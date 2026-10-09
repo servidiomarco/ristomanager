@@ -6,7 +6,7 @@ import {
   ArrowLeft, ArrowRight, ChevronDown, Loader2, Trash2, TriangleAlert, Users, X,
 } from 'lucide-react';
 import { QRCodeSVG } from 'qrcode.react';
-import type { Dish, RestaurantMenu, Reservation, Room, Table, TableMerge, OrderWithItems, OrderItem, ComandaVivaStato } from '../types';
+import type { Dish, RestaurantMenu, Reservation, Room, Table, TableMerge, OrderWithItems, OrderItem, ComandaVivaStato, RigheDallaCassa } from '../types';
 import { Shift } from '../types';
 import { datePart } from '../utils/displayTime';
 import { getTableMerges } from '../services/apiService';
@@ -1544,6 +1544,35 @@ export const OrderPad: React.FC<OrderPadProps> = ({ isInitialLoading = false, di
     return () => { socket.off('passepartout:comanda-viva', onCassa); };
   }, [t]);
 
+  // Le righe battute in cassa sullo stesso tavolo (fase 5 della comanda
+  // viva): in coda alla comanda, in sola lettura. Si rileggono quando la
+  // cassa cambia il tavolo ('passepartout:righe-cassa'), e ogni 30 s per
+  // sicurezza; il server le tiene 10 s, più palmari non pesano sulla cassa.
+  const [righeCassa, setRigheCassa] = useState<RigheDallaCassa | null>(null);
+  const comandaInCassa = order?.comanda_viva?.pp_comanda_id != null && order.comanda_viva.stato !== 'CHIUSA'
+    ? order.comanda_viva.pp_comanda_id
+    : null;
+  useEffect(() => {
+    setRigheCassa(null);
+    if (openOrderId == null || comandaInCassa == null) return;
+    let vivo = true;
+    const leggi = () => {
+      ordersApiService.getRigheCassa(openOrderId)
+        .then(r => { if (vivo) setRigheCassa(r); })
+        .catch(() => { /* senza righe della cassa il pad funziona lo stesso */ });
+    };
+    leggi();
+    const timer = setInterval(leggi, 30_000);
+    const socket = socketClient.getSocket();
+    const onRighe = (p: { order_id?: number }) => { if (p?.order_id === openOrderId) leggi(); };
+    socket?.on('passepartout:righe-cassa', onRighe);
+    return () => {
+      vivo = false;
+      clearInterval(timer);
+      socket?.off('passepartout:righe-cassa', onRighe);
+    };
+  }, [openOrderId, comandaInCassa]);
+
   // Presenza sul tavolo: all'ingresso ci si annuncia e l'ack dice chi c'è
   // già; le variazioni arrivano via orderpad:presence. Sul reconnect ci si
   // riannuncia (il server ha perso la presenza col vecchio socket), e
@@ -1954,6 +1983,7 @@ export const OrderPad: React.FC<OrderPadProps> = ({ isInitialLoading = false, di
     onDragItem: moveServerItem,
     onDragCourse: moveCourseTo,
     catIndexOf,
+    righeCassa,
   };
 
   const browser = (
@@ -2320,6 +2350,7 @@ export const OrderPad: React.FC<OrderPadProps> = ({ isInitialLoading = false, di
       // dice più lei.
       fullPage={pagedPad}
       tableName={table?.name ?? String(tableId)}
+      righeCassa={righeCassa}
       open={comandaOpen}
       onClose={() => setComandaOpen(false)}
       order={order}

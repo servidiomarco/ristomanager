@@ -583,7 +583,7 @@ describe('ordini del CRM in cassa: chi stampa in cucina', () => {
             `INSERT INTO stations (tenant_id, name, printer, sort_order) VALUES (1, 'Cucina Viva Stampa', 'termica-viva', 95) RETURNING id`
         )).rows[0].id);
         const room = await api().post('/rooms').set(bearer(token)).send({ name: 'Sala Comanda Viva 3', width: 600, height: 400 });
-        for (const [i, nome] of ['W1', 'W2', 'W3', 'W4', 'W5', 'W6'].entries()) {
+        for (const [i, nome] of ['W1', 'W2', 'W3', 'W4', 'W5', 'W6', 'W7'].entries()) {
             const t = await api().post('/tables').set(bearer(token)).send({
                 name: `CV${nome}`, shape: 'SQUARE', seats: 4, x: 40 + i * 80, y: 40, room_id: room.body.id, status: 'FREE',
             });
@@ -617,7 +617,8 @@ describe('ordini del CRM in cassa: chi stampa in cucina', () => {
             // Le letture con cui il giro si accorge delle comande chiuse in cassa.
             if (payload?.op === 'comandeAperte') {
                 return ack({ ok: true, result: [...cassa.comande.values()].filter((c) => !c.pagata).map((c) => ({
-                    idComanda: c.id, tavolo: c.tavolo, sala: c.sala, coperti: c.coperti, idPrenotazione: null, aperta: null, totale: 0,
+                    idComanda: c.id, tavolo: c.tavolo, sala: c.sala, coperti: c.coperti, idPrenotazione: null, aperta: null,
+                    totale: c.righe.filter((r) => r.stato !== 'Cancellato').reduce((t, r) => t + r.prezzo * r.pezzi, 0),
                 })) });
             }
             if (payload?.op === 'comanda') {
@@ -811,6 +812,38 @@ describe('ordini del CRM in cassa: chi stampa in cucina', () => {
         expect(esito.inviate).toEqual([1]);
         expect(cassa.invii.filter((i) => i.id === c.id)).toEqual([]);
         c.pagata = true;
+    });
+
+    it('le righe battute in cassa si vedono nel CRM: senza quelle del CRM e gli storni, col totale del tavolo in cassa', async () => {
+        const ordine = await nuovoOrdine('W7');
+        await batti(ordine, [{ dish_id: piatto, qty: 1, course_no: 1 }]);
+        await finoA(async () => (await viva(ordine))?.stato === 'SCRITTA', 'ordine scritto in cassa');
+        const altro = ordini[ordini.indexOf(ordineW1) + 1];
+        const giro = async (coperti: number) => {
+            await api().patch(`/orders/${altro}`).set(bearer(token)).send({ covers: coperti });
+            await sleep(400);
+        };
+        // Un giro che vede la comanda: da qui un cambio di totale in cassa si nota.
+        await giro(3);
+        const righe = () => api().get(`/orders/${ordine}/righe-cassa`).set(bearer(token));
+        const prima = await righe();
+        expect(prima.status).toBe(200);
+        expect(prima.body).toMatchObject({ disponibile: true, righe: [] });
+        expect(prima.body.totale_cents).toBeGreaterThanOrEqual(1200);
+
+        // In cassa battono una tisana, e una riga poi stornata.
+        const c = cassa.sulTavolo('W7')!;
+        c.righe.push({ id: 990_101, articolo: 'VARIE', descrizione: 'Tisana', pezzi: 1, prezzo: 1.5, uscita: 1, stato: 'Nuovo', tipo: 'Semplice', varianti: [] });
+        c.righe.push({ id: 990_102, articolo: 'VARIE', descrizione: 'Caffè', pezzi: 1, prezzo: 1.2, uscita: 1, stato: 'Cancellato', tipo: 'Semplice', varianti: [] });
+        await giro(4);
+        await finoA(async () => (await righe()).body.righe?.length === 1, 'tisana nel CRM');
+        const dopo = (await righe()).body;
+        expect(dopo.righe).toEqual([{ id: 990_101, descrizione: 'Tisana', pezzi: 1, prezzo_cents: 150, totale_cents: 150, uscita: 1, stato: 'Nuovo' }]);
+        expect(dopo.totale_cents).toBe(prima.body.totale_cents + 150);
+
+        // Un ordine che non va in cassa non ha righe della cassa.
+        const fuori = await api().get(`/orders/${altro + 100_000}/righe-cassa`).set(bearer(token));
+        expect(fuori.body).toMatchObject({ disponibile: true, righe: [], totale_cents: null });
     });
 
     it('la comanda chiusa in cassa chiude l\'ordine nel CRM, senza un conto del CRM', async () => {

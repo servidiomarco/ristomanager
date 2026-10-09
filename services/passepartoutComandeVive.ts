@@ -83,6 +83,9 @@ export interface ComandeViveDeps {
     /** L'ordine del CRM la cui comanda è stata chiusa in cassa: si chiude
      *  senza conto del CRM (il conto l'ha fatto la cassa). true se chiuso. */
     chiudiOrdineChiusoInCassa: (tenantId: number, orderId: number) => Promise<boolean>;
+    /** La comanda in cassa di un ordine è cambiata (righe battute in cassa
+     *  o dal palmare): il pad ricarica le righe della cassa (fase 5). */
+    avvisaRigheCassa?: (tenantId: number, orderId: number) => void;
 }
 
 let deps: ComandeViveDeps | null = null;
@@ -351,6 +354,9 @@ function avvisa(tenantId: number, r: any) {
 }
 
 const ultimaLetturaChiuse = new Map<number, number>();
+// Il totale in cassa di ogni comanda viva all'ultima lettura: quando cambia,
+// in cassa hanno battuto qualcosa e il pad si aggiorna.
+const ultimoTotaleInCassa = new Map<string, number>();
 
 /** Gli ordini del CRM la cui comanda la cassa ha chiuso dal suo schermo
  *  (fase 4, collaudo sulla demo del 08/10: prima l'ordine restava aperto nel
@@ -370,11 +376,20 @@ export async function chiuseInCassa(tenantId: number): Promise<number> {
     if (rs.rows.length === 0) return 0;
     ultimaLetturaChiuse.set(tenantId, Date.now());
     const aperte = await callPassepartout<PassepartoutComandaAperta[]>(tenantId, 'comandeAperte', {}, 60_000);
-    const ids = new Set((aperte ?? []).map((c) => Number(c.idComanda)));
+    const totali = new Map((aperte ?? []).map((c) => [Number(c.idComanda), Math.round((Number(c.totale) || 0) * 100)]));
     let chiusi = 0;
     for (const r of rs.rows) {
         const idComanda = Number(r.pp_comanda_id);
-        if (ids.has(idComanda)) continue;
+        if (totali.has(idComanda)) {
+            const chiave = `${tenantId}:${idComanda}`;
+            const prima = ultimoTotaleInCassa.get(chiave);
+            ultimoTotaleInCassa.set(chiave, totali.get(idComanda)!);
+            if (prima != null && prima !== totali.get(idComanda)) {
+                cacheRigheCassa.delete(chiave);
+                try { deps.avvisaRigheCassa?.(tenantId, Number(r.order_id)); } catch { /* il pad si aggiorna al prossimo giro */ }
+            }
+            continue;
+        }
         // Non fra le aperte: si rilegge, per non chiudere per una lettura storta.
         const c = await callPassepartout<PassepartoutComanda | null>(tenantId, 'comanda', { idGestionale: idComanda }, 30_000);
         if (c && !c.isPagato) continue;
@@ -383,6 +398,74 @@ export async function chiuseInCassa(tenantId: number): Promise<number> {
         await segna(tenantId, orderId, { stato: 'CHIUSA' });
     }
     return chiusi;
+}
+
+/** Una riga battuta in cassa (o dal palmare Passepartout) sulla comanda di
+ *  un ordine del CRM: il pad la mostra in sola lettura (fase 5). */
+export interface RigaDallaCassa {
+    id: number;
+    descrizione: string;
+    pezzi: number;
+    prezzo_cents: number;
+    totale_cents: number;
+    uscita: number | null;
+    /** EnumStatoRigaComanda: Nuovo, InAttesa, InProduzione, Fatto. */
+    stato: string | null;
+}
+
+export interface RigheDallaCassa {
+    /** false: la cassa non risponde adesso (agente giù), le righe non si sanno. */
+    disponibile: boolean;
+    righe: RigaDallaCassa[];
+    /** Il totale del tavolo in cassa, righe del CRM comprese; null senza comanda. */
+    totale_cents: number | null;
+}
+
+const RIGHE_CASSA_TTL_MS = 10_000;
+const cacheRigheCassa = new Map<string, { at: number; comanda: PassepartoutComanda | null }>();
+
+/** Le righe della comanda in cassa che non ha scritto il CRM, con il totale
+ *  del tavolo in cassa. Una lettura ogni 10 s per comanda al massimo: più
+ *  palmari sullo stesso tavolo non moltiplicano le chiamate alla cassa. */
+export async function righeDallaCassa(tenantId: number, orderId: number): Promise<RigheDallaCassa> {
+    const v = await queryWithRetry(
+        `SELECT pp_comanda_id, stato FROM passepartout_comande_vive WHERE tenant_id = $1 AND order_id = $2`,
+        [tenantId, orderId]
+    );
+    const ppComandaId = v.rows[0]?.pp_comanda_id != null ? Number(v.rows[0].pp_comanda_id) : null;
+    if (ppComandaId == null || v.rows[0].stato === 'CHIUSA') return { disponibile: true, righe: [], totale_cents: null };
+    const chiave = `${tenantId}:${ppComandaId}`;
+    let voce = cacheRigheCassa.get(chiave);
+    if (!voce || Date.now() - voce.at > RIGHE_CASSA_TTL_MS) {
+        try {
+            const comanda = await callPassepartout<PassepartoutComanda | null>(tenantId, 'comanda', { idGestionale: ppComandaId }, 15_000);
+            voce = { at: Date.now(), comanda };
+            cacheRigheCassa.set(chiave, voce);
+        } catch {
+            return { disponibile: false, righe: [], totale_cents: null };
+        }
+    }
+    const nostre = new Set((await queryWithRetry(
+        `SELECT pp_riga_id FROM passepartout_righe_vive WHERE tenant_id = $1 AND order_id = $2 AND pp_riga_id IS NOT NULL`,
+        [tenantId, orderId]
+    )).rows.map((r: any) => Number(r.pp_riga_id)));
+    const cents = (euro: number | null | undefined) => Math.round((Number(euro) || 0) * 100);
+    const vive = (voce.comanda?.righe ?? []).filter((r) => r.idGestionale != null && r.statoEnum !== 'Cancellato' && (r.pezzi ?? 0) > 0);
+    const righe = vive
+        .filter((r) => !nostre.has(Number(r.idGestionale)))
+        .map((r) => ({
+            id: Number(r.idGestionale),
+            descrizione: String(r.descrizione ?? r.articolo ?? '').trim(),
+            pezzi: Number(r.pezzi) || 0,
+            prezzo_cents: cents(r.prezzo),
+            totale_cents: r.totale != null ? cents(r.totale) : cents(r.prezzo) * (Number(r.pezzi) || 0),
+            uscita: r.uscita ?? null,
+            stato: r.statoEnum ?? null,
+        }));
+    const totale_cents = voce.comanda
+        ? vive.reduce((s, r) => s + (r.totale != null ? cents(r.totale) : cents(r.prezzo) * (Number(r.pezzi) || 0)), 0)
+        : null;
+    return { disponibile: true, righe, totale_cents };
 }
 
 /** Una passata sugli ordini di un ristorante, DENTRO il suo contesto tenant. */

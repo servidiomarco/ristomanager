@@ -325,6 +325,10 @@
     "scrittaTitolo": "L'ordine è nella comanda in cassa del tavolo",
     "inAttesa": "Verso la cassa",
     "errore": "Errore cassa",
-    "erroreDettaglio": "Cassa Passepartout: {{errore}}"
+    "erroreDettaglio": "Cassa Passepartout: {{errore}}",
+    "righeTitolo": "Dalla cassa",
+    "righeTotale": "Tavolo in cassa {{importo}}",
+    "righeNonDisponibili": "La cassa adesso non risponde: le righe battute lì non si vedono.",
+    "rigaPartita": "in cucina"
   }
 }
