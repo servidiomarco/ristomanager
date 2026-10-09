@@ -26634,8 +26634,19 @@ interface GuestManageLink {
     token: string;
     /** Il nome del locale, variabile dei template col bottone. */
     businessName: string;
+    /** Il codice del link breve di Google Maps del locale (la parte dopo
+     *  maps.app.goo.gl/), o null: è la variabile del pulsante «Come
+     *  raggiungerci» nella conferma a due pulsanti. */
+    mapsCode: string | null;
 }
 const guestManageUrl = (token: string): string => `${GUEST_MANAGE_BASE_URL}/r/${token}`;
+// Meta vuole l'host fisso nel template e la variabile in coda all'URL, quindi
+// il pulsante Maps è https://maps.app.goo.gl/{{7}}: vale per i link brevi
+// che dà «Condividi» di Google Maps. Un altro link lascia la conferma col
+// solo pulsante di gestione, mai un pulsante che apre la mappa sbagliata.
+const MAPS_SHORT_LINK_RE = /^https:\/\/maps\.app\.goo\.gl\/([A-Za-z0-9_-]+)\/?$/;
+const mapsShortCode = (mapsUrl: string | null | undefined): string | null =>
+    (typeof mapsUrl === 'string' ? mapsUrl.trim().match(MAPS_SHORT_LINK_RE)?.[1] : undefined) ?? null;
 
 /** Il link della prenotazione per i messaggi, o null se il locale non ha
  *  acceso la gestione dall'ospite. Mai un errore per chi manda: senza link
@@ -26649,7 +26660,15 @@ async function guestManageLink(tenantId: number, reservationId: number | null | 
         if (!policy.enabled) return null;
         const token = await ensureGuestToken(tenantId, Number(reservationId));
         if (!token) return null;
-        return { url: guestManageUrl(token), token, businessName: businessIdentity(tenantId).name };
+        // publicBusinessIdentity: il fallback del Frantoio (nome e mappa)
+        // vale solo per il tenant 1, come sulle pagine pubbliche.
+        const identity = await publicBusinessIdentity(tenantId);
+        return {
+            url: guestManageUrl(token),
+            token,
+            businessName: identity.name,
+            mapsCode: mapsShortCode(identity.mapsUrl),
+        };
     } catch (err: any) {
         console.warn('[guest-manage] link non disponibile:', err?.message || err);
         return null;
@@ -26844,18 +26863,30 @@ function pickWhatsAppTemplateSid(
 // conto). Si usa quando il messaggio porta il link E la sua SID c'è; mai se
 // costerebbe la lingua dell'ospite: un ospite inglese con la conferma
 // inglese senza bottone non riceve quella italiana col bottone.
+//
+// La conferma ha anche la versione a due pulsanti, `_LINK_MAPS`: «Gestisci
+// la prenotazione» più «Come raggiungerci», il pulsante Maps che la
+// conferma storica aveva e quella col solo link aveva perso. Variabile
+// {{7}}, il codice del link breve di Maps; senza quel link, o finché la
+// SID non c'è (si mette su Railway dopo l'ok di Meta), resta `_LINK`.
+type PickedBookingTemplate = { contentSid: string; english: boolean; manage: GuestManageLink | null; maps: boolean };
 function pickBookingTemplateSid(
     baseEnvKey: string,
     language: string | null | undefined,
     manage: GuestManageLink | null | undefined
-): { contentSid: string; english: boolean; manage: GuestManageLink | null } | undefined {
+): PickedBookingTemplate | undefined {
     const plain = pickWhatsAppTemplateSid(baseEnvKey, language);
+    const sameLanguage = (t: { english: boolean }) => !plain || t.english === plain.english;
+    if (manage?.mapsCode) {
+        const withMaps = pickWhatsAppTemplateSid(`${baseEnvKey}_LINK_MAPS`, language);
+        if (withMaps && sameLanguage(withMaps)) return { ...withMaps, manage, maps: true };
+    }
     const linked = manage ? pickWhatsAppTemplateSid(`${baseEnvKey}_LINK`, language) : undefined;
-    if (linked && manage && (!plain || linked.english === plain.english)) return { ...linked, manage };
-    return plain ? { ...plain, manage: null } : undefined;
+    if (linked && manage && sameLanguage(linked)) return { ...linked, manage, maps: false };
+    return plain ? { ...plain, manage: null, maps: false } : undefined;
 }
 function bookingTemplateVariables(
-    picked: { english: boolean; manage: GuestManageLink | null },
+    picked: { english: boolean; manage: GuestManageLink | null; maps: boolean },
     customerName: string | null | undefined,
     guests: number | null | undefined,
     dateLabel: string,
@@ -26870,6 +26901,7 @@ function bookingTemplateVariables(
     if (picked.manage) {
         vars['5'] = picked.manage.businessName || '—';
         vars['6'] = picked.manage.token;
+        if (picked.maps && picked.manage.mapsCode) vars['7'] = picked.manage.mapsCode;
     }
     return vars;
 }

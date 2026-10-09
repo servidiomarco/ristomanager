@@ -265,9 +265,11 @@ export const PublicPayPage: React.FC<Props> = ({ token }) => {
           </div>
           <div className="text-center mt-1">
             {/* La pagina pubblica resta in tema chiaro (nessuna classe .dark
-                fuori dall'app), quindi basta la variante light del logo. */}
+                fuori dall'app), quindi basta la variante light del logo.
+                Multiply: un logo su fondo bianco pieno non fa il riquadro
+                sul grigio della pagina. */}
             {branding?.logo_url && (
-              <img src={branding.logo_url} alt={branding.name ?? ''} className="mx-auto mb-2 h-12 w-auto max-w-[200px] object-contain" />
+              <img src={branding.logo_url} alt={branding.name ?? ''} className="mx-auto mb-2 h-12 w-auto max-w-[200px] object-contain mix-blend-multiply" />
             )}
             {branding?.name && (
               <div className="text-sm font-semibold text-[var(--ds-text-secondary)]">{branding.name}</div>

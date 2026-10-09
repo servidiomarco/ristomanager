@@ -1,8 +1,9 @@
 #!/usr/bin/env node
-// Crea (idempotente) e sottomette a Meta i quattro template WhatsApp col
-// bottone «Gestisci la prenotazione»: la controparte approvabile della
-// gestione dall'ospite (services/guestManage.ts, pickBookingTemplateSid in
-// server.ts). Conferma e promemoria, in italiano e in inglese.
+// Crea (idempotente) e sottomette a Meta i template WhatsApp col bottone
+// «Gestisci la prenotazione»: la controparte approvabile della gestione
+// dall'ospite (services/guestManage.ts, pickBookingTemplateSid in server.ts).
+// Conferma e promemoria, in italiano e in inglese; più la conferma a due
+// pulsanti, che aggiunge «Come raggiungerci» come la conferma storica.
 //
 // Forma: twilio/call-to-action, body {{1}} nome, {{2}} ospiti, {{3}} data,
 // {{4}} ora, {{5}} nome del locale; bottone URL
@@ -10,6 +11,11 @@
 // nel template, come per caparra e conto. Il nome del locale è una
 // variabile (non testo fisso come nei template storici) così gli stessi
 // template servono a ogni ristorante.
+//
+// La conferma a due pulsanti ha in più {{7}}, il codice del link breve di
+// Google Maps del locale (https://maps.app.goo.gl/{{7}}): Meta vuole l'host
+// fisso e la variabile in coda. Il server la usa solo per i locali con un
+// link maps.app.goo.gl, gli altri restano sulla conferma col solo link.
 //
 // I testi non promettono più di quanto la pagina fa: «gestisci la
 // prenotazione» resta vero anche quando arriverà la modifica di data e ora,
@@ -37,6 +43,11 @@ const headers = { Authorization: auth, 'Content-Type': 'application/json' };
 
 // Deve coincidere con GUEST_MANAGE_BASE_URL in server.ts.
 const MANAGE_URL = 'https://app.sympotia.com/r/{{6}}';
+// Deve coincidere con MAPS_SHORT_LINK_RE in server.ts.
+const MAPS_URL = 'https://maps.app.goo.gl/{{7}}';
+
+const manage = (title) => ({ type: 'URL', title, url: MANAGE_URL });
+const directions = (title) => ({ type: 'URL', title, url: MAPS_URL });
 
 const TEMPLATES = [
     {
@@ -44,38 +55,54 @@ const TEMPLATES = [
         envKey: 'TWILIO_WA_CONTENT_SID_BOOKING_CONFIRMED_LINK',
         language: 'it',
         body: 'Ciao {{1}}, la tua prenotazione per {{2}} il {{3}} alle {{4}} da {{5}} è confermata. Se cambia qualcosa, gestiscila dal pulsante qui sotto. A presto!',
-        buttonTitle: 'Gestisci la prenotazione',
+        actions: [manage('Gestisci la prenotazione')],
     },
     {
         friendlyName: 'booking_confirmed_link_en',
         envKey: 'TWILIO_WA_CONTENT_SID_BOOKING_CONFIRMED_LINK_EN',
         language: 'en',
         body: 'Hi {{1}}, your reservation for {{2}} on {{3}} at {{4}} at {{5}} is confirmed. If anything changes, manage it with the button below. See you soon!',
-        buttonTitle: 'Manage your booking',
+        actions: [manage('Manage your booking')],
     },
     {
         friendlyName: 'booking_reminder_link_it',
         envKey: 'TWILIO_WA_CONTENT_SID_BOOKING_REMINDER_LINK',
         language: 'it',
         body: 'Ciao {{1}}! Ti aspettiamo il {{3}} alle {{4}}: tavolo per {{2}} da {{5}}. Ci sarai? Confermalo dal pulsante qui sotto, o gestisci la prenotazione se cambia qualcosa. A presto!',
-        buttonTitle: 'Gestisci la prenotazione',
+        actions: [manage('Gestisci la prenotazione')],
     },
     {
         friendlyName: 'booking_reminder_link_en',
         envKey: 'TWILIO_WA_CONTENT_SID_BOOKING_REMINDER_LINK_EN',
         language: 'en',
         body: 'Hi {{1}}! We look forward to seeing you on {{3}} at {{4}}: a table for {{2}} at {{5}}. Will you make it? Confirm with the button below, or manage your booking if anything changes. See you soon!',
-        buttonTitle: 'Manage your booking',
+        actions: [manage('Manage your booking')],
+    },
+    {
+        friendlyName: 'booking_confirmed_link_maps_it',
+        envKey: 'TWILIO_WA_CONTENT_SID_BOOKING_CONFIRMED_LINK_MAPS',
+        language: 'it',
+        body: 'Ciao {{1}}, la tua prenotazione per {{2}} il {{3}} alle {{4}} da {{5}} è confermata. Qui sotto trovi come raggiungerci e, se cambia qualcosa, puoi gestire la prenotazione. A presto!',
+        actions: [manage('Gestisci la prenotazione'), directions('Come raggiungerci')],
+    },
+    {
+        friendlyName: 'booking_confirmed_link_maps_en',
+        envKey: 'TWILIO_WA_CONTENT_SID_BOOKING_CONFIRMED_LINK_MAPS_EN',
+        language: 'en',
+        body: "Hi {{1}}, your reservation for {{2}} on {{3}} at {{4}} at {{5}} is confirmed. Below you'll find directions and, if anything changes, you can manage your booking. See you soon!",
+        actions: [manage('Manage your booking'), directions('Get directions')],
     },
 ];
 
-const sampleVariables = (language) => ({
+const sampleVariables = (tpl) => ({
     '1': 'Mario',
-    '2': language === 'en' ? '4 guests' : '4 persone',
+    '2': tpl.language === 'en' ? '4 guests' : '4 persone',
     '3': '12/10/2026',
     '4': '20:30',
     '5': 'Vecchio Frantoio',
     '6': 'AbCdEfGhIjKlMnOpQrStUv',
+    // {{7}} solo dove c'è il pulsante Maps.
+    ...(tpl.actions.some(a => a.url === MAPS_URL) ? { '7': 'pf1DjUYzkhi1sStP8' } : {}),
 });
 
 async function listAllContent() {
@@ -98,11 +125,11 @@ async function createContent(tpl) {
         body: JSON.stringify({
             friendly_name: tpl.friendlyName,
             language: tpl.language,
-            variables: sampleVariables(tpl.language),
+            variables: sampleVariables(tpl),
             types: {
                 'twilio/call-to-action': {
                     body: tpl.body,
-                    actions: [{ type: 'URL', title: tpl.buttonTitle, url: MANAGE_URL }],
+                    actions: tpl.actions,
                 },
             },
         }),
@@ -129,7 +156,7 @@ console.log(dryRun ? '--dry-run: nessuna chiamata di scrittura.\n' : '');
 for (const tpl of TEMPLATES) {
     console.log(`${tpl.friendlyName}:`);
     console.log(`  body: "${tpl.body}"`);
-    console.log(`  bottone: [${tpl.buttonTitle}] → ${MANAGE_URL}`);
+    for (const a of tpl.actions) console.log(`  bottone: [${a.title}] → ${a.url}`);
     const already = existing.find(c => c.friendly_name === tpl.friendlyName);
     if (already) {
         sids[tpl.envKey] = already.sid;
@@ -149,5 +176,5 @@ for (const tpl of TEMPLATES) console.log(`${tpl.envKey}=${sids[tpl.envKey] ?? '(
 if (!dryRun) {
     console.log('\nStato approvazione: Twilio Console → Messaging → Content Template Builder,');
     console.log(`oppure GET ${API_BASE}/Content/<SID>/ApprovalRequests.`);
-    console.log('Finché non sono "approved", conferma e promemoria partono col template di prima, senza bottone.');
+    console.log('Le SID vanno su Railway solo quando sono "approved": un template non approvato non parte.');
 }
