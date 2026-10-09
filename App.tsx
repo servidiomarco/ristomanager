@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
-import { LayoutDashboard, Grid, Settings, ChevronRight, ChevronDown, ChevronUp, ChefHat, PanelLeft, Calendar, CalendarDays, Bell, X, AlertTriangle, LogOut, Users, UserCheck, FileText, UsersRound, Sun, Moon, Sunset, MoreHorizontal, Search, UtensilsCrossed, Plus, BookUser, Boxes, Clock, ShoppingCart, ListChecks, ShieldCheck, Phone, ConciergeBell, Zap, PartyPopper, DoorClosed, StickyNote, CreditCard, MessageCircle, Mail, Kanban, ClipboardList, CookingPot, BellRing, MessagesSquare, Gauge, Building2, Milestone, Ban, Sparkles, Landmark, Percent, Calculator, BarChart3, Star, ShoppingBag, LifeBuoy, PlugZap, Radio, Thermometer, SlidersHorizontal, Tag, Scale } from 'lucide-react';
+import { LayoutDashboard, Grid, Settings, ChevronRight, ChevronDown, ChevronUp, ChefHat, PanelLeft, Calendar, CalendarDays, Bell, X, AlertTriangle, LogOut, Users, UserCheck, FileText, UsersRound, Sun, Moon, Sunset, MoreHorizontal, Search, UtensilsCrossed, Plus, BookUser, Boxes, Clock, ShoppingCart, ListChecks, ShieldCheck, Phone, ConciergeBell, Zap, PartyPopper, DoorClosed, StickyNote, CreditCard, MessageCircle, Mail, Kanban, ClipboardList, CookingPot, BellRing, MessagesSquare, Gauge, Building2, Milestone, Ban, Sparkles, Landmark, Percent, Calculator, BarChart3, Star, ShoppingBag, LifeBuoy, PlugZap, Radio, Thermometer, SlidersHorizontal, Tag, Scale, CalendarCheck } from 'lucide-react';
 import { ViewState, Room, Table, Dish, RestaurantMenu, Reservation, TableStatus, TableShape, BanquetMenu, PaymentStatus, Shift, UserRole, ReservationStatus } from './types';
 import { Dashboard } from './components/Dashboard';
 import { FloorPlan } from './components/FloorPlan';
@@ -60,6 +60,7 @@ import { ReservationAllergensManager } from './components/ReservationAllergensMa
 import { AutoDepositManager } from './components/AutoDepositManager';
 import { PaymentLinkExpiryManager } from './components/PaymentLinkExpiryManager';
 import { BookingReminderManager } from './components/BookingReminderManager';
+import { GuestManageManager } from './components/GuestManageManager';
 import { ChargeSettingsManager } from './components/ChargeSettingsManager';
 import { BlacklistPolicyManager } from './components/BlacklistPolicyManager';
 import { PayAtTableSettingsManager } from './components/PayAtTableSettingsManager';
@@ -3576,6 +3577,13 @@ const App: React.FC = () => {
                   description={t('settings.guestRemindersHint')}
                 >
                   <BookingReminderManager showToast={addToast} />
+                </SettingsDisclosure>
+                <SettingsDisclosure
+                  icon={CalendarCheck}
+                  title={t('settings.guestManage')}
+                  description={t('settings.guestManageHint')}
+                >
+                  <GuestManageManager showToast={addToast} />
                 </SettingsDisclosure>
                 <SettingsDisclosure
                   icon={StickyNote}

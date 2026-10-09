@@ -1,0 +1,60 @@
+{
+  "meta": {
+    "title": "Your booking",
+    "titleFull": "Your booking — {{business}}"
+  },
+  "header": {
+    "langGroupAria": "Language"
+  },
+  "notFound": {
+    "title": "Booking not found",
+    "hint": "The link may be incomplete. Open it again from the message or contact the restaurant."
+  },
+  "loadingAria": "Loading",
+  "state": {
+    "confirmed": "Confirmed",
+    "pending": "Awaiting confirmation",
+    "cancelled": "Cancelled",
+    "declined": "Not confirmed",
+    "past": "Past"
+  },
+  "guests_one": "{{count}} guest",
+  "guests_other": "{{count}} guests",
+  "childrenSuffix_one": " ({{count}} child)",
+  "childrenSuffix_other": " ({{count}} children)",
+  "forName": "under the name {{name}}",
+  "confirmed": {
+    "ask": "Will you make it? Confirm with one tap so the restaurant keeps your table ready.",
+    "cta": "We'll be there",
+    "done": "You've confirmed: see you soon."
+  },
+  "pending": {
+    "body": "The restaurant still has to confirm your request: they will write to you as soon as they can."
+  },
+  "cancelled": {
+    "body": "This booking is cancelled. To book again, contact the restaurant."
+  },
+  "declined": {
+    "body": "The restaurant could not confirm this request. Contact them for another day or time."
+  },
+  "past": {
+    "body": "This booking is in the past."
+  },
+  "cancel": {
+    "cta": "Cancel the booking",
+    "ctaRequest": "Cancel the request",
+    "askTitle": "Cancel the booking?",
+    "askTitleRequest": "Cancel the request?",
+    "depositRefund": "The restaurant will refund your {{amount}} deposit.",
+    "depositRetained": "Less than 24 hours to go: the {{amount}} deposit stays with the restaurant.",
+    "yes": "Yes, cancel",
+    "no": "No, keep it",
+    "tooLate_one": "Less than {{count}} hour to go: to cancel, call the restaurant.",
+    "tooLate_other": "Less than {{count}} hours to go: to cancel, call the restaurant.",
+    "contactUs": "To change or cancel, contact the restaurant."
+  },
+  "errors": {
+    "tooLate": "You can no longer cancel from the link: call the restaurant.",
+    "generic": "Something went wrong. Try again, or call the restaurant."
+  }
+}

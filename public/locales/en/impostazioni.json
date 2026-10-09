@@ -224,6 +224,19 @@
     "saved": "Guest reminder updated",
     "errSave": "Could not update the reminder"
   },
+  "gestOspite": {
+    "title": "«Manage your booking» link",
+    "intro": "Confirmations and reminders carry a link: guests confirm they are coming or cancel on their own, and the booking updates here.",
+    "switchOff": "Turn off guest self-service",
+    "switchOn": "Turn on guest self-service",
+    "cutoff": "Cancel from the link up to",
+    "cutoffUnit": "hours before arrival",
+    "cutoffHint": "Closer to arrival the page asks the guest to call the restaurant.",
+    "depositHint": "If a guest with a paid deposit cancels at least 24 hours ahead, you get a notice to refund it; within 24 hours the deposit stays with the restaurant, and the page says so before the guest cancels.",
+    "badCutoff": "Hours must be a whole number between 1 and 72",
+    "saved": "Guest self-service updated",
+    "errSave": "Error updating guest self-service"
+  },
   "bl": {
     "source": {
       "MANUAL": "By hand (CRM)",

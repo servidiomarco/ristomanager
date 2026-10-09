@@ -183,6 +183,8 @@
   "confirmFailed": "{{canale}}: consegna fallita{{errore}}",
   "confirmSent": "{{canale}} inviato il {{quando}} — in attesa di consegna",
   "reminderSent": "Reminder inviato",
+  "guestConfirmed": "L'ospite ha confermato il {{quando}}",
+  "guestCancelled": "Annullata dall'ospite il {{quando}}",
   "formSections": "Sezioni della prenotazione",
   "row": {
     "note": "Nota",
@@ -337,6 +339,7 @@
     "invalidAmount": "Inserisci un importo valido",
     "noChannel": "Canale di invio non disponibile per questa prenotazione",
     "copyFailed": "Copia non riuscita, apri il link manualmente",
+    "guestLinkCopied": "Link della prenotazione copiato",
     "invalidTotal": "Inserisci un totale valido",
     "billOpened": "Conto aperto",
     "assignTableFirst": "Assegna un tavolo alla prenotazione per importare il conto",

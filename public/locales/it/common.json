@@ -108,6 +108,8 @@
     "replyChannelsHint": "Con quale strumento rispondere all'ospite per ogni fonte di prenotazione: ordine di priorità e fallback tra email, WhatsApp e SMS.",
     "guestReminders": "Promemoria all'ospite",
     "guestRemindersHint": "Il messaggio che ricorda la prenotazione all'ospite: se parte da solo e quando.",
+    "guestManage": "Gestione dall'ospite",
+    "guestManageHint": "Il link nei messaggi con cui l'ospite conferma o annulla da solo.",
     "quickNotes": "Note rapide prenotazione",
     "quickNotesHint": "Chip suggeriti nel modal di prenotazione. Ogni nota può avere un'icona che appare nella card. Trascina per riordinare.",
     "allergens": "Intolleranze",

@@ -183,6 +183,8 @@
   "confirmFailed": "{{canale}}: delivery failed{{errore}}",
   "confirmSent": "{{canale}} sent on {{quando}} — awaiting delivery",
   "reminderSent": "Reminder sent",
+  "guestConfirmed": "The guest confirmed on {{quando}}",
+  "guestCancelled": "Cancelled by the guest on {{quando}}",
   "formSections": "Booking sections",
   "row": {
     "note": "Note",
@@ -337,6 +339,7 @@
     "invalidAmount": "Enter a valid amount",
     "noChannel": "No sending channel available for this booking",
     "copyFailed": "Copy failed, open the link by hand",
+    "guestLinkCopied": "Booking link copied",
     "invalidTotal": "Enter a valid total",
     "billOpened": "Bill opened",
     "assignTableFirst": "Assign a table to the booking to import the bill",

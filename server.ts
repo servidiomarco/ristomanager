@@ -249,6 +249,17 @@ import {
     type BookingReminderPolicy,
 } from './services/bookingReminders.js';
 import {
+    getGuestManagePolicy,
+    saveGuestManagePolicy,
+    normalizeGuestManagePolicy,
+    guestActionsFor,
+    depositOutcomeOnCancel,
+    ensureGuestToken,
+    CANCEL_CUTOFF_MIN,
+    CANCEL_CUTOFF_MAX,
+    GUEST_TOKEN_MIN_LENGTH,
+} from './services/guestManage.js';
+import {
     getBlacklistPolicy,
     saveBlacklistPolicy,
     isBlacklistBehavior,
@@ -357,8 +368,9 @@ app.use(compression());
 // 404: chi arriva qui per sbaglio (un webhook configurato male, un QR che
 // punta al nodo) deve capire che ha sbagliato porta, non che la risorsa
 // non esiste. Prefissi chiusi con '/' dove serve: '/pay/' non deve
-// catturare '/payments' (route di servizio della cassa).
-const SERVICE_NODE_BLOCKED_PREFIXES = ['/webhook/', '/public/', '/pay/', '/prenota', '/ordina'];
+// catturare '/payments' (route di servizio della cassa). '/r/' è la pagina
+// «La tua prenotazione» dell'ospite: la prenotazione è del cloud.
+const SERVICE_NODE_BLOCKED_PREFIXES = ['/webhook/', '/public/', '/pay/', '/prenota', '/ordina', '/r/'];
 if (isServiceNode) {
     console.log('🏠 Profilo service-node: mondo inbound spento, servito solo il dominio sala');
     app.use((req, res, next) => {
@@ -2160,8 +2172,9 @@ async function handleElevenLabsPostCall(tenantId: number, req: express.Request, 
         );
         const row = linked.rows[0];
         if (row && row.phone) {
-            const message = buildConfirmationMessage(row.customer_name, row.reservation_time, row.guests, row.room_name, resolveGuestLanguage(row), { timezone: fusoMsg });
-            const whatsappTemplate = buildBookingConfirmedTemplate(row.customer_name, row.reservation_time, row.guests, resolveGuestLanguage(row), { timezone: fusoMsg });
+            const manage = await guestManageLink(tenantId, row.id);
+            const message = buildConfirmationMessage(row.customer_name, row.reservation_time, row.guests, row.room_name, resolveGuestLanguage(row), { timezone: fusoMsg, manage });
+            const whatsappTemplate = buildBookingConfirmedTemplate(row.customer_name, row.reservation_time, row.guests, resolveGuestLanguage(row), { timezone: fusoMsg, manage });
             sendBookingConfirmation(tenantId, row.phone, message, row.id, { whatsappTemplate }).catch(err =>
                 console.warn('[ElevenLabs] post-call confirmation send failed:', err?.message || err)
             );
@@ -2949,7 +2962,14 @@ app.put('/reservations/:id', authenticate, requirePermission('reservations:full'
                     consent_data_health = COALESCE($16, consent_data_health),
                     consent_updated_at = CASE WHEN ($15 IS NOT NULL OR $16 IS NOT NULL) THEN CURRENT_TIMESTAMP ELSE consent_updated_at END,
                     note_selections = COALESCE($17::jsonb, note_selections),
-                    banquet_menu_id = CASE WHEN $19::boolean THEN $20::integer ELSE banquet_menu_id END
+                    banquet_menu_id = CASE WHEN $19::boolean THEN $20::integer ELSE banquet_menu_id END,
+                    -- «La tua prenotazione»: il «ci saremo» dell'ospite valeva
+                    -- per l'orario di prima, e un annullo dell'ospite non vale
+                    -- più se lo staff ripristina la prenotazione.
+                    guest_confirmed_at = CASE WHEN reservation_time IS DISTINCT FROM ${reservationTimeSql(reservation_time, 2, TZ)} THEN NULL ELSE guest_confirmed_at END,
+                    -- Cast esplicito: $12 è già varchar in reservation_status,
+                    -- e un confronto senza cast lo dedurrebbe anche text.
+                    guest_cancelled_at = CASE WHEN $12::varchar = 'CANCELLED' THEN guest_cancelled_at ELSE NULL END
                 WHERE id = $14 AND tenant_id = $18
                 RETURNING *
             )
@@ -3098,6 +3118,7 @@ app.put('/reservations/:id', authenticate, requirePermission('reservations:full'
             (updatedReservation?.phone || updatedReservation?.email)
         ) {
             const roomName = await resolveReservationRoomName(updatedReservation);
+            const manage = await guestManageLink(req.tenantId!, updatedReservation.id);
             // Canale (o canali) decisi dalla policy per fonte in Impostazioni
             // → Canali di risposta; il default riproduce la condotta storica.
             dispatchBookingNotification({
@@ -3111,18 +3132,18 @@ app.put('/reservations/:id', authenticate, requirePermission('reservations:full'
                     updatedReservation.reservation_time,
                     updatedReservation.guests,
                     roomName,
-                    resolveGuestLanguage(updatedReservation), { timezone: fusoMsg }),
+                    resolveGuestLanguage(updatedReservation), { timezone: fusoMsg, manage }),
                 whatsappTemplate: buildBookingConfirmedTemplate(
                     updatedReservation.customer_name,
                     updatedReservation.reservation_time,
                     updatedReservation.guests,
-                    resolveGuestLanguage(updatedReservation), { timezone: fusoMsg }),
+                    resolveGuestLanguage(updatedReservation), { timezone: fusoMsg, manage }),
                 buildEmail: () => buildBookingConfirmationEmail({
                     customerName: updatedReservation.customer_name,
                     reservationTime: updatedReservation.reservation_time,
                     guests: updatedReservation.guests,
                     roomName,
-                    language: resolveGuestLanguage(updatedReservation), timezone: fusoMsg }),
+                    language: resolveGuestLanguage(updatedReservation), timezone: fusoMsg, manage }),
                 kind: 'confirmation',
             }).catch(err => console.error('Auto-confirmation send failed:', err));
         }
@@ -3390,13 +3411,14 @@ app.post('/reservations/:id/send-reminder', authenticate, requirePermission('res
 
         // Nome e telefono del ristorante della prenotazione, non del tenant 1.
         await refreshBusinessIdentity(req.tenantId!).catch(() => {});
+        const manage = await guestManageLink(req.tenantId!, id);
         const sendResult = await sendBookingConfirmation(
             req.tenantId!,
             resv.phone,
-            buildReminderMessage(resv.customer_name, resv.reservation_time, resv.guests, resv.room_name, resolveGuestLanguage(resv), { timezone: fusoMsg }, businessIdentity(req.tenantId!)),
+            buildReminderMessage(resv.customer_name, resv.reservation_time, resv.guests, resv.room_name, resolveGuestLanguage(resv), { timezone: fusoMsg, manage }, businessIdentity(req.tenantId!)),
             id,
             {
-                whatsappTemplate: buildBookingReminderTemplate(resv.customer_name, resv.reservation_time, resv.guests, resolveGuestLanguage(resv), { timezone: fusoMsg }),
+                whatsappTemplate: buildBookingReminderTemplate(resv.customer_name, resv.reservation_time, resv.guests, resolveGuestLanguage(resv), { timezone: fusoMsg, manage }),
                 recordConfirmation: false,
             }
         );
@@ -3682,12 +3704,13 @@ app.post('/reservations/:id/confirm-whatsapp', authenticate, requireFeature('wha
         }
 
         const roomName = await resolveReservationRoomName(reservation);
+        const manage = await guestManageLink(req.tenantId!, reservation.id);
         const message = buildConfirmationMessage(
             reservation.customer_name,
             reservation.reservation_time,
             reservation.guests,
             roomName,
-            reservation.language, { timezone: fusoMsg });
+            reservation.language, { timezone: fusoMsg, manage });
 
         let outcome: OutboundConfirmationResult;
         if (channelChoice === 'sms') {
@@ -3712,7 +3735,7 @@ app.post('/reservations/:id/confirm-whatsapp', authenticate, requireFeature('wha
                 reservation.customer_name,
                 reservation.reservation_time,
                 reservation.guests,
-                reservation.language, { timezone: fusoMsg });
+                reservation.language, { timezone: fusoMsg, manage });
             outcome = await sendWhatsAppText(req.tenantId!, reservation.phone, message, reservation.id, whatsappTemplate);
             recordConfirmationSent(req.tenantId!, reservation.id, outcome).catch(err =>
                 console.warn('[confirmation] recordConfirmationSent failed:', err?.message || err)
@@ -3723,7 +3746,7 @@ app.post('/reservations/:id/confirm-whatsapp', authenticate, requireFeature('wha
                     reservation.customer_name,
                     reservation.reservation_time,
                     reservation.guests,
-                    reservation.language, { timezone: fusoMsg }),
+                    reservation.language, { timezone: fusoMsg, manage }),
             });
         }
 
@@ -3769,12 +3792,13 @@ app.post('/reservations/:id/confirm-email', authenticate, requirePermission('res
         }
 
         const roomName = await resolveReservationRoomName(reservation);
+        const manage = await guestManageLink(req.tenantId!, reservation.id);
         const { subject, text, html } = buildBookingConfirmationEmail({
             customerName: reservation.customer_name,
             reservationTime: reservation.reservation_time,
             guests: reservation.guests,
             roomName,
-            language: reservation.language, timezone: fusoMsg });
+            language: reservation.language, timezone: fusoMsg, manage });
 
         const emailStatus = await getSmtpConfigStatus(req.tenantId!).catch(() => null);
         const emailProvider: 'smtp' | 'resend' = emailStatus?.provider === 'resend' ? 'resend' : 'smtp';
@@ -13791,16 +13815,20 @@ function buildDepositConfirmationMessage(
     const guestsNum = Math.max(1, Math.trunc(Number(guests) || 1));
     const room = (roomName ?? '').trim();
     const amount = formatMoneyMinor(amountCents, currency);
+    // Il link della prenotazione, come nella conferma (buildConfirmationMessage).
+    const manage = opts?.manage?.url;
     if (isEnglishGuest(language)) {
         const greeting = fullName ? `Hi ${fullName}` : 'Hi';
         const guestsLabel = guestsNum === 1 ? 'guest' : 'guests';
         const roomPart = room ? ` in ${room}` : '';
-        return `${greeting}, we have received your deposit of ${amount}. Your reservation for ${guestsNum} ${guestsLabel} on ${dateLabel} at ${timeLabel}${roomPart} is confirmed. See you soon!`;
+        const manageEn = manage ? ` Manage your booking: ${manage}` : '';
+        return `${greeting}, we have received your deposit of ${amount}. Your reservation for ${guestsNum} ${guestsLabel} on ${dateLabel} at ${timeLabel}${roomPart} is confirmed. See you soon!${manageEn}`;
     }
     const greeting = fullName ? `Ciao ${fullName}` : 'Ciao';
     const persone = guestsNum === 1 ? 'persona' : 'persone';
     const roomPart = room ? ` in ${room}` : '';
-    return `${greeting}, abbiamo ricevuto la caparra di ${amount}. La tua prenotazione per ${guestsNum} ${persone} il ${dateLabel} alle ${timeLabel}${roomPart} e' confermata. A presto!`;
+    const manageIt = manage ? ` Gestisci la prenotazione: ${manage}` : '';
+    return `${greeting}, abbiamo ricevuto la caparra di ${amount}. La tua prenotazione per ${guestsNum} ${persone} il ${dateLabel} alle ${timeLabel}${roomPart} e' confermata. A presto!${manageIt}`;
 }
 
 // Sent to the guest when staff refund a deposit from the Pagamenti page.
@@ -14682,6 +14710,9 @@ async function applyPaymentOrderTransition(
                     // Niente JWT qui (webhook o riconciliatore): il fuso è quello del
         // tenant della payment_request.
         const fusoMsg = (await getTenantLocale(Number(row.tenant_id) || PUBLIC_TENANT_ID)).timezone;
+        // Il link della prenotazione va nell'SMS; il template WhatsApp della
+        // caparra non ha il bottone (il promemoria lo porterà).
+        const manage = await guestManageLink(Number(row.tenant_id) || PUBLIC_TENANT_ID, reservation.id);
         const message = buildDepositConfirmationMessage(
                         reservation.customer_name,
                         reservation.reservation_time,
@@ -14689,7 +14720,7 @@ async function applyPaymentOrderTransition(
                         row.amount_cents,
                         roomName,
                         guestLanguage,
-                        (await getTenantLocale(Number(row.tenant_id) || PUBLIC_TENANT_ID)).currency, { timezone: fusoMsg });
+                        (await getTenantLocale(Number(row.tenant_id) || PUBLIC_TENANT_ID)).currency, { timezone: fusoMsg, manage });
                     // Transizione invocata sia da webhook sia da riconciliatore:
                     // niente JWT in mano, il tenant è quello della payment_request.
                     await sendBookingConfirmation(Number(row.tenant_id) || PUBLIC_TENANT_ID, reservation.phone, message, reservation.id, {
@@ -18316,7 +18347,8 @@ const startBookingReminderScheduler = () => {
 
                     const language = resolveGuestLanguage(row);
                     const identity = businessIdentity(tenantId);
-                    const msgOpts = { timezone: gate.tz };
+                    const manage = await guestManageLink(tenantId, row.id);
+                    const msgOpts = { timezone: gate.tz, manage };
                     const outcome = await dispatchBookingNotification({
                         tenantId,
                         source: row.source,
@@ -18333,6 +18365,7 @@ const startBookingReminderScheduler = () => {
                             language,
                             timezone: gate.tz,
                             identity,
+                            manage,
                         }),
                         kind: 'reminder',
                     });
@@ -20301,6 +20334,31 @@ app.post('/banquet-menus/:id/send-quote-whatsapp', authenticate, requirePermissi
     }
 });
 
+// La carta d'identità del ristorante per le pagine pubbliche React
+// (preventivo, «La tua prenotazione»): chi parla e come raggiungerlo.
+function publicBusinessCard(tenantId: number) {
+    const identity = businessIdentity(tenantId);
+    // Il logo in anagrafica è un path del backend (/public/media/…): la
+    // pagina vive sul dominio dell'app, quindi qui diventa assoluto — la
+    // stessa ragione per cui le email non usano path relativi.
+    const apiBase = publicAppBaseUrl();
+    const logoAbs = identity.logoUrl
+        ? (/^https?:\/\//i.test(identity.logoUrl)
+            ? identity.logoUrl
+            : (apiBase ? `${apiBase}${identity.logoUrl}` : null))
+        : null;
+    return {
+        name: identity.name,
+        tagline: identity.tagline || null,
+        phone: identity.phone || null,
+        whatsapp: identity.whatsapp || null,
+        address: identity.address || null,
+        maps_url: identity.mapsUrl || null,
+        website_url: identity.websiteUrl || null,
+        logo_url: logoAbs,
+    };
+}
+
 // La pagina pubblica del preventivo: composizione per uscite, tariffe e
 // totali. Niente note operative (cucina/sala/mise en place) né riferimenti
 // interni — è il documento che il cliente inoltra alla famiglia.
@@ -20345,27 +20403,8 @@ app.get('/preventivo/:token', publicPayLimiter, async (req, res) => runAsPlatfor
             ? Math.min(gross, gross * (discountValue / 100))
             : row.discount_type === 'AMOUNT' ? Math.min(gross, discountValue) : 0;
 
-        const identity = businessIdentity(row.tenant_id);
-        // Il logo in anagrafica è un path del backend (/public/media/…): la
-        // pagina vive sul dominio dell'app, quindi qui diventa assoluto — la
-        // stessa ragione per cui le email non usano path relativi.
-        const apiBase = publicAppBaseUrl();
-        const logoAbs = identity.logoUrl
-            ? (/^https?:\/\//i.test(identity.logoUrl)
-                ? identity.logoUrl
-                : (apiBase ? `${apiBase}${identity.logoUrl}` : null))
-            : null;
         res.json({
-            business: {
-                name: identity.name,
-                tagline: identity.tagline || null,
-                phone: identity.phone || null,
-                whatsapp: identity.whatsapp || null,
-                address: identity.address || null,
-                maps_url: identity.mapsUrl || null,
-                website_url: identity.websiteUrl || null,
-                logo_url: logoAbs,
-            },
+            business: publicBusinessCard(row.tenant_id),
             // La valuta del ristorante: la pagina ci scrive tutti gli importi.
             currency: (await getTenantLocale(row.tenant_id)).currency,
             quote: {
@@ -26556,10 +26595,49 @@ function whatsappHref(display: string): string {
  * Il fuso serve a scrivere l'ora giusta: questi builder formattano un istante
  * preso dal database, e «20:30» dipende da dove sta il locale. Arriva come
  * campo di un oggetto e non come parametro posizionale — queste firme hanno
- * già sei o otto argomenti, e un nono in coda si sbaglia d'ordine. */
-type MsgOpts = { timezone?: string | null; currency?: string | null };
+ * già sei o otto argomenti, e un nono in coda si sbaglia d'ordine.
+ *
+ * `manage` è il link «Gestisci la prenotazione» (services/guestManage.ts):
+ * presente solo quando il locale ha acceso la gestione dall'ospite, e
+ * allora conferma e promemoria lo portano. */
+type MsgOpts = { timezone?: string | null; currency?: string | null; manage?: GuestManageLink | null };
 const msgTz = (opts?: MsgOpts): string => opts?.timezone || 'Europe/Rome';
 const msgCurrency = (opts?: MsgOpts): string => opts?.currency || 'EUR';
+
+// ── «La tua prenotazione»: il link nei messaggi all'ospite ──────────────
+// Il dominio è quello scritto nei template WhatsApp col bottone
+// (https://app.sympotia.com/r/{{6}}, vedi
+// scripts/create-whatsapp-templates-gestione.mjs): cambiarlo qui senza
+// rifare approvare i template manderebbe SMS ed email da una parte e
+// WhatsApp dall'altra.
+const GUEST_MANAGE_BASE_URL = (process.env.GUEST_MANAGE_BASE_URL || 'https://app.sympotia.com').replace(/\/+$/, '');
+interface GuestManageLink {
+    url: string;
+    /** Solo il token: è la variabile del bottone nei template WhatsApp. */
+    token: string;
+    /** Il nome del locale, variabile dei template col bottone. */
+    businessName: string;
+}
+const guestManageUrl = (token: string): string => `${GUEST_MANAGE_BASE_URL}/r/${token}`;
+
+/** Il link della prenotazione per i messaggi, o null se il locale non ha
+ *  acceso la gestione dall'ospite. Mai un errore per chi manda: senza link
+ *  il messaggio parte come prima. */
+async function guestManageLink(tenantId: number, reservationId: number | null | undefined): Promise<GuestManageLink | null> {
+    // Sul nodo di sala i messaggi al cliente non partono (vedi
+    // dispatchBookingNotification): niente token coniati nel suo database.
+    if (isServiceNode || reservationId == null) return null;
+    try {
+        const policy = await getGuestManagePolicy(tenantId);
+        if (!policy.enabled) return null;
+        const token = await ensureGuestToken(tenantId, Number(reservationId));
+        if (!token) return null;
+        return { url: guestManageUrl(token), token, businessName: businessIdentity(tenantId).name };
+    } catch (err: any) {
+        console.warn('[guest-manage] link non disponibile:', err?.message || err);
+        return null;
+    }
+}
 
 function buildConfirmationMessage(
     customerName: string | null | undefined,
@@ -26585,16 +26663,22 @@ function buildConfirmationMessage(
     // in forma maps.app.goo.gl — porta il messaggio tipico oltre i 160
     // caratteri, cioè a 2 segmenti fatturati. Il link viaggia solo dove non
     // costa: bottone del template WhatsApp e email (contactBlockHtml).
+    // Il link della prenotazione invece c'è, quando il locale lo vuole: vale
+    // il segmento in più perché risparmia una telefonata. Sta in fondo,
+    // così nessuna punteggiatura gli si attacca.
+    const manage = opts?.manage?.url;
     if (isEnglishGuest(language)) {
         const greeting = fullName ? `Hi ${fullName}, your` : 'Your';
         const guestsLabel = guestsNum === 1 ? 'guest' : 'guests';
         const roomPart = room ? ` in the ${room} room` : '';
-        return `${greeting} reservation for ${guestsNum} ${guestsLabel} on ${dateLabel} at ${timeLabel}${roomPart} is confirmed. See you soon!`;
+        const manageEn = manage ? ` Manage your booking: ${manage}` : '';
+        return `${greeting} reservation for ${guestsNum} ${guestsLabel} on ${dateLabel} at ${timeLabel}${roomPart} is confirmed. See you soon!${manageEn}`;
     }
     const greeting = fullName ? `Ciao ${fullName}, la tua` : 'La';
     const persone = guestsNum === 1 ? 'persona' : 'persone';
     const roomPart = room ? ` in ${room}` : '';
-    return `${greeting} prenotazione per ${guestsNum} ${persone} il ${dateLabel} alle ${timeLabel}${roomPart} e' confermata. A presto!`;
+    const manageIt = manage ? ` Gestisci la prenotazione: ${manage}` : '';
+    return `${greeting} prenotazione per ${guestsNum} ${persone} il ${dateLabel} alle ${timeLabel}${roomPart} e' confermata. A presto!${manageIt}`;
 }
 
 // Resolve the room name for a reservation, preferring the actually assigned
@@ -26661,16 +26745,28 @@ function buildReminderMessage(
     const { dateLabel, timeLabel } = formatBookingDateTime(asUtcInstant(reservationTime), msgTz(opts));
     const fullName = toTitleCase(customerName);
     const guestsNum = Math.max(1, Math.trunc(Number(guests) || 1));
+    // Niente «—» in questi testi: fuori dall'alfabeto GSM, trasformava
+    // l'intero SMS in Unicode (70 caratteri a segmento invece di 160), e il
+    // promemoria partiva in quattro segmenti invece di due.
+    // Col link della prenotazione l'ospite conferma o annulla da solo: la
+    // riga «chiamaci» lascia il posto al link, che sta in fondo.
+    const manage = opts?.manage?.url;
     if (isEnglishGuest(language)) {
         const greeting = fullName ? `Hi ${fullName}!` : 'Hi!';
         const guestsLabel = guestsNum === 1 ? 'guest' : 'guests';
         const roomPart = roomName ? ` (${roomName})` : '';
-        return `${greeting} We look forward to seeing you on ${dateLabel} at ${timeLabel}: a table for ${guestsNum} ${guestsLabel}${roomPart} at ${identity.name}. Need to change anything or something came up? Call us at ${identity.phone} — we'll take care of it. See you soon!`;
+        const tail = manage
+            ? `Will you make it? Confirm or cancel here: ${manage}`
+            : `Need to change anything or something came up? Call us at ${identity.phone}, we'll take care of it. See you soon!`;
+        return `${greeting} We look forward to seeing you on ${dateLabel} at ${timeLabel}: a table for ${guestsNum} ${guestsLabel}${roomPart} at ${identity.name}. ${tail}`;
     }
     const greeting = fullName ? `Ciao ${fullName}!` : 'Ciao!';
     const persone = guestsNum === 1 ? 'persona' : 'persone';
     const roomPart = roomName ? ` (${roomName})` : '';
-    return `${greeting} Ti aspettiamo ${dateLabel} alle ${timeLabel}: tavolo per ${guestsNum} ${persone}${roomPart} da ${identity.name}. Per modifiche o imprevisti chiamaci al ${identity.phone} — sistemiamo tutto noi. A presto!`;
+    const tail = manage
+        ? `Ci sarai? Conferma o annulla qui: ${manage}`
+        : `Per modifiche o imprevisti chiamaci al ${identity.phone}, sistemiamo tutto noi. A presto!`;
+    return `${greeting} Ti aspettiamo ${dateLabel} alle ${timeLabel}: tavolo per ${guestsNum} ${persone}${roomPart} da ${identity.name}. ${tail}`;
 }
 
 // Avviso di modifica — parte da solo quando ora o coperti di una
@@ -26724,6 +26820,42 @@ function pickWhatsAppTemplateSid(
     const italianSid = process.env[baseEnvKey];
     return italianSid ? { contentSid: italianSid, english: false } : undefined;
 }
+// Conferma e promemoria hanno una seconda versione col bottone «Gestisci
+// la prenotazione» (scripts/create-whatsapp-templates-gestione.mjs): stesse
+// quattro variabili, più {{5}} il nome del locale e {{6}} il solo token
+// (l'host https://app.sympotia.com/r/ vive nel template, come per caparra e
+// conto). Si usa quando il messaggio porta il link E la sua SID c'è; mai se
+// costerebbe la lingua dell'ospite: un ospite inglese con la conferma
+// inglese senza bottone non riceve quella italiana col bottone.
+function pickBookingTemplateSid(
+    baseEnvKey: string,
+    language: string | null | undefined,
+    manage: GuestManageLink | null | undefined
+): { contentSid: string; english: boolean; manage: GuestManageLink | null } | undefined {
+    const plain = pickWhatsAppTemplateSid(baseEnvKey, language);
+    const linked = manage ? pickWhatsAppTemplateSid(`${baseEnvKey}_LINK`, language) : undefined;
+    if (linked && manage && (!plain || linked.english === plain.english)) return { ...linked, manage };
+    return plain ? { ...plain, manage: null } : undefined;
+}
+function bookingTemplateVariables(
+    picked: { english: boolean; manage: GuestManageLink | null },
+    customerName: string | null | undefined,
+    guests: number | null | undefined,
+    dateLabel: string,
+    timeLabel: string
+): Record<string, string> {
+    const vars: Record<string, string> = {
+        '1': templateName(customerName),
+        '2': templateGuestsLabel(guests, picked.english),
+        '3': dateLabel,
+        '4': timeLabel,
+    };
+    if (picked.manage) {
+        vars['5'] = picked.manage.businessName || '—';
+        vars['6'] = picked.manage.token;
+    }
+    return vars;
+}
 function buildBookingConfirmedTemplate(
     customerName: string | null | undefined,
     reservationTime: string | Date,
@@ -26731,17 +26863,12 @@ function buildBookingConfirmedTemplate(
     language?: string | null,
     opts?: MsgOpts
 ): WhatsAppTemplateOpts | undefined {
-    const picked = pickWhatsAppTemplateSid('TWILIO_WA_CONTENT_SID_BOOKING_CONFIRMED', language);
+    const picked = pickBookingTemplateSid('TWILIO_WA_CONTENT_SID_BOOKING_CONFIRMED', language, opts?.manage);
     if (!picked) return undefined;
     const { dateLabel, timeLabel } = formatBookingDateTime(asUtcInstant(reservationTime), msgTz(opts));
     return {
         contentSid: picked.contentSid,
-        contentVariables: {
-            '1': templateName(customerName),
-            '2': templateGuestsLabel(guests, picked.english),
-            '3': dateLabel,
-            '4': timeLabel,
-        },
+        contentVariables: bookingTemplateVariables(picked, customerName, guests, dateLabel, timeLabel),
     };
 }
 // Reminder e avviso di modifica: stesse quattro variabili degli altri
@@ -26755,17 +26882,12 @@ function buildBookingReminderTemplate(
     language?: string | null,
     opts?: MsgOpts
 ): WhatsAppTemplateOpts | undefined {
-    const picked = pickWhatsAppTemplateSid('TWILIO_WA_CONTENT_SID_BOOKING_REMINDER', language);
+    const picked = pickBookingTemplateSid('TWILIO_WA_CONTENT_SID_BOOKING_REMINDER', language, opts?.manage);
     if (!picked) return undefined;
     const { dateLabel, timeLabel } = formatBookingDateTime(asUtcInstant(reservationTime), msgTz(opts));
     return {
         contentSid: picked.contentSid,
-        contentVariables: {
-            '1': templateName(customerName),
-            '2': templateGuestsLabel(guests, picked.english),
-            '3': dateLabel,
-            '4': timeLabel,
-        },
+        contentVariables: bookingTemplateVariables(picked, customerName, guests, dateLabel, timeLabel),
     };
 }
 function buildBookingUpdatedTemplate(
@@ -27382,6 +27504,15 @@ ${identity.name}`;
 // Booking-confirmation email — sent when staff flips a PENDING reservation to
 // CONFIRMED, or when the manual /confirm-email endpoint is invoked. Wraps the
 // same one-line text used by SMS/WhatsApp in a proper HTML layout.
+// Il bottone «Gestisci la prenotazione» delle email di conferma e
+// promemoria: stesso disegno del bottone delle recensioni.
+function guestManageButtonHtml(url: string, label: string): string {
+    return `
+      <p style="margin:0 0 16px;">
+        <a href="${escapeHtml(url)}" style="display:inline-block;background:#065f46;color:#ffffff;text-decoration:none;font-size:15px;font-weight:600;padding:12px 28px;border-radius:10px;">${escapeHtml(label)}</a>
+      </p>`;
+}
+
 function buildBookingConfirmationEmail(params: {
     customerName: string;
     reservationTime: string | Date;
@@ -27389,6 +27520,8 @@ function buildBookingConfirmationEmail(params: {
     roomName?: string | null;
     language?: string | null;
     timezone?: string | null;
+    /** Il link «Gestisci la prenotazione», se il locale l'ha acceso. */
+    manage?: GuestManageLink | null;
 }): { subject: string; text: string; html: string } {
     // DB-sourced confirmation time → read a bare naive string as UTC (see
     // asUtcInstant). The request email above keeps the raw web-form input (#85).
@@ -27397,7 +27530,8 @@ function buildBookingConfirmationEmail(params: {
     const guestsNum = Math.max(1, Math.trunc(Number(params.guests) || 1));
     const room = (params.roomName || '').trim();
     const name = toTitleCase(params.customerName);
-    const shortConfirm = buildConfirmationMessage(params.customerName, params.reservationTime, params.guests, params.roomName ?? null, params.language, { timezone: params.timezone });
+    const shortConfirm = buildConfirmationMessage(params.customerName, params.reservationTime, params.guests, params.roomName ?? null, params.language, { timezone: params.timezone, manage: params.manage });
+    const manageUrl = params.manage?.url ?? null;
 
     if (isEnglishGuest(params.language)) {
         const guestsLabel = guestsNum === 1 ? 'guest' : 'guests';
@@ -27411,7 +27545,9 @@ function buildBookingConfirmationEmail(params: {
         <tr><td style="padding:6px 0;font-size:14px;color:#065f46;"><strong>Time:</strong> ${escapeHtml(timeLabel)}</td></tr>
         <tr><td style="padding:6px 0;font-size:14px;color:#065f46;"><strong>Guests:</strong> ${guestsNum} ${guestsLabel}${roomPart}</td></tr>
       </table>
-      <p class="muted" style="margin:0 0 8px;font-size:14px;line-height:1.6;color:#57534e;">We look forward to seeing you. If you need to change or cancel, reply to this email or contact us directly.</p>
+      ${manageUrl
+        ? `<p class="muted" style="margin:0 0 12px;font-size:14px;line-height:1.6;color:#57534e;">We look forward to seeing you. Something came up? You can cancel from here:</p>${guestManageButtonHtml(manageUrl, 'Manage your booking')}`
+        : `<p class="muted" style="margin:0 0 8px;font-size:14px;line-height:1.6;color:#57534e;">We look forward to seeing you. If you need to change or cancel, reply to this email or contact us directly.</p>`}
       ${contactBlockHtml(params.language)}
       <p style="margin:16px 0 0;font-size:14px;">See you soon!<br><em>${escapeHtml(identity.name)}</em></p>
     `;
@@ -27431,7 +27567,9 @@ function buildBookingConfirmationEmail(params: {
         <tr><td style="padding:6px 0;font-size:14px;color:#065f46;"><strong>Ora:</strong> ${escapeHtml(timeLabel)}</td></tr>
         <tr><td style="padding:6px 0;font-size:14px;color:#065f46;"><strong>Ospiti:</strong> ${guestsNum} ${persone}${roomPart}</td></tr>
       </table>
-      <p class="muted" style="margin:0 0 8px;font-size:14px;line-height:1.6;color:#57534e;">Ti aspettiamo a tavola. Se hai bisogno di modificare o annullare, rispondi a questa email o contattaci direttamente.</p>
+      ${manageUrl
+        ? `<p class="muted" style="margin:0 0 12px;font-size:14px;line-height:1.6;color:#57534e;">Ti aspettiamo a tavola. Un imprevisto? Puoi annullare da qui:</p>${guestManageButtonHtml(manageUrl, 'Gestisci la prenotazione')}`
+        : `<p class="muted" style="margin:0 0 8px;font-size:14px;line-height:1.6;color:#57534e;">Ti aspettiamo a tavola. Se hai bisogno di modificare o annullare, rispondi a questa email o contattaci direttamente.</p>`}
       ${contactBlockHtml()}
       <p style="margin:16px 0 0;font-size:14px;">A presto!<br><em>${escapeHtml(identity.name)}</em></p>
     `;
@@ -27451,13 +27589,16 @@ function buildBookingReminderEmail(params: {
     language?: string | null;
     timezone?: string | null;
     identity: BusinessIdentity;
+    /** Il link «Gestisci la prenotazione», se il locale l'ha acceso. */
+    manage?: GuestManageLink | null;
 }): { subject: string; text: string; html: string } {
     const { identity } = params;
+    const manageUrl = params.manage?.url ?? null;
     const { dateLabel, timeLabel } = formatBookingDateTime(asUtcInstant(params.reservationTime), params.timezone || 'Europe/Rome');
     const guestsNum = Math.max(1, Math.trunc(Number(params.guests) || 1));
     const room = (params.roomName || '').trim();
     const name = toTitleCase(params.customerName);
-    const text = buildReminderMessage(params.customerName, params.reservationTime, params.guests, params.roomName ?? null, params.language, { timezone: params.timezone }, identity);
+    const text = buildReminderMessage(params.customerName, params.reservationTime, params.guests, params.roomName ?? null, params.language, { timezone: params.timezone, manage: params.manage }, identity);
 
     if (isEnglishGuest(params.language)) {
         const guestsLabel = guestsNum === 1 ? 'guest' : 'guests';
@@ -27470,7 +27611,9 @@ function buildBookingReminderEmail(params: {
         <tr><td style="padding:6px 0;font-size:14px;color:#065f46;"><strong>Time:</strong> ${escapeHtml(timeLabel)}</td></tr>
         <tr><td style="padding:6px 0;font-size:14px;color:#065f46;"><strong>Guests:</strong> ${guestsNum} ${guestsLabel}${roomPart}</td></tr>
       </table>
-      <p class="muted" style="margin:0 0 8px;font-size:14px;line-height:1.6;color:#57534e;">Need to change or cancel? Reply to this email or contact us: we'll take care of it.</p>
+      ${manageUrl
+        ? `<p class="muted" style="margin:0 0 12px;font-size:14px;line-height:1.6;color:#57534e;">Will you make it? Confirm or cancel from here:</p>${guestManageButtonHtml(manageUrl, 'Manage your booking')}`
+        : `<p class="muted" style="margin:0 0 8px;font-size:14px;line-height:1.6;color:#57534e;">Need to change or cancel? Reply to this email or contact us: we'll take care of it.</p>`}
       ${contactBlockHtml(params.language, identity)}
       <p style="margin:16px 0 0;font-size:14px;">See you soon!<br><em>${escapeHtml(identity.name)}</em></p>
     `;
@@ -27487,7 +27630,9 @@ function buildBookingReminderEmail(params: {
         <tr><td style="padding:6px 0;font-size:14px;color:#065f46;"><strong>Ora:</strong> ${escapeHtml(timeLabel)}</td></tr>
         <tr><td style="padding:6px 0;font-size:14px;color:#065f46;"><strong>Ospiti:</strong> ${guestsNum} ${persone}${roomPart}</td></tr>
       </table>
-      <p class="muted" style="margin:0 0 8px;font-size:14px;line-height:1.6;color:#57534e;">Per modifiche o imprevisti rispondi a questa email o contattaci: sistemiamo tutto noi.</p>
+      ${manageUrl
+        ? `<p class="muted" style="margin:0 0 12px;font-size:14px;line-height:1.6;color:#57534e;">Ci sarai? Conferma o annulla da qui:</p>${guestManageButtonHtml(manageUrl, 'Gestisci la prenotazione')}`
+        : `<p class="muted" style="margin:0 0 8px;font-size:14px;line-height:1.6;color:#57534e;">Per modifiche o imprevisti rispondi a questa email o contattaci: sistemiamo tutto noi.</p>`}
       ${contactBlockHtml(params.language, identity)}
       <p style="margin:16px 0 0;font-size:14px;">A presto!<br><em>${escapeHtml(identity.name)}</em></p>
     `;
@@ -32817,6 +32962,325 @@ app.put('/settings/booking-reminders', authenticate, requirePermission('settings
 });
 
 // ============================================
+// «LA TUA PRENOTAZIONE» — l'ospite conferma o annulla da solo
+// ============================================
+// Il link «Gestisci la prenotazione» di conferma e promemoria apre
+// https://app.sympotia.com/r/<token> (components/PublicReservationPage.tsx),
+// che legge e scrive qui. Il token è la capability, come per /pay e
+// /preventivo: niente login. Le regole stanno in services/guestManage.ts;
+// le scritture le rifanno sul dato fresco, dentro la transazione.
+
+app.get('/settings/guest-manage', authenticate, async (req, res) => {
+    try {
+        res.json(await getGuestManagePolicy(req.tenantId!));
+    } catch (err) {
+        console.error('GET /settings/guest-manage error:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+app.put('/settings/guest-manage', authenticate, requirePermission('settings:full'), async (req, res) => {
+    try {
+        // Update parziale, come il promemoria: i campi assenti restano.
+        const current = await getGuestManagePolicy(req.tenantId!);
+        const body = req.body ?? {};
+        const next = normalizeGuestManagePolicy({
+            enabled: body.enabled !== undefined ? body.enabled : current.enabled,
+            cancel_cutoff_hours: body.cancel_cutoff_hours !== undefined ? body.cancel_cutoff_hours : current.cancel_cutoff_hours,
+        });
+        if (!next) {
+            return res.status(400).json({
+                error: 'invalid_policy',
+                message: `Policy non valida: enabled booleano, cancel_cutoff_hours intero tra ${CANCEL_CUTOFF_MIN} e ${CANCEL_CUTOFF_MAX}`,
+            });
+        }
+        await saveGuestManagePolicy(req.tenantId!, next);
+        if (req.user) {
+            LogService.logActivity(
+                req.tenantId!,
+                req.user.userId, req.user.email, req.user.email,
+                ActivityAction.UPDATE, ResourceType.SETTINGS,
+                0,
+                `Gestione dall'ospite: ${next.enabled ? `attiva, annullo fino a ${next.cancel_cutoff_hours} ore prima` : 'disattivata'}`
+            );
+        }
+        res.json(next);
+    } catch (err) {
+        console.error('PUT /settings/guest-manage error:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+// Il link della prenotazione per lo staff: da incollare in una chat o da
+// dettare al telefono. Conia il token come farebbe il primo messaggio, ed
+// esiste anche a gestione spenta (la pagina allora mostra solo i dati).
+app.post('/reservations/:id/guest-link', authenticate, requirePermission('reservations:full'), async (req, res) => {
+    try {
+        const id = parseInt(req.params.id, 10);
+        if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ error: 'id non valido' });
+        const token = await ensureGuestToken(req.tenantId!, id);
+        if (!token) return res.status(404).json({ error: 'Prenotazione non trovata' });
+        res.json({ token, url: guestManageUrl(token) });
+    } catch (err) {
+        console.error('POST /reservations/:id/guest-link error:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+// La pagina dell'ospite: lo stesso scudo per IP del conto al tavolo contro
+// chi prova token a caso, ma con un contatore suo (un'istanza condivisa
+// sommerebbe le richieste di pagine diverse).
+const guestPageLimiter = rateLimit({
+    windowMs: 60 * 1000,
+    limit: 60,
+    standardHeaders: 'draft-7',
+    legacyHeaders: false,
+    message: { error: 'rate_limited', message: 'Troppe richieste, riprova tra qualche secondo.' },
+});
+
+// Le scritture dell'ospite: dieci al minuto per token, oltre al limite per
+// IP — un link inoltrato non diventa un martello.
+const guestActionLimiter = rateLimit({
+    windowMs: 60 * 1000,
+    limit: 10,
+    standardHeaders: 'draft-7',
+    legacyHeaders: false,
+    keyGenerator: (req) => `guest:${req.params.token || 'unknown'}`,
+    message: { error: 'rate_limited', message: 'Troppe richieste, riprova tra qualche secondo.' },
+});
+
+// Quello che la pagina mostra: la prenotazione SENZA tavolo (dato
+// operativo, cambia fino all'arrivo) né note interne, cosa si può fare
+// adesso e la caparra pagata con la sua sorte se si annulla.
+const GUEST_RESERVATION_SQL = `
+    SELECT r.id, r.tenant_id, r.customer_name, r.reservation_time, r.guests, r.children,
+           r.reservation_status, r.arrival_status, r.guest_confirmed_at, r.guest_cancelled_at,
+           r.payment_status, r.deposit_amount, r.phone,
+           ro.name AS room_name,
+           dep.amount_cents AS deposit_paid_cents
+      FROM reservations r
+      LEFT JOIN tables t ON t.id = r.table_id AND t.tenant_id = r.tenant_id
+      LEFT JOIN rooms ro ON ro.id = t.room_id AND ro.tenant_id = t.tenant_id
+      LEFT JOIN LATERAL (
+          -- Solo le caparre incassate online e non rimborsate: i pagamenti
+          -- del conto dal QR (table_bill_split_id) non sono caparre.
+          SELECT SUM(pr.amount_cents)::int AS amount_cents
+            FROM payment_requests pr
+           WHERE pr.reservation_id = r.id
+             AND pr.tenant_id = r.tenant_id
+             AND pr.table_bill_split_id IS NULL
+             AND UPPER(pr.status) = 'COMPLETED'
+      ) dep ON true
+     WHERE r.guest_token = $1`;
+
+const loadGuestReservation = async (token: string): Promise<any | null> => {
+    if (!token || token.length < GUEST_TOKEN_MIN_LENGTH) return null;
+    const rs = await queryWithRetry(GUEST_RESERVATION_SQL, [token]);
+    return rs.rows[0] ?? null;
+};
+
+// La caparra pagata: online (payment_requests) o segnata a mano dallo
+// staff (PAID_DEPOSIT con l'importo sulla prenotazione).
+const guestDepositPaidCents = (row: any): number => {
+    const online = Number(row.deposit_paid_cents) || 0;
+    if (online > 0) return online;
+    const manual = Number(row.deposit_amount) || 0;
+    return row.payment_status === 'PAID_DEPOSIT' && manual > 0 ? Math.round(manual * 100) : 0;
+};
+
+async function guestReservationView(row: any) {
+    const tenantId = Number(row.tenant_id);
+    const [policy, locale] = await Promise.all([getGuestManagePolicy(tenantId), getTenantLocale(tenantId)]);
+    await refreshBusinessIdentity(tenantId).catch(() => {});
+    const now = new Date();
+    const reservationTime = new Date(row.reservation_time);
+    const actions = guestActionsFor({
+        now,
+        reservationTime,
+        status: row.reservation_status,
+        arrivalStatus: row.arrival_status,
+        guestConfirmedAt: row.guest_confirmed_at ? new Date(row.guest_confirmed_at) : null,
+        policy,
+    });
+    const depositCents = guestDepositPaidCents(row);
+    return {
+        business: publicBusinessCard(tenantId),
+        currency: locale.currency,
+        reservation: {
+            customer_name: toTitleCase(row.customer_name) || null,
+            date: getDatePartInTz(reservationTime, locale.timezone),
+            time: getTimePartInTz(reservationTime, locale.timezone),
+            guests: Number(row.guests) || 1,
+            children: Number(row.children) || 0,
+            room_name: row.room_name || null,
+            state: actions.state,
+            guest_confirmed_at: row.guest_confirmed_at ?? null,
+            guest_cancelled_at: row.guest_cancelled_at ?? null,
+        },
+        actions: {
+            can_confirm: actions.can_confirm,
+            can_cancel: actions.can_cancel,
+            cancel_block: actions.cancel_block,
+            cancel_cutoff_hours: policy.cancel_cutoff_hours,
+        },
+        deposit: depositCents > 0
+            ? { amount: depositCents / 100, on_cancel: depositOutcomeOnCancel(now, reservationTime) }
+            : null,
+    };
+}
+
+// rls-bypass: pagina a token senza JWT, tenant da guest_token (unico globale)
+app.get('/r/:token', guestPageLimiter, async (req, res) => runAsPlatform(async () => {
+    try {
+        const row = await loadGuestReservation(String(req.params.token || ''));
+        if (!row) return res.status(404).json({ error: 'Not found' });
+        res.json(await guestReservationView(row));
+    } catch (err) {
+        console.error('GET /r/:token error:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+}));
+
+// L'envelope di replica: l'ospite non è un utente, il canale dice chi è.
+const GUEST_OUTBOX_CONTEXT = { commandId: null, actor: { channel: 'guest' } };
+
+type GuestWriteOutcome = { ok: true; row: any } | { ok: false; status: number; error: string };
+
+/** Rilegge la prenotazione bloccata, rifà i controlli e applica `apply`. */
+async function guestWrite(
+    tenantId: number,
+    reservationId: number,
+    check: (actions: ReturnType<typeof guestActionsFor>, fresh: any) => string | null,
+    apply: (tx: any) => Promise<any>
+): Promise<GuestWriteOutcome> {
+    const policy = await getGuestManagePolicy(tenantId);
+    return runWithOutboxTx(async (tx) => {
+        const cur = await tx.query(
+            `SELECT id, reservation_time, reservation_status, arrival_status, guest_confirmed_at
+               FROM reservations WHERE id = $1 AND tenant_id = $2 FOR UPDATE`,
+            [reservationId, tenantId]
+        );
+        const fresh = cur.rows[0];
+        if (!fresh) return { ok: false, status: 404, error: 'not_found' } as const;
+        const actions = guestActionsFor({
+            now: new Date(),
+            reservationTime: new Date(fresh.reservation_time),
+            status: fresh.reservation_status,
+            arrivalStatus: fresh.arrival_status,
+            guestConfirmedAt: fresh.guest_confirmed_at ? new Date(fresh.guest_confirmed_at) : null,
+            policy,
+        });
+        const refused = check(actions, fresh);
+        if (refused) return { ok: false, status: 409, error: refused } as const;
+        const row = await apply(tx);
+        await outboxEnqueueInTx(tx, tenantId, 'reservation:updated', `reservation:${reservationId}`,
+            { reservation_id: reservationId }, GUEST_OUTBOX_CONTEXT);
+        return { ok: true, row } as const;
+    });
+}
+
+// «Ci saremo»: segna la conferma dell'ospite. Idempotente — un secondo tocco
+// (o il link aperto su due telefoni) risponde con la pagina com'è.
+// rls-bypass: pagina a token senza JWT; la scrittura gira nel contesto del tenant della prenotazione
+app.post('/r/:token/confirm', guestPageLimiter, guestActionLimiter, async (req, res) => runAsPlatform(async () => {
+    try {
+        const found = await loadGuestReservation(String(req.params.token || ''));
+        if (!found) return res.status(404).json({ error: 'Not found' });
+        const tenantId = Number(found.tenant_id);
+        const id = Number(found.id);
+        if (found.guest_confirmed_at) return res.json(await guestReservationView(found));
+        const outcome = await runWithTenantContext(tenantId, () => guestWrite(
+            tenantId, id,
+            (actions, fresh) => fresh.guest_confirmed_at ? null : (actions.can_confirm ? null : 'not_allowed'),
+            async (tx) => (await tx.query(
+                `UPDATE reservations SET guest_confirmed_at = COALESCE(guest_confirmed_at, NOW())
+                  WHERE id = $1 AND tenant_id = $2 RETURNING id`,
+                [id, tenantId]
+            )).rows[0]
+        ));
+        if (outcome.ok === false) return res.status(outcome.status).json({ error: outcome.error });
+        outboxKick();
+        await broadcastReservationsUpdatedByIds([id]);
+        LogService.logActivity(
+            tenantId, null, 'ospite@link', 'Ospite (link)',
+            ActivityAction.UPDATE, ResourceType.RESERVATION, id, toTitleCase(found.customer_name),
+            { source: 'GUEST_LINK', guest_confirmed: true }
+        );
+        const updated = await loadGuestReservation(String(req.params.token));
+        res.json(await guestReservationView(updated ?? found));
+    } catch (err) {
+        console.error('POST /r/:token/confirm error:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+}));
+
+// L'ospite annulla: la prenotazione passa ad annullata e libera il tavolo,
+// come l'annullo dallo staff (PUT /reservations/:id). La caparra non si
+// tocca qui: con almeno 24 ore d'anticipo l'avviso chiede allo staff di
+// rimborsarla dal pulsante che già esiste; sotto, resta al locale.
+// rls-bypass: pagina a token senza JWT; la scrittura gira nel contesto del tenant della prenotazione
+app.post('/r/:token/cancel', guestPageLimiter, guestActionLimiter, async (req, res) => runAsPlatform(async () => {
+    try {
+        const found = await loadGuestReservation(String(req.params.token || ''));
+        if (!found) return res.status(404).json({ error: 'Not found' });
+        const tenantId = Number(found.tenant_id);
+        const id = Number(found.id);
+        if (found.reservation_status === 'CANCELLED') return res.json(await guestReservationView(found));
+        const outcome = await runWithTenantContext(tenantId, () => guestWrite(
+            tenantId, id,
+            (actions) => actions.can_cancel ? null : (actions.cancel_block ?? 'not_allowed'),
+            async (tx) => (await tx.query(
+                `UPDATE reservations
+                    SET reservation_status = 'CANCELLED',
+                        table_id = NULL,
+                        guest_cancelled_at = NOW()
+                  WHERE id = $1 AND tenant_id = $2
+                  RETURNING id, customer_name, guests, reservation_time, reservation_status`,
+                [id, tenantId]
+            )).rows[0]
+        ));
+        if (outcome.ok === false) return res.status(outcome.status).json({ error: outcome.error });
+        outboxKick();
+        await broadcastReservationsUpdatedByIds([id]);
+        await runWithTenantContext(tenantId, async () => {
+            // Le campanelle che chiedevano qualcosa per questa prenotazione
+            // (richiesta da confermare, ospite VIP in arrivo) non servono più.
+            await markSharedNotificationsRead(tenantId, [`pending-${id}`, vipReservationTag(id)]);
+            const tz = (await getTenantLocale(tenantId)).timezone;
+            const label = reservationPushLabel(asUtcInstant(outcome.row.reservation_time), tz);
+            const depositCents = guestDepositPaidCents(found);
+            const currency = (await getTenantLocale(tenantId)).currency;
+            const depositNote = depositCents > 0
+                ? (depositOutcomeOnCancel(new Date(), new Date(outcome.row.reservation_time)) === 'refund'
+                    ? ` · caparra ${formatMoneyMinor(depositCents, currency)} da rimborsare`
+                    : ` · caparra ${formatMoneyMinor(depositCents, currency)} trattenuta (meno di 24 ore)`)
+                : '';
+            pushSendToRoles(
+                tenantId,
+                bookingTools.RESERVATION_PUSH_ROLES,
+                {
+                    category: 'reservation',
+                    title: "Annullata dall'ospite",
+                    body: `${toTitleCase(outcome.row.customer_name)} · ${outcome.row.guests} ospiti · ${label}${depositNote}`,
+                    url: `/?view=RESERVATIONS&reservationId=${id}`,
+                    tag: `reservation-${id}`,
+                }
+            ).catch(err => console.error('Push (guest cancellation) failed:', err));
+        });
+        LogService.logActivity(
+            tenantId, null, 'ospite@link', 'Ospite (link)',
+            ActivityAction.UPDATE, ResourceType.RESERVATION, id, toTitleCase(found.customer_name),
+            { source: 'GUEST_LINK', reservation_status: 'CANCELLED', cancelled_via: 'guest_link' }
+        );
+        const updated = await loadGuestReservation(String(req.params.token));
+        res.json(await guestReservationView(updated ?? found));
+    } catch (err) {
+        console.error('POST /r/:token/cancel error:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+}));
+
+// ============================================
 // COPERTO E SERVIZIO (righe di sistema delle comande)
 // ============================================
 
@@ -36511,6 +36975,11 @@ const handlePublicReservationCreate = async (tenantId: number, req: express.Requ
             }
         }
 
+        // Confermata subito (tavolo trovato, niente caparra): la conferma
+        // porta il link della prenotazione come quella mandata dallo staff.
+        const ackManage = !depositCheckoutUrl && confirmedNow
+            ? await guestManageLink(tenantId, created.id)
+            : null;
         const ackText = depositCheckoutUrl
             ? buildDepositRequestMessage(
                 toTitleCase(customer_name),
@@ -36524,7 +36993,7 @@ const handlePublicReservationCreate = async (tenantId: number, req: express.Requ
                 depositCurrency
               )
             : confirmedNow
-                ? buildConfirmationMessage(customer_name, created.reservation_time, guestsNum, ackRoomName, language, { timezone: fusoMsg })
+                ? buildConfirmationMessage(customer_name, created.reservation_time, guestsNum, ackRoomName, language, { timezone: fusoMsg, manage: ackManage })
                 : isEnglishGuest(language)
                     ? `Hi ${toTitleCase(customer_name)}, we've received your reservation request for ${guestGuestsLabel} on ${dateLabel} at ${time}. We'll get back to you shortly to confirm it. Thank you!`
                     : `Ciao ${toTitleCase(customer_name)}, abbiamo ricevuto la tua richiesta di prenotazione per ${guestsLabel} il ${dateLabel} alle ${time}. Ti ricontatteremo a breve per confermarla. Grazie!`;
@@ -36546,7 +37015,7 @@ const handlePublicReservationCreate = async (tenantId: number, req: express.Requ
                 { currency: valutaMsg }
             );
         } else if (confirmedNow) {
-            waTemplate = buildBookingConfirmedTemplate(customer_name, created.reservation_time, guestsNum, language, { timezone: fusoMsg });
+            waTemplate = buildBookingConfirmedTemplate(customer_name, created.reservation_time, guestsNum, language, { timezone: fusoMsg, manage: ackManage });
         } else {
             const pickedReceived = pickWhatsAppTemplateSid('TWILIO_WA_CONTENT_SID_BOOKING_RECEIVED', language);
             if (pickedReceived) {
@@ -36592,7 +37061,7 @@ const handlePublicReservationCreate = async (tenantId: number, req: express.Requ
                     reservationTime: created.reservation_time,
                     guests: guestsNum,
                     roomName: ackRoomName,
-                    language, timezone: fusoMsg })
+                    language, timezone: fusoMsg, manage: ackManage })
                 : buildBookingRequestEmail({
                     customerName: toTitleCase(customer_name),
                     reservationTime: reservation_time,
