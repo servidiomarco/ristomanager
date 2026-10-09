@@ -1091,6 +1091,9 @@ export interface RigaViva {
     varianti: VarianteViva[];
     /** La riga coperto: TipoEnum Coperto sull'articolo del coperto. */
     coperto?: boolean;
+    /** Senza prezzo: lo mette la cassa dal suo listino (il coperto della
+     *  cassa con «conto: la cassa»; provato sulla demo il 09/10). */
+    prezzoDellaCassa?: boolean;
     /** Coperto e servizio del CRM: solo su una comanda nata dal CRM. Sul
      *  tavolo aperto dal palmare coperti e servizio sono quelli della cassa. */
     soloComandaNostra?: boolean;
@@ -1108,6 +1111,9 @@ export interface ParametriComandaViva {
     coperti: number;
     righe: RigaViva[];
     idArticoloGenerico: number | null;
+    /** Le uscite della cassa da mandare in produzione dopo la scrittura
+     *  (fase 3, «stampa: la cassa»): quelle lanciate nel CRM. */
+    inviaUscite?: number[];
 }
 
 export interface EsitoRigaViva {
@@ -1131,6 +1137,8 @@ export interface EsitoComandaViva {
     righe: EsitoRigaViva[];
     /** Somma delle righe non cancellate della comanda, tutte. */
     totaleCassaCents: number;
+    /** Le uscite mandate in produzione dalla cassa con questa chiamata. */
+    inviate?: number[];
 }
 
 /** Quello che l'agente ricorda di un ordine fra un tentativo e l'altro:
@@ -1152,6 +1160,8 @@ function rigaVivaXml(f: {
     idRiga?: number | null;
     pezzi: number;
     prezzoCents: number;
+    /** Niente Prezzo né Totale: la cassa prende quello del suo listino. */
+    senzaPrezzo?: boolean;
     coperto?: boolean;
     uscita?: number | null;
     varianti?: VarianteViva[];
@@ -1165,10 +1175,10 @@ function rigaVivaXml(f: {
         (f.descrizione ? `<c:Descrizione>${xmlEscape(f.descrizione)}</c:Descrizione>` : '') +
         (f.idRiga != null ? `<c:IdGestionale>${f.idRiga}</c:IdGestionale>` : '') +
         `<c:Pezzi>${f.pezzi}</c:Pezzi>` +
-        `<c:Prezzo>${euro(f.prezzoCents)}</c:Prezzo>` +
+        (f.senzaPrezzo ? '' : `<c:Prezzo>${euro(f.prezzoCents)}</c:Prezzo>`) +
         (f.coperto ? '<c:TipoEnum>Coperto</c:TipoEnum>' : '') +
         '<c:Tool_EseguiInvio>false</c:Tool_EseguiInvio>' +
-        `<c:Totale>${euro(f.prezzoCents * f.pezzi)}</c:Totale>` +
+        (f.senzaPrezzo ? '' : `<c:Totale>${euro(f.prezzoCents * f.pezzi)}</c:Totale>`) +
         (f.uscita != null ? `<c:Uscita>${f.uscita}</c:Uscita>` : '') +
         (varianti.length
             ? '<c:Varianti>' + varianti.map((v) => '<c:PMBRigaVariante>' +
@@ -1182,7 +1192,7 @@ function rigaVivaXml(f: {
 
 /** La riga com'è in cassa, rimandata col suo IdGestionale e i campi da
  *  cambiare (come nelle prove 5a e 5c). */
-function rigaEsistenteXml(r: PassepartoutRigaComanda, cambia: { pezzi?: number; prezzoCents?: number; daCancellare?: boolean }): string {
+function rigaEsistenteXml(r: PassepartoutRigaComanda, cambia: { pezzi?: number; prezzoCents?: number; daCancellare?: boolean; prezzoDellaCassa?: boolean }): string {
     return rigaVivaXml({
         articolo: r.articolo,
         daCancellare: cambia.daCancellare,
@@ -1190,6 +1200,7 @@ function rigaEsistenteXml(r: PassepartoutRigaComanda, cambia: { pezzi?: number; 
         idRiga: r.idGestionale,
         pezzi: cambia.pezzi ?? Math.round(r.pezzi ?? 1),
         prezzoCents: cambia.prezzoCents ?? Math.round((r.prezzo ?? 0) * 100),
+        senzaPrezzo: cambia.prezzoDellaCassa,
         uscita: r.uscita,
     });
 }
@@ -1250,8 +1261,11 @@ export async function scriviComandaViva(
                 continue;
             }
             const cambiaPezzi = Math.round(inCassa.pezzi ?? 0) !== pezzi;
-            const cambiaPrezzo = Math.round((inCassa.prezzo ?? 0) * 100) !== r.prezzoCents;
-            if (cambiaPezzi || cambiaPrezzo) xmlRighe.push(rigaEsistenteXml(inCassa, { pezzi, prezzoCents: r.prezzoCents }));
+            // Il prezzo della cassa non si confronta: è suo.
+            const cambiaPrezzo = !r.prezzoDellaCassa && Math.round((inCassa.prezzo ?? 0) * 100) !== r.prezzoCents;
+            if (cambiaPezzi || cambiaPrezzo) {
+                xmlRighe.push(rigaEsistenteXml(inCassa, r.prezzoDellaCassa ? { pezzi, prezzoDellaCassa: true } : { pezzi, prezzoCents: r.prezzoCents }));
+            }
             esiti.set(r.chiave, { chiave: r.chiave, idRiga: idNoto, statoEnum: inCassa.statoEnum ?? null });
             continue;
         }
@@ -1268,9 +1282,12 @@ export async function scriviComandaViva(
         }
         // Sull'articolo generico il nome è quello del CRM; sugli articoli
         // della cassa la descrizione la completa la cassa dal catalogo.
-        const descrizione = r.coperto || art === generico || art?.codice == null
-            ? testoPerCassa(r.coperto ? 'Coperto' : r.descrizione, 60) || 'Voce'
-            : null;
+        // Il coperto della cassa prende anche la descrizione dal suo listino.
+        const descrizione = r.prezzoDellaCassa && art?.codice
+            ? null
+            : r.coperto || art === generico || art?.codice == null
+                ? testoPerCassa(r.coperto ? 'Coperto' : r.descrizione, 60) || 'Voce'
+                : null;
         // Il coperto senza uscita: in cassa sta sull'uscita 0 (prova 1).
         const uscita = r.coperto ? null : r.uscita;
         xmlRighe.push(rigaVivaXml({
@@ -1278,6 +1295,7 @@ export async function scriviComandaViva(
             descrizione,
             pezzi,
             prezzoCents: r.prezzoCents,
+            senzaPrezzo: r.prezzoDellaCassa === true && !!art?.codice,
             coperto: r.coperto,
             uscita,
             varianti: r.varianti,
@@ -1334,9 +1352,36 @@ export async function scriviComandaViva(
         const trovata = i >= 0 ? nuove.splice(i, 1)[0] : null;
         esiti.set(a.chiave, { chiave: a.chiave, idRiga: trovata?.idGestionale ?? null, statoEnum: trovata?.statoEnum ?? null });
     }
-    for (const r of dopo?.righe ?? []) {
-        for (const e of esiti.values()) {
-            if (e.idRiga === r.idGestionale && !e.sparita) e.statoEnum = r.statoEnum ?? e.statoEnum;
+    const aggiornaStati = (c: PassepartoutComanda | null) => {
+        for (const r of c?.righe ?? []) {
+            for (const e of esiti.values()) {
+                if (e.idRiga === r.idGestionale && !e.sparita) e.statoEnum = r.statoEnum ?? e.statoEnum;
+            }
+        }
+    };
+    aggiornaStati(dopo);
+
+    // 5. Le uscite lanciate nel CRM, mandate in produzione dalla cassa (fase
+    //    3, «stampa: la cassa»). La cassa manda l'uscita intera: anche le
+    //    righe di palmare e cassa di quell'uscita non ancora mandate, come il
+    //    suo «Invia uscita» (prova 4: le uscite dopo restano in attesa).
+    //    Un'uscita già partita dalla cassa (il suo «Invia», mentre la
+    //    scrittura del CRM era in sospeso) non si rimanda: la cassa non
+    //    ristampa le righe ma conta un invio in più (prova del 09/10 sulla
+    //    demo). Risulta mandata lo stesso.
+    const uscite = [...new Set((p.inviaUscite ?? []).filter((u) => Number.isInteger(u) && u > 0))].sort((a, b) => a - b);
+    const giaPartita = (u: number) => {
+        const righe = (dopo?.righe ?? []).filter((r) => (r.uscita ?? 0) === u);
+        return righe.length > 0 && righe.every((r) => ['InProduzione', 'Fatto', 'Cancellato'].includes(r.statoEnum ?? ''));
+    };
+    const daMandare = uscite.filter((u) => !giaPartita(u));
+    const inviate = idComanda != null ? uscite : [];
+    if (daMandare.length > 0 && idComanda != null) {
+        await inviaProduzioneComanda({ idComanda, inviaTutto: false, uscite: daMandare });
+        const riletta = await getComanda(idComanda);
+        if (riletta) {
+            dopo = riletta;
+            aggiornaStati(dopo);
         }
     }
 
@@ -1346,6 +1391,7 @@ export async function scriviComandaViva(
         chiusa: false,
         righe: p.righe.map((r) => esiti.get(r.chiave) ?? { chiave: r.chiave, idRiga: null, statoEnum: null }),
         totaleCassaCents: totaleDi(dopo),
+        ...(inviate.length > 0 ? { inviate } : {}),
     };
 }
 

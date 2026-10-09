@@ -95,7 +95,11 @@ export const ComandeInCassa: React.FC<Props> = ({ showToast }) => {
               onChange={(e) => salva({ stampa: e.target.value as PpChi })}
             >
               <option value="cassa">{t('pp.vivoByCassa')}</option>
-              <option value="crm">{t('pp.vivoByCrm')}</option>
+              {/* La cassa, chiudendo, manderebbe in produzione le righe del
+                  CRM una seconda volta: la stampa del CRM vuole il suo conto. */}
+              <option value="crm" disabled={stato.conto !== 'crm'}>
+                {stato.conto === 'crm' ? t('pp.vivoByCrm') : t('pp.vivoByCrmBillToo')}
+              </option>
             </select>
           </Field>
 
@@ -107,8 +111,11 @@ export const ComandeInCassa: React.FC<Props> = ({ showToast }) => {
               disabled={busy}
               onChange={(e) => salva({ conto: e.target.value as PpChi })}
             >
-              <option value="cassa">{t('pp.vivoByCassa')}</option>
-              <option value="crm">{t('pp.vivoByCrm')}</option>
+              <option value="cassa" disabled={stato.stampa === 'crm'}>{t('pp.vivoByCassa')}</option>
+              {/* Il conto del CRM sugli ordini in cassa arriva con la fase 4c. */}
+              <option value="crm" disabled={stato.conto !== 'crm'}>
+                {stato.conto === 'crm' ? t('pp.vivoByCrm') : t('pp.vivoByCrmSoon')}
+              </option>
             </select>
           </Field>
 

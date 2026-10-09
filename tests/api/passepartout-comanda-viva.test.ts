@@ -4,8 +4,8 @@ import type { AddressInfo } from 'node:net';
 import { Client } from 'pg';
 import { io as ioClient, type Socket } from 'socket.io-client';
 import { api, bearer, ownerToken } from './helpers';
-import { differenza, righeDesiderate, uscitaPerCassa, variantiPerCassa } from '../../services/passepartoutComandeVive';
-import { PassepartoutError, scriviComandaViva, type EsitoComandaViva, type MemoriaComandaViva } from '../../services/passepartoutService';
+import { differenza, righeDesiderate, uscitaPerCassa, usciteDaInviare, variantiPerCassa } from '../../services/passepartoutComandeVive';
+import { PassepartoutError, getComanda, scriviComandaViva, type EsitoComandaViva, type MemoriaComandaViva } from '../../services/passepartoutService';
 
 // Comanda viva, fase 2: gli ordini del CRM nella comanda in cassa del
 // tavolo vero. Due livelli: le righe (cosa va in cassa e la differenza con
@@ -80,6 +80,39 @@ describe('righe della comanda viva', () => {
         expect(per['oi:3']).toMatchObject({ idRiga: 103, prezzoCents: 900 });
         expect(per['oi:4']).toMatchObject({ idRiga: 104, cancella: true });
     });
+
+    it('conto della cassa: il coperto ha il numero dei coperti e il prezzo della cassa', () => {
+        const [cop] = righeDesiderate([riga({ id: 2, line_kind: 'COVER', qty: 3, unit_price_cents: 250 })], 3, false, { copertoDellaCassa: true });
+        expect(cop).toMatchObject({ chiave: 'coperto', coperto: true, pezzi: 3, prezzoCents: 0, prezzoDellaCassa: true });
+        const [senza] = righeDesiderate([riga({ id: 3 })], 2, false, { copertoDellaCassa: true });
+        expect(senza).toMatchObject({ chiave: 'coperto', pezzi: 2, prezzoDellaCassa: true });
+        // Sul tavolo del palmare il coperto resta della cassa e il CRM non lo scrive.
+        expect(righeDesiderate([riga({ id: 3 })], 2, true, { copertoDellaCassa: true }).map((r) => r.chiave)).toEqual(['oi:3']);
+    });
+
+    it('chi stampa: le uscite lanciate le manda la cassa; quella con righe stampate dal CRM resta del CRM', () => {
+        const lanciata = '2026-10-08T20:00:00Z';
+        const desiderate = righeDesiderate([
+            riga({ id: 1, course_no: 1, fired_at: lanciata }),
+            riga({ id: 2, course_no: 99, fired_at: lanciata }),
+            riga({ id: 3, course_no: 2, fired_at: lanciata }),
+            riga({ id: 4, course_no: 2, fired_at: lanciata }),
+            riga({ id: 5, course_no: 3 }),
+            riga({ id: 6, course_no: 4, fired_at: lanciata }),
+        ], 0, false);
+        const scritta = { pp_riga_id: 100, pezzi_scritti: 1, prezzo_cents_scritto: 1000, sparita: false };
+        expect(usciteDaInviare(desiderate, [
+            { chiave: 'oi:3', ...scritta, stampata_crm: true },
+            { chiave: 'oi:6', ...scritta, inviata: true },
+        ])).toEqual({
+            // Il Bar va sull'uscita 1 della cassa, come le portate della 1.
+            cassa: [1],
+            // La 2 ha già una riga stampata dal CRM: il resto lo stampa il CRM.
+            crm: [4],
+        });
+        // Non lanciata, o già mandata: niente da mandare.
+        expect(usciteDaInviare(righeDesiderate([riga({ id: 5, course_no: 3 })], 0, false), [])).toEqual({ cassa: [], crm: [] });
+    });
 });
 
 // ---------------------------------------------------------------------------
@@ -93,6 +126,7 @@ interface ComandaFinta { id: number; note: string; sala: string; tavolo: string;
 const CATALOGO = [
     { id: 1, codice: 'Coperti', descrizione: 'Coperti', prezzo: 3 },
     { id: 11, codice: 'Tagliatelle Silana', descrizione: 'Tagliatelle Silana', prezzo: 13 },
+    { id: 12, codice: 'Gnocchi Silani', descrizione: 'Gnocchi Silani', prezzo: 12 },
     { id: 500, codice: 'VARIE', descrizione: 'Varie', prezzo: 0 },
 ];
 
@@ -101,6 +135,10 @@ function cassaFinta() {
     let prossima = 80_000;
     let prossimaRiga = 900_000;
     const put: string[] = [];
+    // Gli invii in produzione (InviaProduzioneComanda), e i tavoli su cui la
+    // cassa rifiuta la scrittura (come la comanda vecchia della demo).
+    const invii: Array<{ id: number; uscite: number[] }> = [];
+    const rifiuta = new Set<string>();
     const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
     const un = (s: string) => s.replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&amp;/g, '&');
     const campo = (xml: string, nome: string) => {
@@ -144,7 +182,8 @@ function cassaFinta() {
                     else esistente.stato = 'Cancellato';
                 } else {
                     esistente.pezzi = Number(campo(r, 'Pezzi'));
-                    esistente.prezzo = Number(campo(r, 'Prezzo'));
+                    // Senza prezzo resta quello che c'è, come la cassa vera.
+                    if (campo(r, 'Prezzo') != null) esistente.prezzo = Number(campo(r, 'Prezzo'));
                 }
                 continue;
             }
@@ -152,7 +191,10 @@ function cassaFinta() {
             const coperto = campo(r, 'TipoEnum') === 'Coperto';
             c.righe.push({
                 id: ++prossimaRiga, articolo, descrizione: campo(r, 'Descrizione') ?? CATALOGO.find((a) => a.codice === articolo)?.descrizione ?? articolo,
-                pezzi: Number(campo(r, 'Pezzi')), prezzo: Number(campo(r, 'Prezzo')), uscita: coperto ? 0 : Number(campo(r, 'Uscita') ?? 1),
+                // Senza prezzo la cassa prende quello del suo listino (prova del 07/10).
+                pezzi: Number(campo(r, 'Pezzi')),
+                prezzo: campo(r, 'Prezzo') != null ? Number(campo(r, 'Prezzo')) : (CATALOGO.find((a) => a.codice === articolo)?.prezzo ?? 0),
+                uscita: coperto ? 0 : Number(campo(r, 'Uscita') ?? 1),
                 stato: 'Nuovo', tipo: coperto ? 'Coperto' : 'Semplice', varianti,
             });
         }
@@ -186,11 +228,26 @@ function cassaFinta() {
                 const c = [...comande.values()].find((x) => x.tavolo === tavolo && !x.pagata);
                 return ok(c ? busta(op, comandaXml(c)) : nil(op));
             }
-            if (op === 'PutComanda') return ok(busta(op, comandaXml(putComanda(body))));
+            if (op === 'PutComanda') {
+                const tavolo = /<c:Tavolo>([^<]*)<\/c:Tavolo>/.exec(body)?.[1];
+                if (tavolo && rifiuta.has(tavolo)) {
+                    return ok(`<s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/"><s:Body><s:Fault><faultstring>Errore comanda: System.NullReferenceException</faultstring></s:Fault></s:Body></s:Envelope>`);
+                }
+                return ok(busta(op, comandaXml(putComanda(body))));
+            }
+            if (op === 'InviaProduzioneComanda') {
+                const id = Number(/<idComanda>(\d+)<\/idComanda>/.exec(body)?.[1]);
+                const uscite = [...body.matchAll(/<a:int>(\d+)<\/a:int>/g)].map((m) => Number(m[1]));
+                invii.push({ id, uscite });
+                for (const r of comande.get(id)?.righe ?? []) {
+                    if (r.stato === 'Nuovo' && r.tipo !== 'Coperto' && (uscite.length === 0 || uscite.includes(r.uscita))) r.stato = 'InProduzione';
+                }
+                return ok(nil(op));
+            }
             ok(`<s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/"><s:Body><s:Fault><faultstring>op non prevista: ${op}</faultstring></s:Fault></s:Body></s:Envelope>`);
         });
     });
-    return { server, comande, put, sulTavolo: (t: string) => [...comande.values()].find((c) => c.tavolo === t && !c.pagata) ?? null };
+    return { server, comande, put, invii, rifiuta, sulTavolo: (t: string) => [...comande.values()].find((c) => c.tavolo === t && !c.pagata) ?? null };
 }
 
 describe('ordini del CRM nella comanda in cassa', () => {
@@ -439,5 +496,357 @@ describe('ordini del CRM nella comanda in cassa', () => {
             idArticoloGenerico: null,
         })).rejects.toThrow(/non ha un articolo in cassa/);
         expect(cassa.sulTavolo('V9')).toBeNull();
+    });
+});
+
+// ---------------------------------------------------------------------------
+// Fase 3: chi stampa in cucina. Con «stampa: la cassa» e un agente che sa
+// mandare in produzione ('comanda-viva-invio'), le uscite lanciate nel CRM
+// le manda la cassa e il CRM non stampa; se la cassa non può, stampa il CRM
+// e quell'uscita resta sua.
+// ---------------------------------------------------------------------------
+describe('ordini del CRM in cassa: chi stampa in cucina', () => {
+    let token: string;
+    let db: Client;
+    let socket: Socket | null = null;
+    const cassa = cassaFinta();
+    const tavoli: Record<string, number> = {};
+    const ordini: number[] = [];
+    let piatto: number;
+    let dolce: number;
+    let stationId: number;
+    let comandePrima = false;
+    let firePrima: string | null = null;
+    const memoria = new Map<string, MemoriaComandaViva>();
+    // La scrittura in sospeso (tavolo aperto nel Menu Client della demo, 09/10):
+    // la chiamata dell'agente scade, ma la cassa la fa lo stesso, senza invio.
+    let inSospeso = false;
+
+    const finoA = async (cond: () => Promise<boolean>, descr: string, timeoutMs = 8_000) => {
+        const deadline = Date.now() + timeoutMs;
+        for (;;) {
+            if (await cond()) return;
+            if (Date.now() > deadline) throw new Error(`Timeout: ${descr}`);
+            await sleep(150);
+        }
+    };
+    const viva = async (orderId: number) => (await db.query(
+        `SELECT stato, pp_comanda_id, error FROM passepartout_comande_vive WHERE tenant_id = 1 AND order_id = $1`, [orderId]
+    )).rows[0];
+    const righeVive = async (orderId: number) => (await db.query(
+        `SELECT chiave, pp_riga_id, inviata, stampata_crm FROM passepartout_righe_vive WHERE tenant_id = 1 AND order_id = $1 AND chiave LIKE 'oi:%' ORDER BY chiave`, [orderId]
+    )).rows;
+    const stampe = async (orderId: number) => (await db.query(
+        `SELECT kind, payload FROM print_jobs WHERE tenant_id = 1 AND (payload->>'order_id')::int = $1 ORDER BY id`, [orderId]
+    )).rows;
+    const capacita = async () => (await api().get('/passepartout/status').set(bearer(token))).body.capabilities ?? [];
+    const saluta = async (caps: string[]) => {
+        socket!.emit('agent:hello', { hostname: 'agente-comanda-viva-3', capabilities: caps });
+        await finoA(async () => {
+            const c = await capacita();
+            return caps.every((x) => c.includes(x)) && c.length === caps.length;
+        }, `agente con ${caps.join(', ')}`);
+    };
+    const nuovoOrdine = async (tavolo: string) => {
+        const o = await api().post('/orders').set(bearer(token)).send({ table_id: tavoli[tavolo], covers: 2 });
+        expect(o.status).toBe(201);
+        ordini.push(o.body.order.id);
+        return o.body.order.id as number;
+    };
+    const batti = async (orderId: number, items: Array<Record<string, unknown>>) => {
+        expect((await api().post(`/orders/${orderId}/items`).set(bearer(token)).send({ items })).status).toBe(201);
+        expect((await api().post(`/orders/${orderId}/send`).set(bearer(token)).send({})).status).toBe(200);
+    };
+    const lancia = async (orderId: number, uscita: number) => {
+        const r = await api().post(`/orders/${orderId}/courses/${uscita}/fire`).set(bearer(token)).send({});
+        expect(r.status).toBe(200);
+    };
+
+    beforeAll(async () => {
+        token = await ownerToken();
+        db = new Client({ connectionString: process.env.DATABASE_URL || 'postgresql://localhost/ristotest_api' });
+        await db.connect();
+        await new Promise<void>((resolve) => cassa.server.listen(0, '127.0.0.1', () => resolve()));
+        process.env.PASSEPARTOUT_WS_URL = `http://127.0.0.1:${(cassa.server.address() as AddressInfo).port}/AdapterWS`;
+        process.env.PASSEPARTOUT_WS_USER = 'utente-prova';
+        process.env.PASSEPARTOUT_WS_PASSWORD = 'segreto-prova';
+
+        await api().put('/settings/entitlements').set(bearer(token)).send({ passepartout: true });
+        comandePrima = (await api().get('/settings/features').set(bearer(token))).body.table_orders_enabled === true;
+        await api().put('/settings/features').set(bearer(token)).send({ table_orders_enabled: true });
+        firePrima = (await db.query(`SELECT text_value FROM app_settings WHERE tenant_id = 1 AND key = 'course_fire_mode'`)).rows[0]?.text_value ?? null;
+        // Le uscite si lanciano a mano: il test decide quando.
+        expect((await api().put('/sala/fire-mode').set(bearer(token)).send({ mode: 'MANUAL' })).status).toBe(200);
+
+        // Una partita CON stampante: senza printer i foglietti non si accodano.
+        stationId = Number((await db.query(
+            `INSERT INTO stations (tenant_id, name, printer, sort_order) VALUES (1, 'Cucina Viva Stampa', 'termica-viva', 95) RETURNING id`
+        )).rows[0].id);
+        const room = await api().post('/rooms').set(bearer(token)).send({ name: 'Sala Comanda Viva 3', width: 600, height: 400 });
+        for (const [i, nome] of ['W1', 'W2', 'W3', 'W4', 'W5', 'W6'].entries()) {
+            const t = await api().post('/tables').set(bearer(token)).send({
+                name: `CV${nome}`, shape: 'SQUARE', seats: 4, x: 40 + i * 80, y: 40, room_id: room.body.id, status: 'FREE',
+            });
+            tavoli[nome] = t.body.id;
+            await db.query(
+                `INSERT INTO passepartout_tavoli (table_id, tenant_id, pp_sala, pp_tavolo, origine, confermato)
+                 VALUES ($1, 1, 'TETTOIA', $2, 'manuale', true)`,
+                [t.body.id, nome]
+            );
+        }
+        for (const [nome, prezzo, set] of [
+            ['Gnocchi Viva Stampa', 12, (id: number) => { piatto = id; }],
+            ['Tiramisu Viva Stampa', 6, (id: number) => { dolce = id; }],
+        ] as const) {
+            const d = await api().post('/dishes').set(bearer(token)).send({
+                name: nome, description: null, price: prezzo, category: 'PRIMI', allergens: null, station_id: stationId,
+            });
+            expect(d.status).toBe(201);
+            set(d.body.id);
+        }
+        await db.query(`UPDATE dishes SET external_ref = 'pp:articolo:12' WHERE id = $1`, [piatto]);
+        await db.query(
+            `INSERT INTO passepartout_config (tenant_id, articolo_generico_id) VALUES (1, 500)
+             ON CONFLICT (tenant_id) DO UPDATE SET articolo_generico_id = 500`
+        );
+
+        socket = ioClient(`${process.env.TEST_BASE_URL}/pp-agent`, {
+            auth: { token: AGENT_TOKEN }, transports: ['websocket'], reconnection: false,
+        });
+        socket.on('pp:call', async (payload: any, ack: (r: unknown) => void) => {
+            // Le letture con cui il giro si accorge delle comande chiuse in cassa.
+            if (payload?.op === 'comandeAperte') {
+                return ack({ ok: true, result: [...cassa.comande.values()].filter((c) => !c.pagata).map((c) => ({
+                    idComanda: c.id, tavolo: c.tavolo, sala: c.sala, coperti: c.coperti, idPrenotazione: null, aperta: null, totale: 0,
+                })) });
+            }
+            if (payload?.op === 'comanda') {
+                return ack({ ok: true, result: await getComanda(Number(payload.params?.idGestionale)) });
+            }
+            if (payload?.op !== 'comandaViva') return ack({ ok: false, error: `op non prevista: ${payload?.op}`, kind: 'agent' });
+            try {
+                const p = inSospeso ? { ...payload.params, inviaUscite: undefined } : payload.params;
+                const esito: EsitoComandaViva = await scriviComandaViva(p, memoria.get(p.tag) ?? { idComanda: null, righe: {} });
+                const m = memoria.get(p.tag) ?? { idComanda: null, righe: {} };
+                if (esito.idComanda != null) m.idComanda = esito.idComanda;
+                for (const r of esito.righe) {
+                    if (r.cancellata) delete m.righe[r.chiave];
+                    else if (r.idRiga != null) m.righe[r.chiave] = r.idRiga;
+                }
+                memoria.set(p.tag, m);
+                if (inSospeso) return ack({ ok: false, error: 'Gestionale non raggiungibile (This operation was aborted)', kind: 'gestionale' });
+                ack({ ok: true, result: esito });
+            } catch (err) {
+                ack({ ok: false, error: (err as Error).message, kind: err instanceof PassepartoutError ? 'gestionale' : 'agent' });
+            }
+        });
+        await new Promise<void>((resolve, reject) => {
+            socket!.on('connect', () => resolve());
+            socket!.on('connect_error', reject);
+        });
+        await saluta(['comanda-viva', 'comanda-viva-invio']);
+        const acceso = await api().put('/passepartout/comande-vive/config').set(bearer(token)).send({ enabled: true, stampa: 'cassa', conto: 'cassa' });
+        expect(acceso.status).toBe(200);
+    });
+
+    afterAll(async () => {
+        await api().put('/passepartout/comande-vive/config').set(bearer(token)).send({ enabled: false, stampa: 'cassa', conto: 'cassa' });
+        for (const id of ordini) {
+            await api().delete(`/orders/${id}?forza=1`).set(bearer(token)).send({ motivo: 'fine prova' });
+        }
+        await sleep(300);
+        socket?.close();
+        await db.query(`DELETE FROM print_jobs WHERE tenant_id = 1 AND (payload->>'order_id')::int = ANY($1::int[])`, [ordini]);
+        await db.query(`DELETE FROM passepartout_comande_vive WHERE tenant_id = 1 AND order_id = ANY($1::int[])`, [ordini]);
+        await db.query(`DELETE FROM passepartout_tavoli WHERE tenant_id = 1 AND table_id = ANY($1::int[])`, [Object.values(tavoli)]);
+        await db.query(`UPDATE passepartout_config SET articolo_generico_id = NULL WHERE tenant_id = 1`);
+        await db.query(`UPDATE dishes SET station_id = NULL WHERE tenant_id = 1 AND station_id = $1`, [stationId]);
+        await db.query(`DELETE FROM stations WHERE id = $1`, [stationId]);
+        if (firePrima == null) await db.query(`DELETE FROM app_settings WHERE tenant_id = 1 AND key = 'course_fire_mode'`);
+        else await api().put('/sala/fire-mode').set(bearer(token)).send({ mode: firePrima });
+        await api().put('/settings/features').set(bearer(token)).send({ table_orders_enabled: comandePrima });
+        delete process.env.PASSEPARTOUT_WS_URL;
+        delete process.env.PASSEPARTOUT_WS_USER;
+        delete process.env.PASSEPARTOUT_WS_PASSWORD;
+        await new Promise<void>((resolve) => cassa.server.close(() => resolve()));
+        await db.end();
+    });
+
+    it('«stampa: il CRM» si sceglie solo con «conto: il CRM»', async () => {
+        const salva = (body: Record<string, unknown>) => api().put('/passepartout/comande-vive/config').set(bearer(token)).send(body);
+        const no = await salva({ stampa: 'crm' });
+        expect(no.status).toBe(409);
+        expect(no.body.error).toBe('stampa_crm_senza_conto_crm');
+        expect((await salva({ stampa: 'crm', conto: 'crm' })).status).toBe(200);
+        expect((await salva({ conto: 'cassa' })).status).toBe(409);
+        expect((await salva({ stampa: 'cassa', conto: 'cassa' })).status).toBe(200);
+    });
+
+    let ordineW1: number;
+    it('l\'uscita lanciata nel CRM la manda la cassa, e il CRM non stampa', async () => {
+        const ordine = await nuovoOrdine('W1');
+        ordineW1 = ordine;
+        await batti(ordine, [
+            { dish_id: piatto, qty: 1, course_no: 1 },
+            { dish_id: dolce, qty: 1, course_no: 2 },
+        ]);
+        await finoA(async () => (await viva(ordine))?.stato === 'SCRITTA', 'ordine scritto in cassa');
+        const c = cassa.sulTavolo('W1')!;
+        // Mandato ma non lanciato: in cassa senza invio.
+        expect(cassa.invii.filter((i) => i.id === c.id)).toEqual([]);
+
+        await lancia(ordine, 1);
+        await finoA(async () => cassa.invii.some((i) => i.id === c.id && i.uscite.join() === '1'), 'uscita 1 mandata dalla cassa');
+        await lancia(ordine, 2);
+        await finoA(async () => cassa.invii.some((i) => i.id === c.id && i.uscite.join() === '2'), 'uscita 2 mandata dalla cassa');
+        await finoA(async () => (await righeVive(ordine)).every((r: any) => r.inviata), 'righe segnate come mandate');
+        expect(c.righe.filter((r) => r.tipo !== 'Coperto').every((r) => r.stato === 'InProduzione')).toBe(true);
+        // Nessun foglietto di partita dal CRM.
+        expect(await stampe(ordine)).toEqual([]);
+    });
+
+    it('agente senza invio: stampa il CRM, e quell\'uscita resta del CRM anche dopo', async () => {
+        await saluta(['comanda-viva']);
+        const ordine = await nuovoOrdine('W2');
+        await batti(ordine, [{ dish_id: piatto, qty: 1, course_no: 1 }]);
+        await finoA(async () => (await viva(ordine))?.stato === 'SCRITTA', 'ordine scritto in cassa');
+        await lancia(ordine, 1);
+        expect((await stampe(ordine)).map((j: any) => j.kind)).toEqual(['COMANDA']);
+        expect((await righeVive(ordine))[0]).toMatchObject({ stampata_crm: true });
+
+        // L'agente nuovo torna: la stessa uscita non la manda la cassa (la
+        // ristamperebbe), le righe nuove le stampa ancora il CRM.
+        await saluta(['comanda-viva', 'comanda-viva-invio']);
+        const c = cassa.sulTavolo('W2')!;
+        expect((await api().post(`/orders/${ordine}/items`).set(bearer(token)).send({ items: [{ dish_id: piatto, qty: 2, course_no: 1 }] })).status).toBe(201);
+        // Righe aggiunte a un'uscita già lanciata: partono all'«Invia».
+        expect((await api().post(`/orders/${ordine}/send`).set(bearer(token)).send({})).status).toBe(200);
+        await finoA(async () => (await stampe(ordine)).length === 2, 'riga aggiunta stampata dal CRM');
+        await finoA(async () => (await righeVive(ordine)).length === 2 && (await righeVive(ordine)).every((r: any) => r.pp_riga_id != null), 'righe scritte in cassa');
+        await sleep(300);
+        expect(cassa.invii.filter((i) => i.id === c.id)).toEqual([]);
+    });
+
+    it('se la cassa non prende l\'ordine, dopo un attimo stampa il CRM', async () => {
+        cassa.rifiuta.add('W3');
+        try {
+            const ordine = await nuovoOrdine('W3');
+            await batti(ordine, [{ dish_id: piatto, qty: 1, course_no: 1 }]);
+            await lancia(ordine, 1);
+            await finoA(async () => (await viva(ordine))?.error != null, 'scrittura rifiutata dalla cassa');
+            // Al lancio non ha stampato: la cassa doveva mandarla.
+            expect(await stampe(ordine)).toEqual([]);
+            // Passato il tempo del ripiego, alla prossima modifica stampa il CRM.
+            await sleep(700);
+            await api().patch(`/orders/${ordine}`).set(bearer(token)).send({ covers: 3 });
+            await finoA(async () => (await stampe(ordine)).length === 1, 'stampa di ripiego dal CRM');
+            expect((await righeVive(ordine))[0]).toMatchObject({ stampata_crm: true });
+        } finally {
+            cassa.rifiuta.delete('W3');
+        }
+    });
+
+    it('scrittura in sospeso: il CRM non stampa, e quando passa l\'uscita la manda la cassa', async () => {
+        inSospeso = true;
+        let ordine: number;
+        try {
+            ordine = await nuovoOrdine('W5');
+            await batti(ordine, [{ dish_id: piatto, qty: 1, course_no: 1 }]);
+            await lancia(ordine, 1);
+            await finoA(async () => ((await viva(ordine))?.error ?? '').includes('aborted'), 'scrittura senza risposta');
+            // Passato il tempo del ripiego la cassa risponde: niente stampa dal CRM.
+            await sleep(700);
+            await api().patch(`/orders/${ordine}`).set(bearer(token)).send({ covers: 3 });
+            await sleep(800);
+            expect(await stampe(ordine)).toEqual([]);
+        } finally {
+            inSospeso = false;
+        }
+        // Il tentativo dopo (qui subito invece che fra un minuto) trova le righe e manda l'uscita.
+        await db.query(`UPDATE passepartout_comande_vive SET next_at = now() WHERE tenant_id = 1 AND order_id = $1`, [ordine]);
+        await api().patch(`/orders/${ordine}`).set(bearer(token)).send({ covers: 2 });
+        const c = cassa.sulTavolo('W5')!;
+        await finoA(async () => cassa.invii.some((i) => i.id === c.id && i.uscite.join() === '1'), 'uscita 1 mandata dalla cassa');
+        await finoA(async () => (await righeVive(ordine)).every((r: any) => r.inviata), 'righe segnate come mandate');
+        expect(c.righe.filter((r) => r.articolo !== 'Coperti')).toHaveLength(1);
+        expect(await stampe(ordine)).toEqual([]);
+    });
+
+    it('la cassa ha già mandato l\'uscita dal suo «Invia»: il CRM la segna mandata, non la stampa e non la rimanda', async () => {
+        const ordine = await nuovoOrdine('W6');
+        await batti(ordine, [{ dish_id: piatto, qty: 1, course_no: 1 }]);
+        await finoA(async () => (await viva(ordine))?.stato === 'SCRITTA', 'ordine scritto in cassa');
+        const c = cassa.sulTavolo('W6')!;
+        inSospeso = true;
+        try {
+            await lancia(ordine, 1);
+            await finoA(async () => ((await viva(ordine))?.error ?? '').includes('aborted'), 'invio senza risposta');
+            // Intanto in cassa premono «Invia».
+            for (const r of c.righe) if (r.tipo !== 'Coperto') r.stato = 'InProduzione';
+            await sleep(700);
+            await api().patch(`/orders/${ordine}`).set(bearer(token)).send({ covers: 3 });
+            await finoA(async () => (await righeVive(ordine)).every((r: any) => r.inviata), 'righe segnate come mandate');
+        } finally {
+            inSospeso = false;
+        }
+        await db.query(`UPDATE passepartout_comande_vive SET next_at = now() WHERE tenant_id = 1 AND order_id = $1`, [ordine]);
+        await api().patch(`/orders/${ordine}`).set(bearer(token)).send({ covers: 2 });
+        await finoA(async () => (await viva(ordine))?.error == null, 'scrittura riuscita');
+        expect(await stampe(ordine)).toEqual([]);
+        expect(cassa.invii.filter((i) => i.id === c.id)).toEqual([]);
+    });
+
+    it('l\'agente non rimanda un\'uscita che la cassa ha già mandato', async () => {
+        const base = {
+            tag: 'sympotia-ordine:prova-guardia', idComanda: null, sala: 'TETTOIA', tavolo: 'W9', coperti: 0, idArticoloGenerico: 500,
+            righe: [{ chiave: 'oi:1', idRiga: null, idArticolo: 12, descrizione: 'Gnocchi', pezzi: 1, prezzoCents: 1200, uscita: 1, varianti: [] }],
+        };
+        const scritta = await scriviComandaViva(base, { idComanda: null, righe: {} });
+        const c = cassa.comande.get(scritta.idComanda!)!;
+        for (const r of c.righe) r.stato = 'InProduzione';
+        const esito = await scriviComandaViva(
+            { ...base, idComanda: scritta.idComanda, righe: [], inviaUscite: [1] },
+            { idComanda: scritta.idComanda, righe: { 'oi:1': scritta.righe[0].idRiga! } },
+        );
+        expect(esito.inviate).toEqual([1]);
+        expect(cassa.invii.filter((i) => i.id === c.id)).toEqual([]);
+        c.pagata = true;
+    });
+
+    it('la comanda chiusa in cassa chiude l\'ordine nel CRM, senza un conto del CRM', async () => {
+        const c = cassa.sulTavolo('W1')!;
+        c.pagata = true;
+        // Il giro passa a ogni modifica di un ordine del ristorante.
+        await api().patch(`/orders/${ordini[ordini.length - 1]}`).set(bearer(token)).send({ covers: 4 });
+        await finoA(async () => (await viva(ordineW1))?.stato === 'CHIUSA', 'ordine segnato chiuso in cassa');
+        const o = (await db.query(`SELECT status, closed_by_user_id, table_bill_id FROM orders WHERE id = $1`, [ordineW1])).rows[0];
+        expect(o).toMatchObject({ status: 'CLOSED', closed_by_user_id: null, table_bill_id: null });
+        // Gli altri, con la comanda ancora aperta in cassa, restano aperti.
+        const w2 = ordini[ordini.indexOf(ordineW1) + 1];
+        expect((await db.query(`SELECT status FROM orders WHERE id = $1`, [w2])).rows[0].status).toBe('OPEN');
+    });
+
+    it('conto della cassa: coperto della cassa, e chiudendo dal CRM il conto è la comanda in cassa', async () => {
+        await saluta(['comanda-viva', 'comanda-viva-invio', 'comanda-viva-coperto']);
+        const ordine = await nuovoOrdine('W4');
+        await batti(ordine, [{ dish_id: piatto, qty: 1, course_no: 1 }]);
+        await finoA(async () => (await viva(ordine))?.stato === 'SCRITTA', 'ordine scritto in cassa');
+        const c = cassa.sulTavolo('W4')!;
+        // Il coperto è quello della cassa: due coperti al prezzo del suo listino.
+        expect(c.righe.find((r) => r.tipo === 'Coperto')).toMatchObject({ articolo: 'Coperti', pezzi: 2, prezzo: 3 });
+        const scritto = cassa.put.find((b) => b.includes('<c:Tavolo>W4</c:Tavolo>'))!;
+        const copertoXml = /<c:PMBRigaComanda>(?:(?!<\/c:PMBRigaComanda>)[\s\S])*<c:TipoEnum>Coperto<\/c:TipoEnum>[\s\S]*?<\/c:PMBRigaComanda>/.exec(scritto)![0];
+        expect(copertoXml).not.toContain('<c:Prezzo>');
+        // In cassa battono anche una tisana.
+        c.righe.push({ id: 990_001, articolo: 'VARIE', descrizione: 'Tisana', pezzi: 1, prezzo: 1.5, uscita: 1, stato: 'Nuovo', tipo: 'Semplice', varianti: [] });
+
+        const chiusa = await api().post(`/orders/${ordine}/close`).set(bearer(token)).send({});
+        expect(chiusa.status).toBe(200);
+        // 2 coperti × 3 € + gnocchi 12 € + tisana 1,50 €.
+        expect(chiusa.body.bill).toMatchObject({ external_ref: `pp:comanda:${c.id}`, total_cents: 600 + 1200 + 150, residual_cents: 1950 });
+        expect((chiusa.body.bill.items as any[]).map((i) => i.name)).toEqual(expect.arrayContaining(['Tisana']));
+        const o = (await db.query(`SELECT status, table_bill_id FROM orders WHERE id = $1`, [ordine])).rows[0];
+        expect(o).toMatchObject({ status: 'CLOSED', table_bill_id: chiusa.body.bill.id });
+        await db.query(`DELETE FROM table_bills WHERE id = $1`, [chiusa.body.bill.id]);
     });
 });

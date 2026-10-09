@@ -22,20 +22,44 @@
 // periodico la recupera. Un tentativo fallito si rifà senza doppioni: le
 // righe scritte di cui la risposta è andata persa le ricorda l'agente.
 //
-// Questa fase scrive le righe e basta: niente invio in produzione dalla
-// cassa (fase 3) e niente conto dalla cassa (fase 4). Solo cloud: con i
-// conti in sala (nodo) il giro salta il ristorante, come lo specchio.
+// Fase 3, «stampa: la cassa»: le uscite lanciate nel CRM le manda in
+// produzione la cassa (InviaProduzioneComanda per uscita), e il CRM non
+// stampa i suoi foglietti di partita per quell'ordine; il monitor resta. La
+// cassa manda sempre l'uscita intera, e alla chiusura dal suo schermo manda
+// anche le righe del CRM mai partite (collaudo sulla demo, 08/10): per
+// questo «stampa: il CRM» si sceglie solo con «conto: il CRM». Se la cassa
+// non può mandare (agente giù, ordine fermo), dopo un'attesa breve stampa il
+// CRM e quell'uscita resta sua: mandata dalla cassa, la ristamperebbe.
+// Prima di stampare il CRM chiede alla cassa: se risponde, le righe le manda
+// lei (doppia stampa sulla demo il 09/10: tavolo aperto nel Menu Client, la
+// scrittura arrivata dopo 11 minuti e mandata dalla cassa, il CRM che
+// l'aveva già stampata). La cassa non accetta righe segnate «già mandate»
+// (500 sul cambio di StatoEnum, prova del 09/10): una riga stampata dal CRM
+// che finisce in cassa non mandata riparte al primo «Invia» della cassa.
+// Niente conto dalla cassa (fase 4). Solo cloud: con i conti in sala (nodo)
+// il giro salta il ristorante, come lo specchio.
 
 import { queryWithRetry, runAsPlatform, runWithTenantContext, withTenant } from '../db.js';
 import { isFeatureEnabledForTenant } from './entitlements.js';
 import { callPassepartout, connectedPassepartoutTenants, passepartoutAgentSupports, PassepartoutBridgeError } from './passepartoutBridge.js';
-import type { EsitoComandaViva, ParametriComandaViva, RigaViva, VarianteViva } from './passepartoutService.js';
+import type { EsitoComandaViva, ParametriComandaViva, PassepartoutComanda, PassepartoutComandaAperta, RigaViva, VarianteViva } from './passepartoutService.js';
 import { BAR_COURSE_NO, DESSERT_COURSE_NO } from '../utils/courses.js';
 
 const CAPACITA = 'comanda-viva';
+const CAPACITA_INVIO = 'comanda-viva-invio';
+const CAPACITA_COPERTO = 'comanda-viva-coperto';
 const MAX_TENTATIVI = 8;
+// Ogni quanto, al massimo, si chiede alla cassa quali comande sono aperte
+// per accorgersi di quelle chiuse da lei.
+const CHIUSE_IN_CASSA_OGNI_MS = () => Number(process.env.PASSEPARTOUT_COMANDE_VIVE_CHIUSE_MS ?? '') || 15_000;
+// Quanto si aspetta la cassa prima di stampare dal CRM un'uscita lanciata.
+const STAMPA_DI_RIPIEGO_DOPO_MS = () => Number(process.env.PASSEPARTOUT_COMANDE_VIVE_RIPIEGO_MS) || 45_000;
 // Un problema di configurazione non passa ritentando.
 const SENZA_ARTICOLO = 'non ha un articolo in cassa';
+// Una scrittura senza risposta (cassa lenta, tavolo aperto nel Menu Client)
+// la cassa può ancora farla: le sue righe non le stampa il CRM finché la
+// cassa risponde. Un rifiuto esplicito invece non arriverà mai in cassa.
+const SCRITTURA_IN_SOSPESO = /non raggiungibile|Nessuna risposta dall'agente|aborted|timeout/i;
 const STATI_INVIATA = new Set(['InProduzione', 'Fatto', 'Cancellato']);
 
 export interface StatoComandaViva {
@@ -53,6 +77,12 @@ export interface ComandeViveDeps {
     /** Lo stato in cassa di un ordine, per l'etichetta nel palmare
      *  (evento 'passepartout:comanda-viva'). */
     avvisa: (tenantId: number, stato: StatoComandaViva) => void;
+    /** I foglietti di partita stampati dal CRM per righe lanciate che la
+     *  cassa non ha mandato (ripiego): stampa e segna stampata_crm. */
+    stampaDalCrm: (tenantId: number, orderId: number, orderItemIds: number[]) => Promise<void>;
+    /** L'ordine del CRM la cui comanda è stata chiusa in cassa: si chiude
+     *  senza conto del CRM (il conto l'ha fatto la cassa). true se chiuso. */
+    chiudiOrdineChiusoInCassa: (tenantId: number, orderId: number) => Promise<boolean>;
 }
 
 let deps: ComandeViveDeps | null = null;
@@ -92,6 +122,8 @@ export function variantiPerCassa(modifiers: unknown, note: string | null): Varia
  *  quelli già scritti. */
 interface Desiderata extends RigaViva {
     orderItemId: number | null;
+    /** Lanciata nel CRM: la cucina la deve avere. */
+    lanciata: boolean;
 }
 
 /** L'ordine com'è adesso, nelle righe che la cassa deve avere. */
@@ -99,9 +131,13 @@ export function righeDesiderate(
     righe: Array<{
         id: number; line_kind: string; qty: number; unit_price_cents: number; modifiers: unknown;
         note: string | null; course_no: number; name_snapshot: string; weight_grams: number | null; external_ref: string | null;
+        fired_at?: string | Date | null;
     }>,
     coperti: number,
     palmare: boolean,
+    /** «Conto: la cassa»: il coperto lo prezza la cassa col suo listino; il
+     *  CRM ne passa solo il numero (scelta dell'utente, 09/10). */
+    opzioni: { copertoDellaCassa?: boolean } = {},
 ): Desiderata[] {
     const out: Desiderata[] = [];
     let copertoPezzi = 0;
@@ -116,7 +152,7 @@ export function righeDesiderate(
         if (kind === 'SERVICE') {
             if (palmare) continue;
             out.push({
-                chiave: 'servizio', orderItemId: null, idRiga: null, idArticolo: null,
+                chiave: 'servizio', orderItemId: null, lanciata: false, idRiga: null, idArticolo: null,
                 descrizione: String(r.name_snapshot || 'Servizio'), pezzi: 1,
                 prezzoCents: Math.round(Number(r.unit_price_cents) * (Number(r.qty) || 1)),
                 uscita: 1, varianti: [], soloComandaNostra: true,
@@ -130,6 +166,7 @@ export function righeDesiderate(
         out.push({
             chiave: `oi:${r.id}`,
             orderItemId: Number(r.id),
+            lanciata: r.fired_at != null,
             idRiga: null,
             idArticolo: ref ? Number(ref[1]) : null,
             // Al peso il prezzo della riga è già quello dei grammi pesati.
@@ -145,11 +182,13 @@ export function righeDesiderate(
     // nessuna riga coperto, la cassa aggiunge la sua al suo prezzo (prova
     // del 06/10) e il totale non tornerebbe più.
     if (!palmare && (copertoPezzi > 0 || coperti > 0)) {
+        const dellaCassa = opzioni.copertoDellaCassa === true;
         out.unshift({
-            chiave: 'coperto', orderItemId: null, idRiga: null, idArticolo: null, descrizione: 'Coperto',
+            chiave: 'coperto', orderItemId: null, lanciata: false, idRiga: null, idArticolo: null, descrizione: 'Coperto',
             pezzi: copertoPezzi > 0 ? copertoPezzi : coperti,
-            prezzoCents: copertoPezzi > 0 ? (copertoPrezzo ?? 0) : 0,
+            prezzoCents: dellaCassa ? 0 : copertoPezzi > 0 ? (copertoPrezzo ?? 0) : 0,
             uscita: 1, varianti: [], coperto: true, soloComandaNostra: true,
+            ...(dellaCassa ? { prezzoDellaCassa: true } : {}),
         });
     }
     return out;
@@ -161,6 +200,10 @@ interface Scritta {
     pezzi_scritti: number;
     prezzo_cents_scritto: number | null;
     sparita: boolean;
+    /** Mandata in produzione dalla cassa. */
+    inviata?: boolean;
+    /** Stampata dal CRM per ripiego: la sua uscita resta del CRM. */
+    stampata_crm?: boolean;
 }
 
 /** La differenza fra l'ordine e quello che il CRM ha già scritto in cassa:
@@ -181,18 +224,41 @@ export function differenza(desiderate: Desiderata[], scritte: Scritta[]): Deside
     for (const s of perChiave.values()) {
         if (s.sparita || s.pp_riga_id == null) continue;
         out.push({
-            chiave: s.chiave, orderItemId: null, idRiga: s.pp_riga_id, idArticolo: null, descrizione: '',
+            chiave: s.chiave, orderItemId: null, lanciata: false, idRiga: s.pp_riga_id, idArticolo: null, descrizione: '',
             pezzi: s.pezzi_scritti, prezzoCents: s.prezzo_cents_scritto ?? 0, uscita: 1, varianti: [], cancella: true,
         });
     }
     return out;
 }
 
+/** Con «stampa: la cassa»: le uscite della cassa da mandare in produzione
+ *  (righe lanciate nel CRM non ancora mandate) e le righe che stampa il CRM.
+ *  Un'uscita con una riga già stampata dal CRM resta del CRM: la cassa la
+ *  manderebbe intera, ristampando quella riga. */
+export function usciteDaInviare(desiderate: Desiderata[], scritte: Scritta[]): { cassa: number[]; crm: number[] } {
+    const perChiave = new Map(scritte.map((s) => [s.chiave, s]));
+    const delCrm = new Set<number>();
+    for (const d of desiderate) {
+        const s = perChiave.get(d.chiave);
+        if (s?.stampata_crm && !s.inviata) delCrm.add(d.uscita);
+    }
+    const cassa = new Set<number>();
+    const crm: number[] = [];
+    for (const d of desiderate) {
+        if (!d.lanciata || d.orderItemId == null || d.cancella) continue;
+        const s = perChiave.get(d.chiave);
+        if (s?.inviata || s?.stampata_crm || s?.sparita) continue;
+        if (delCrm.has(d.uscita)) crm.push(d.orderItemId);
+        else cassa.add(d.uscita);
+    }
+    return { cassa: [...cassa].sort((a, b) => a - b), crm };
+}
+
 const tag = (orderId: number) => `sympotia-ordine:${orderId}`;
 
 async function configVive(tenantId: number) {
     const rs = await queryWithRetry(
-        `SELECT comande_vive_enabled, comande_vive_dal, articolo_generico_id FROM passepartout_config WHERE tenant_id = $1`,
+        `SELECT comande_vive_enabled, comande_vive_dal, articolo_generico_id, comande_stampa, comande_conto FROM passepartout_config WHERE tenant_id = $1`,
         [tenantId]
     );
     return rs.rows[0] ?? null;
@@ -240,7 +306,7 @@ async function righeDegliOrdini(tenantId: number, orderIds: number[]) {
     const [righe, scritte] = await Promise.all([
         queryWithRetry(
             `SELECT oi.id, oi.order_id, oi.line_kind, oi.qty, oi.unit_price_cents, oi.modifiers, oi.note,
-                    oi.course_no, oi.name_snapshot, oi.weight_grams, d.external_ref
+                    oi.course_no, oi.name_snapshot, oi.weight_grams, oi.fired_at, d.external_ref
                FROM order_items oi
                LEFT JOIN dishes d ON d.id = oi.dish_id AND d.tenant_id = oi.tenant_id
               WHERE oi.tenant_id = $1 AND oi.order_id = ANY($2::int[]) AND oi.status NOT IN ('DRAFT', 'VOIDED')
@@ -248,7 +314,7 @@ async function righeDegliOrdini(tenantId: number, orderIds: number[]) {
             [tenantId, orderIds]
         ),
         queryWithRetry(
-            `SELECT order_id, chiave, pp_riga_id, pezzi_scritti, prezzo_cents_scritto, sparita
+            `SELECT order_id, chiave, pp_riga_id, pezzi_scritti, prezzo_cents_scritto, sparita, inviata, stampata_crm
                FROM passepartout_righe_vive WHERE tenant_id = $1 AND order_id = ANY($2::int[])`,
             [tenantId, orderIds]
         ),
@@ -284,16 +350,63 @@ function avvisa(tenantId: number, r: any) {
     } catch { /* l'etichetta nel palmare non ferma il giro */ }
 }
 
+const ultimaLetturaChiuse = new Map<number, number>();
+
+/** Gli ordini del CRM la cui comanda la cassa ha chiuso dal suo schermo
+ *  (fase 4, collaudo sulla demo del 08/10: prima l'ordine restava aperto nel
+ *  CRM). Una lettura delle comande aperte ogni tanto; una comanda che non
+ *  c'è più si rilegge, e se è pagata o sparita l'ordine si chiude. */
+export async function chiuseInCassa(tenantId: number): Promise<number> {
+    if (!deps) return 0;
+    const ultima = ultimaLetturaChiuse.get(tenantId) ?? 0;
+    if (Date.now() - ultima < CHIUSE_IN_CASSA_OGNI_MS()) return 0;
+    const rs = await queryWithRetry(
+        `SELECT v.order_id, v.pp_comanda_id
+           FROM passepartout_comande_vive v
+           JOIN orders o ON o.id = v.order_id AND o.tenant_id = v.tenant_id
+          WHERE v.tenant_id = $1 AND v.stato = 'SCRITTA' AND v.pp_comanda_id IS NOT NULL AND o.status = 'OPEN'`,
+        [tenantId]
+    );
+    if (rs.rows.length === 0) return 0;
+    ultimaLetturaChiuse.set(tenantId, Date.now());
+    const aperte = await callPassepartout<PassepartoutComandaAperta[]>(tenantId, 'comandeAperte', {}, 60_000);
+    const ids = new Set((aperte ?? []).map((c) => Number(c.idComanda)));
+    let chiusi = 0;
+    for (const r of rs.rows) {
+        const idComanda = Number(r.pp_comanda_id);
+        if (ids.has(idComanda)) continue;
+        // Non fra le aperte: si rilegge, per non chiudere per una lettura storta.
+        const c = await callPassepartout<PassepartoutComanda | null>(tenantId, 'comanda', { idGestionale: idComanda }, 30_000);
+        if (c && !c.isPagato) continue;
+        const orderId = Number(r.order_id);
+        if (await deps.chiudiOrdineChiusoInCassa(tenantId, orderId)) chiusi++;
+        await segna(tenantId, orderId, { stato: 'CHIUSA' });
+    }
+    return chiusi;
+}
+
 /** Una passata sugli ordini di un ristorante, DENTRO il suo contesto tenant. */
 export async function lavoraComandeVive(tenantId: number, soloOrdine: number | null = null): Promise<number> {
     if (!(await isFeatureEnabledForTenant(tenantId, 'passepartout'))) return 0;
     if (!passepartoutAgentSupports(tenantId, CAPACITA)) return 0;
     if (deps && await deps.nodeOwnsBills(tenantId)) return 0;
+    try {
+        await chiuseInCassa(tenantId);
+    } catch (err: any) {
+        // Agente giù o vecchio: ci si riprova al giro dopo.
+        if (!(err instanceof PassepartoutBridgeError)) console.error('[passepartout] comande vive, chiuse in cassa:', err?.message || err);
+    }
     const cfg = await configVive(tenantId);
     if (!cfg) return 0;
     const ordini = await ordiniDaGuardare(tenantId, soloOrdine);
     if (ordini.length === 0) return 0;
     const { righe, scritte } = await righeDegliOrdini(tenantId, ordini.map((o: any) => Number(o.order_id)));
+
+    // «Stampa: la cassa» con un agente che sa mandare in produzione.
+    const invioDallaCassa = (cfg.comande_stampa ?? 'cassa') === 'cassa' && passepartoutAgentSupports(tenantId, CAPACITA_INVIO);
+    // «Conto: la cassa» col coperto della cassa. Un agente che non lo sa
+    // fare scriverebbe il coperto a zero: resta quello del CRM.
+    const copertoDellaCassa = (cfg.comande_conto ?? 'cassa') === 'cassa' && passepartoutAgentSupports(tenantId, CAPACITA_COPERTO);
 
     let scritti = 0;
     for (const o of ordini) {
@@ -301,24 +414,39 @@ export async function lavoraComandeVive(tenantId: number, soloOrdine: number | n
         const aperto = o.status === 'OPEN';
         const palmare = o.palmare === true;
         const desiderate = o.status === 'OPEN' || o.status === 'CLOSED'
-            ? righeDesiderate(righe.get(orderId) ?? [], Number(o.covers) || 0, palmare)
+            ? righeDesiderate(righe.get(orderId) ?? [], Number(o.covers) || 0, palmare, { copertoDellaCassa })
             : [];
-        const daScrivere = differenza(desiderate, (scritte.get(orderId) ?? []).map((s: any) => ({
+        const giaScritte: Scritta[] = (scritte.get(orderId) ?? []).map((s: any) => ({
             chiave: s.chiave,
             pp_riga_id: s.pp_riga_id != null ? Number(s.pp_riga_id) : null,
             pezzi_scritti: Number(s.pezzi_scritti),
             prezzo_cents_scritto: s.prezzo_cents_scritto != null ? Number(s.prezzo_cents_scritto) : null,
             sparita: s.sparita === true,
-        })));
-        if (daScrivere.length === 0) {
+            inviata: s.inviata === true,
+            stampata_crm: s.stampata_crm === true,
+        }));
+        const daScrivere = differenza(desiderate, giaScritte);
+        // Le uscite lanciate da mandare dalla cassa; quelle già del CRM le
+        // stampa il CRM, subito.
+        const invio = aperto && invioDallaCassa ? usciteDaInviare(desiderate, giaScritte) : { cassa: [], crm: [] };
+        if (invio.crm.length > 0 && deps) {
+            try { await deps.stampaDalCrm(tenantId, orderId, invio.crm); } catch (err: any) {
+                console.error('[passepartout] comande vive, stampa dal CRM:', err?.message || err);
+            }
+        }
+        if (daScrivere.length === 0 && invio.cassa.length === 0) {
             // Allineato: un ordine chiuso o cancellato nel CRM ha finito.
             if (o.v_order != null && (!aperto || o.v_stato === 'PENDING')) {
                 await segna(tenantId, orderId, { stato: aperto ? 'SCRITTA' : 'CHIUSA' });
             }
             continue;
         }
-        // Un ordine mai scritto che nel frattempo si è chiuso non va in cassa.
-        if (o.v_order == null && !aperto) continue;
+        // Un ordine mai scritto in cassa che nel frattempo si è chiuso non ci
+        // va più (la riga può esserci già: la crea anche la stampa del CRM).
+        if (o.pp_comanda_id == null && !aperto) {
+            if (o.v_order != null && o.v_stato !== 'CHIUSA') await segna(tenantId, orderId, { stato: 'CHIUSA' });
+            continue;
+        }
         if (!o.pp_tavolo && o.pp_comanda_id == null) continue;
 
         // Claim: vince chi incrementa per primo (due processi durante un
@@ -345,13 +473,15 @@ export async function lavoraComandeVive(tenantId: number, soloOrdine: number | n
             // si ritrova dal suo numero, il tavolo serve solo alla fila.
             tavolo: String(o.pp_tavolo ?? `comanda-${o.pp_comanda_id}`),
             coperti: Number(o.covers) || 0,
-            righe: daScrivere.map(({ orderItemId: _oi, ...r }) => r),
+            righe: daScrivere.map(({ orderItemId: _oi, lanciata: _l, ...r }) => r),
             idArticoloGenerico: cfg.articolo_generico_id != null ? Number(cfg.articolo_generico_id) : null,
+            ...(invio.cassa.length > 0 ? { inviaUscite: invio.cassa } : {}),
         };
         try {
             const esito = await callPassepartout<EsitoComandaViva>(tenantId, 'comandaViva', params as unknown as Record<string, unknown>, 120_000);
             // Comanda chiusa in cassa: non si è scritto niente.
             const nonTrovate = esito.chiusa ? [] : await registra(tenantId, orderId, daScrivere, esito);
+            if (!esito.chiusa && (esito.inviate?.length ?? 0) > 0) await segnaInviate(tenantId, orderId, desiderate, esito.inviate!);
             // Un ordine chiuso o cancellato nel CRM, allineato con questa
             // scrittura, ha finito: nessun altro giro deve riguardarlo.
             const stato: StatoComandaViva['stato'] = esito.chiusa
@@ -437,6 +567,106 @@ async function registra(tenantId: number, orderId: number, inviate: Desiderata[]
     return nonTrovate;
 }
 
+/** Le righe lanciate delle uscite che la cassa ha appena mandato. */
+async function segnaInviate(tenantId: number, orderId: number, desiderate: Desiderata[], uscite: number[]): Promise<void> {
+    const chiavi = desiderate.filter((d) => d.lanciata && uscite.includes(d.uscita)).map((d) => d.chiave);
+    if (chiavi.length === 0) return;
+    await queryWithRetry(
+        `UPDATE passepartout_righe_vive SET inviata = true, updated_at = now()
+          WHERE tenant_id = $1 AND order_id = $2 AND chiave = ANY($3::text[]) AND NOT stampata_crm`,
+        [tenantId, orderId, chiavi]
+    );
+}
+
+/** Le righe della comanda in cassa con il loro stato, se la cassa risponde.
+ *  null se non risponde (agente giù o vecchio, gestionale irraggiungibile):
+ *  allora il ripiego stampa. Una comanda non ancora scritta si prova con le
+ *  comande aperte: basta sapere che la cassa c'è. */
+async function righeInCassa(tenantId: number, ppComandaId: number | null): Promise<Map<number, string | null> | null> {
+    if (!passepartoutAgentSupports(tenantId, CAPACITA)) return null;
+    try {
+        if (ppComandaId == null) {
+            await callPassepartout<PassepartoutComandaAperta[]>(tenantId, 'comandeAperte', {}, 15_000);
+            return new Map();
+        }
+        // Una comanda sparita (chiusa in cassa) torna null: nessuna riga da
+        // stampare, l'ordine lo chiude chiuseInCassa.
+        const c = await callPassepartout<PassepartoutComanda | null>(tenantId, 'comanda', { idGestionale: ppComandaId }, 15_000);
+        return new Map((c?.righe ?? []).filter((r) => r.idGestionale != null).map((r) => [Number(r.idGestionale), r.statoEnum ?? null]));
+    } catch {
+        return null;
+    }
+}
+
+/** Il ripiego: righe lanciate da più di un attimo che la cassa non ha
+ *  mandato (agente giù, ordine fermo o non ancora scritto) le stampa il
+ *  CRM. Gira anche senza agente collegato: è proprio il caso. Se la cassa
+ *  risponde, prima le si chiede: le righe che ha già mandato si segnano, le
+ *  altre che ha o che le stanno arrivando le manda lei. */
+export async function stampeDiRipiego(tenantId: number): Promise<number> {
+    if (!deps) return 0;
+    const rs = await queryWithRetry(
+        `SELECT oi.order_id, oi.id, rv.pp_riga_id, v.pp_comanda_id, v.stato AS v_stato, v.error AS v_error
+           FROM order_items oi
+           JOIN orders o ON o.id = oi.order_id AND o.tenant_id = oi.tenant_id
+           JOIN passepartout_config pc ON pc.tenant_id = o.tenant_id
+           LEFT JOIN passepartout_comande_vive v ON v.tenant_id = o.tenant_id AND v.order_id = o.id
+           LEFT JOIN passepartout_righe_vive rv ON rv.tenant_id = oi.tenant_id AND rv.order_id = oi.order_id AND rv.chiave = 'oi:' || oi.id
+          WHERE oi.tenant_id = $1 AND o.status = 'OPEN' AND o.order_type = 'DINE_IN'
+            AND pc.comande_stampa = 'cassa'
+            AND oi.line_kind = 'DISH' AND oi.status NOT IN ('DRAFT', 'VOIDED')
+            AND oi.fired_at IS NOT NULL AND oi.fired_at < now() - make_interval(secs => $2::double precision)
+            AND NOT COALESCE(rv.inviata, false) AND NOT COALESCE(rv.stampata_crm, false)
+            -- Non mentre una scrittura va a buon fine (il claim sposta next_at
+            -- avanti): la cassa potrebbe star mandando proprio quell'uscita.
+            -- Dopo un errore della cassa si guarda subito, senza aspettare
+            -- il prossimo tentativo.
+            AND (v.order_id IS NULL OR v.next_at <= now() OR v.stato = 'FAILED' OR v.error IS NOT NULL)
+            AND (
+                v.order_id IS NOT NULL
+                OR (pc.comande_vive_enabled AND o.opened_at >= COALESCE(pc.comande_vive_dal, now())
+                    AND EXISTS (SELECT 1 FROM passepartout_tavoli pt
+                                 WHERE pt.tenant_id = o.tenant_id AND pt.table_id = o.table_id AND pt.confermato))
+            )
+          ORDER BY oi.order_id, oi.id`,
+        [tenantId, STAMPA_DI_RIPIEGO_DOPO_MS() / 1000]
+    );
+    const perOrdine = new Map<number, any[]>();
+    for (const r of rs.rows) perOrdine.set(Number(r.order_id), [...(perOrdine.get(Number(r.order_id)) ?? []), r]);
+    let stampate = 0;
+    for (const [orderId, righe] of perOrdine) {
+        try {
+            const testa = righe[0];
+            const inCassa = await righeInCassa(tenantId, testa.pp_comanda_id != null ? Number(testa.pp_comanda_id) : null);
+            let ids: number[];
+            if (inCassa == null) {
+                ids = righe.map((r) => Number(r.id));
+            } else {
+                const mandate = righe.filter((r) => r.pp_riga_id != null && STATI_INVIATA.has(inCassa.get(Number(r.pp_riga_id)) ?? ''));
+                if (mandate.length > 0) {
+                    await queryWithRetry(
+                        `UPDATE passepartout_righe_vive SET inviata = true, updated_at = now()
+                          WHERE tenant_id = $1 AND order_id = $2 AND chiave = ANY($3::text[]) AND NOT stampata_crm`,
+                        [tenantId, orderId, mandate.map((r) => `oi:${r.id}`)]
+                    );
+                }
+                // La cassa risponde: le righe che ha le manda lei, al prossimo
+                // giro o al suo «Invia». Stampa il CRM solo quelle che in
+                // cassa non arriveranno: mai scritte, con la cassa che ha
+                // rifiutato la scrittura o un ordine che il giro non scrive.
+                const inSospeso = testa.v_stato !== 'FAILED' && SCRITTURA_IN_SOSPESO.test(String(testa.v_error ?? ''));
+                ids = inSospeso ? [] : righe.filter((r) => r.pp_riga_id == null).map((r) => Number(r.id));
+            }
+            if (ids.length === 0) continue;
+            await deps.stampaDalCrm(tenantId, orderId, ids);
+            stampate += ids.length;
+        } catch (err: any) {
+            console.error('[passepartout] comande vive, stampa di ripiego:', err?.message || err);
+        }
+    }
+    return stampate;
+}
+
 /** «Riprova» su un ordine fermo (FAILED): torna in coda. */
 export async function riprovaComandaViva(tenantId: number, orderId: number): Promise<boolean> {
     const rs = await queryWithRetry(
@@ -466,6 +696,29 @@ export async function statiComandeVive(tenantId: number, orderIds: number[]): Pr
     }));
 }
 
+/** Le stampe di ripiego in tutti i ristoranti con «stampa: la cassa»,
+ *  agente collegato o no. */
+async function ripieghi(): Promise<void> {
+    // rls-bypass: solo l'elenco dei ristoranti con «stampa: la cassa» e ordini in cassa possibili; ognuno si lavora nel suo contesto tenant
+    const rs = await runAsPlatform(() => queryWithRetry(
+        `SELECT tenant_id FROM passepartout_config WHERE comande_stampa = 'cassa'
+            AND (comande_vive_enabled OR EXISTS (SELECT 1 FROM passepartout_comande_vive v
+                                                  WHERE v.tenant_id = passepartout_config.tenant_id AND v.stato IN ('PENDING', 'SCRITTA', 'FAILED')))`
+    ));
+    for (const row of rs.rows) {
+        const tenantId = Number(row.tenant_id);
+        try {
+            await runWithTenantContext(tenantId, async () => {
+                if (!(await isFeatureEnabledForTenant(tenantId, 'passepartout'))) return;
+                if (deps && await deps.nodeOwnsBills(tenantId)) return;
+                await stampeDiRipiego(tenantId);
+            });
+        } catch (err: any) {
+            console.error('[passepartout] comande vive, ripiego:', err?.message || err);
+        }
+    }
+}
+
 // Un giro alla volta per ristorante in questo processo: una rotta che
 // avvisa mentre il giro lavora chiede un altro giro alla fine, invece di
 // partirne uno accanto.
@@ -476,7 +729,10 @@ async function lavoraInFila(tenantId: number): Promise<void> {
     try {
         do {
             inCorso.set(tenantId, false);
-            await runWithTenantContext(tenantId, () => lavoraComandeVive(tenantId));
+            await runWithTenantContext(tenantId, async () => {
+                await lavoraComandeVive(tenantId);
+                await stampeDiRipiego(tenantId);
+            });
         } while (inCorso.get(tenantId));
     } catch (err: any) {
         console.error('[passepartout] comande vive:', err?.message || err);
@@ -507,6 +763,7 @@ async function giro(): Promise<void> {
     if (giroInCorso) return;
     giroInCorso = true;
     try {
+        await ripieghi();
         const pronti = connectedPassepartoutTenants().filter((t) => passepartoutAgentSupports(t, CAPACITA));
         if (pronti.length === 0) return;
         // rls-bypass: solo l'elenco dei ristoranti con le comande in cassa accese o ancora da chiudere; ognuno si lavora nel suo contesto tenant

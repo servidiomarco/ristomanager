@@ -11,7 +11,7 @@ import { api, bearer, ownerToken } from './helpers';
 // ristorante 1 (tipo di pagamento ESTERNO dall'env).
 
 const TOKEN_STORICO = 'test-pp-agent-token';
-const CAPACITA_TUTTE = ['chiudi-riprendi', 'prenotazioni', 'conti', 'tavoli-aperti', 'chiudi-preconto', 'preconto', 'specchio', 'diagnosi', 'sconto-cassa', 'comanda-viva'];
+const CAPACITA_TUTTE = ['chiudi-riprendi', 'prenotazioni', 'conti', 'tavoli-aperti', 'chiudi-preconto', 'preconto', 'specchio', 'diagnosi', 'sconto-cassa', 'comanda-viva', 'comanda-viva-invio', 'comanda-viva-coperto'];
 const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
 
 type Gestore = (params: any) => { ok: true; result: unknown } | { ok: false; error: string; kind: string };

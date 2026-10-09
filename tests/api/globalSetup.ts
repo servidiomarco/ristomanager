@@ -144,6 +144,10 @@ export default async function globalSetup(): Promise<() => Promise<void>> {
             PASSEPARTOUT_SPECCHIO_SWEEP_MS: '3600000',
             // Le comande vive le spingono le rotte delle comande, nei test.
             PASSEPARTOUT_COMANDE_VIVE_SWEEP_MS: '3600000',
+            // La stampa di ripiego della comanda viva (fase 3): nei test dopo mezzo secondo.
+            PASSEPARTOUT_COMANDE_VIVE_RIPIEGO_MS: '500',
+            // Le comande chiuse in cassa: nei test si guarda a ogni giro.
+            PASSEPARTOUT_COMANDE_VIVE_CHIUSE_MS: '1',
             // Il flag del token storico si rilegge a ogni handshake: il test
             // dell'abbinamento lo spegne e lo riaccende per i file dopo.
             PP_TOKEN_STORICO_TTL_MS: '0',
@@ -162,9 +166,11 @@ export default async function globalSetup(): Promise<() => Promise<void>> {
     }
 
     // /health risponde 200 prima ancora che lo schema esista (createSchema gira
-    // in background dopo la listen), quindi non è un readiness probe. Il login
-    // del seed owner invece verifica in un colpo solo che lo schema c'è, che il
-    // seed è passato e che role_permissions è popolata.
+    // in background dopo la listen), quindi non è un readiness probe. Serve
+    // /ready (migration finite) E il login del seed owner: il login da solo
+    // passa appena l'owner esiste, mentre createSchema sta ancora seminando
+    // role_permissions — il primo test leggeva una matrice a metà e la
+    // cache la teneva per 5 minuti (403 su POST /rooms, CI del 09/10).
     const baseUrl = `http://127.0.0.1:${port}`;
     const deadline = Date.now() + 90_000;
     for (;;) {
@@ -172,12 +178,15 @@ export default async function globalSetup(): Promise<() => Promise<void>> {
             throw new Error(`Il server è morto al boot (exit ${child.exitCode}):\n${bootLog}`);
         }
         try {
-            const res = await fetch(`${baseUrl}/auth/login`, {
-                method: 'POST',
-                headers: { 'content-type': 'application/json' },
-                body: JSON.stringify({ email: OWNER_EMAIL, password: OWNER_PASSWORD }),
-            });
-            if (res.status === 200) break;
+            const ready = await fetch(`${baseUrl}/ready`);
+            if (ready.status === 200) {
+                const res = await fetch(`${baseUrl}/auth/login`, {
+                    method: 'POST',
+                    headers: { 'content-type': 'application/json' },
+                    body: JSON.stringify({ email: OWNER_EMAIL, password: OWNER_PASSWORD }),
+                });
+                if (res.status === 200) break;
+            }
         } catch {
             // server non ancora in ascolto
         }
