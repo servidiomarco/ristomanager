@@ -618,6 +618,14 @@ export async function chiudiComandaCompleta(params: {
      *  ContoComanda — solo il saldo del sospeso, se manca. Senza, un
      *  secondo tentativo rifarebbe lo scontrino. */
     riprendi?: boolean;
+    /** Comanda viva con «stampa: il CRM»: le righe mai partite le ha già
+     *  stampate il CRM, e non vanno mandate in produzione prima di chiudere
+     *  (la chiusura di ContoComanda è comunque con noInvio). */
+    senzaInvio?: boolean;
+    /** Lo sconto del conto del CRM («conto: il CRM»), in euro, anche zero:
+     *  va sul conto della comanda in cassa, come lo mette la cassa
+     *  (chiudiConSconto). Assente: non è un conto del CRM. */
+    scontoEuro?: number;
 }): Promise<EsitoChiusuraComanda> {
     const contiPrima = await getContiGiorno();
     const preconto = contoDelPreconto(contiPrima, params.idComanda);
@@ -630,8 +638,14 @@ export async function chiudiComandaCompleta(params: {
     if (!comanda) {
         throw new PassepartoutError(`Comanda ${params.idComanda} non trovata sul gestionale`, 'ContoComanda');
     }
+    // Il conto del CRM porta sempre il suo sconto (anche zero): sul conto in
+    // cassa deve esserci quello, non uno messo dalla cassa sul preconto.
+    if (params.scontoEuro != null && (params.scontoEuro > 0
+        || (preconto && Math.abs((asNumber(preconto.ScontoEuro) ?? 0) - params.scontoEuro) > 0.005))) {
+        return chiudiConSconto(params, preconto, comanda);
+    }
     if (preconto) return chiudiContoDelPreconto(params, preconto, comanda);
-    const daInviare = comanda.stato === '0' || comanda.righe.some((r) => r.stato === '0');
+    const daInviare = !params.senzaInvio && (comanda.stato === '0' || comanda.righe.some((r) => r.stato === '0'));
     if (daInviare) {
         await inviaProduzioneComanda({ idComanda: params.idComanda, inviaTutto: true });
         // MenuSrv processa l'invio in asincrono e ritocca la comanda: un
@@ -706,7 +720,7 @@ async function chiudiContoDelPreconto(
     }
     // Un piatto aggiunto dopo il preconto può non essere nel suo conto: lo
     // si segnala, il conto chiuso è comunque quello della cassa.
-    const totaleRighe = Math.round(comanda.righe.reduce((s, r) => s + (r.totale ?? 0), 0) * 100) / 100;
+    const totaleRighe = Math.round((comanda.righe.reduce((s, r) => s + (r.totale ?? 0), 0) - (asNumber(preconto.ScontoEuro) ?? 0)) * 100) / 100;
     const avviso = Math.abs(totaleRighe - daPagare) > 0.005
         ? `Preconto da ${daPagare.toFixed(2)} su una comanda da ${totaleRighe.toFixed(2)}`
         : null;
@@ -735,6 +749,69 @@ async function chiudiContoDelPreconto(
         totaleDaPagare: asNumber(conto.TotaleDaPagare),
         avviso,
     };
+}
+
+/**
+ * Chiusura col conto del CRM scontato («conto: il CRM», fase 4c). In
+ * Passepartout lo sconto sta sul conto, non sulle righe: prova sulla demo del
+ * 09/10 (comanda 1427, conto 211), in tre passi:
+ * 1. il preconto crea il conto Aperto (30,00 coi contanti precompilati);
+ * 2. PutConto SENZA comando, con ScontoEuro e ScontoFormato («1,00»): la
+ *    cassa sconta il conto (da pagare 29,00) e riduce da sé il pagamento
+ *    precompilato. Lo sconto insieme al «Chiudi» invece lo ignora, e il
+ *    pagamento del netto lascia un sospeso che vuole il cliente (rifiutato);
+ * 3. la chiusura del conto del preconto: ESTERNO al posto dei contanti.
+ * Le righe restano a prezzo pieno, come quando sconta la cassa.
+ */
+async function chiudiConSconto(
+    params: { idComanda: number; tipoDocumento?: TipoDocumentoConto; tipoPagamento?: string; importoPagato?: number; proforma?: boolean; scontoEuro?: number },
+    preconto: Record<string, unknown> | null,
+    comanda: PassepartoutComanda,
+): Promise<EsitoChiusuraComanda> {
+    const sconto = Math.round((params.scontoEuro ?? 0) * 100) / 100;
+    let conto = preconto;
+    if (!conto) {
+        await emettiPreconto(params.idComanda);
+        conto = contoDelPreconto(await getContiGiorno(), params.idComanda);
+        if (!conto) {
+            throw new PassepartoutError(`Conto del preconto della comanda ${params.idComanda} non trovato: comanda lasciata aperta`, 'RiceviMessaggio');
+        }
+    }
+    const idConto = asNumber(conto.IdGestionale ?? (conto as any).idGestionale);
+    if (idConto == null) throw new PassepartoutError(`Conto del preconto della comanda ${params.idComanda} senza numero`, 'PutConto');
+    if (Math.abs((asNumber(conto.ScontoEuro) ?? 0) - sconto) > 0.005) {
+        await scontaConto({ idConto, idComanda: params.idComanda, scontoEuro: sconto });
+        conto = (await getContiGiorno())
+            .filter((c) => asNumber(c.IdGestionale ?? (c as any).idGestionale) === idConto).pop() ?? conto;
+    }
+    // Lo sconto deve esserci davvero: chiudere il pieno col pagamento del
+    // netto, o il netto senza sconto, sbaglierebbe incasso e scontrino.
+    const documento = asNumber(conto.TotaleDocumento);
+    const daPagare = asNumber(conto.TotaleDaPagare) ?? 0;
+    if (documento != null && Math.abs(documento - sconto - daPagare) > 0.005) {
+        throw new PassepartoutError(
+            `Sconto di ${sconto.toFixed(2)} non applicato dalla cassa: da pagare ${daPagare.toFixed(2)} su ${documento.toFixed(2)}`,
+            'PutConto',
+        );
+    }
+    return chiudiContoDelPreconto(params, conto, comanda);
+}
+
+/** Lo sconto sul conto della comanda, senza chiuderlo (vedi chiudiConSconto). */
+export async function scontaConto(params: { idConto: number; idComanda: number; scontoEuro: number }): Promise<void> {
+    const NS_CONTO = 'http://schemas.datacontract.org/2004/07/PMessageBox.Contract.Conto';
+    const euro = params.scontoEuro.toFixed(2);
+    // Ordine alfabetico del data contract: CausaleSconto, IdComanda,
+    // IdGestionale, ScontoEuro, ScontoFormato.
+    const contoXml =
+        `<conto xmlns:c="${NS_CONTO}">` +
+        `<c:CausaleSconto>Sconto del CRM</c:CausaleSconto>` +
+        `<c:IdComanda>${params.idComanda}</c:IdComanda>` +
+        `<c:IdGestionale>${params.idConto}</c:IdGestionale>` +
+        `<c:ScontoEuro>${euro}</c:ScontoEuro>` +
+        `<c:ScontoFormato>${euro.replace('.', ',')}</c:ScontoFormato>` +
+        `</conto>`;
+    await soapCall('PutConto', contoXml);
 }
 
 /**

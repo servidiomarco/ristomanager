@@ -126,7 +126,7 @@ if (CODICE_ABBINA) {
 // in cassa i conti chiusi nel CRM (comanda specchio, fase 4). 'diagnosi':
 // la verifica guidata della sezione Passepartout. 'comanda-viva': scrive le
 // righe degli ordini del CRM nella comanda in cassa del tavolo vero.
-const CAPABILITIES = ['chiudi-riprendi', 'prenotazioni', 'conti', 'tavoli-aperti', 'chiudi-preconto', 'preconto', 'specchio', 'diagnosi', 'sconto-cassa', 'comanda-viva', 'comanda-viva-invio', 'comanda-viva-coperto'];
+const CAPABILITIES = ['chiudi-riprendi', 'prenotazioni', 'conti', 'tavoli-aperti', 'chiudi-preconto', 'preconto', 'specchio', 'diagnosi', 'sconto-cassa', 'comanda-viva', 'comanda-viva-invio', 'comanda-viva-coperto', 'chiudi-senza-invio', 'chiudi-con-sconto'];
 
 if (!CODICE_ABBINA && (!SERVER_URL || !TOKEN)) {
     console.error('Config mancante: servono PP_AGENT_SERVER_URL e PP_AGENT_TOKEN, o un abbinamento (--abbina CODICE --server URL).');
@@ -351,6 +351,9 @@ const handlers: Record<string, Handler> = {
                 ? Number(p.importoPagato) : undefined,
             proforma: p?.proforma === true,
             riprendi: p?.riprendi === true,
+            senzaInvio: p?.senzaInvio === true,
+            scontoEuro: p?.scontoEuro != null && Number.isFinite(Number(p.scontoEuro)) && Number(p.scontoEuro) >= 0
+                ? Number(p.scontoEuro) : undefined,
         }));
     },
 };

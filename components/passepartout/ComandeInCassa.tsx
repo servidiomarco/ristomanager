@@ -112,10 +112,7 @@ export const ComandeInCassa: React.FC<Props> = ({ showToast }) => {
               onChange={(e) => salva({ conto: e.target.value as PpChi })}
             >
               <option value="cassa" disabled={stato.stampa === 'crm'}>{t('pp.vivoByCassa')}</option>
-              {/* Il conto del CRM sugli ordini in cassa arriva con la fase 4c. */}
-              <option value="crm" disabled={stato.conto !== 'crm'}>
-                {stato.conto === 'crm' ? t('pp.vivoByCrm') : t('pp.vivoByCrmSoon')}
-              </option>
+              <option value="crm">{t('pp.vivoByCrm')}</option>
             </select>
           </Field>
 

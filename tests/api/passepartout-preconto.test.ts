@@ -26,13 +26,18 @@ describe('cassa Passepartout: preconto e chiusura dopo il preconto', () => {
     let server: http.Server;
     const chiamate: Chiamata[] = [];
     // Lo stato della cassa finta.
-    let conti: Array<{ id: number; comanda: number; stato: 'Aperto' | 'Pagato'; sospeso: number; daPagare: number; pagato: number }> = [];
+    let conti: Array<{ id: number; comanda: number; stato: 'Aperto' | 'Pagato'; sospeso: number; daPagare: number; pagato: number; documento?: number; sconto?: number }> = [];
     let erroriMessaggio: string[] = [];
+    // La cassa che non applica lo sconto (per la guardia di chiudiConSconto).
+    let ignoraSconto = false;
 
     const contoXml = (c: typeof conti[number]) =>
         `<a:ContrattoConto><a:IdComanda>${c.comanda}</a:IdComanda><a:IdGestionale>${c.id}</a:IdGestionale>` +
-        `<a:NumeroScontrinoFiscale i:nil="true"/><a:Sospeso>${c.sospeso.toFixed(2)}</a:Sospeso>` +
+        `<a:NumeroScontrinoFiscale i:nil="true"/>` +
+        (c.sconto != null ? `<a:ScontoEuro>${c.sconto.toFixed(2)}</a:ScontoEuro>` : '') +
+        `<a:Sospeso>${c.sospeso.toFixed(2)}</a:Sospeso>` +
         `<a:StatoEnum>${c.stato}</a:StatoEnum><a:TotaleDaPagare>${c.daPagare.toFixed(2)}</a:TotaleDaPagare>` +
+        (c.documento != null ? `<a:TotaleDocumento>${c.documento.toFixed(2)}</a:TotaleDocumento>` : '') +
         `<a:TotalePagato>${c.pagato.toFixed(2)}</a:TotalePagato></a:ContrattoConto>`;
     const comandaXml = (id: number) =>
         `<a:IdGestionale>${id}</a:IdGestionale><a:IsPagato>false</a:IsPagato><a:Stato>1</a:Stato><a:Tavolo>29</a:Tavolo><a:Sala>DENTRO</a:Sala>` +
@@ -59,12 +64,28 @@ describe('cassa Passepartout: preconto e chiusura dopo il preconto', () => {
                 if (op === 'PutConto') {
                     const id = Number(body.match(/IdGestionale>(\d+)</)?.[1]);
                     const c = conti.find(x => x.id === id);
+                    // Senza comando è lo sconto sul conto (prova del 09/10 sulla demo):
+                    // da pagare scende, i contanti precompilati lo seguono.
+                    if (c && !body.includes('ComandoEnum')) {
+                        const sconto = Number(body.match(/ScontoEuro>([\d.]+)</)?.[1] ?? 0);
+                        if (!ignoraSconto) {
+                            c.sconto = sconto;
+                            c.daPagare = Math.round(((c.documento ?? c.daPagare) - sconto) * 100) / 100;
+                            c.pagato = c.daPagare;
+                        }
+                        return rispondi(busta(op, contoXml(c).replace(/^<a:ContrattoConto>|<\/a:ContrattoConto>$/g, '')));
+                    }
                     if (c) { c.stato = 'Pagato'; c.pagato = c.daPagare; }
                     return rispondi(busta(op, c ? contoXml(c).replace(/^<a:ContrattoConto>|<\/a:ContrattoConto>$/g, '') : ''));
                 }
                 // Come la cassa vera dopo un preconto (pmbLog del 06/10).
                 if (op === 'ContoComanda') return rispondi(faultXml("E' avvenuto un errore interno sul server"));
                 if (op === 'RiceviMessaggio') {
+                    // Il preconto lascia il conto Aperto coi contanti precompilati.
+                    const idComanda = Number(body.match(/IDGestionale>(\d+)</)?.[1]);
+                    if (erroriMessaggio.length === 0 && !conti.some(c => c.comanda === idComanda)) {
+                        conti.push({ id: 82600, comanda: idComanda, stato: 'Aperto', sospeso: 0, daPagare: 3, pagato: 3, documento: 3 });
+                    }
                     return rispondi(
                         `<s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/"><s:Body><RiceviMessaggioResponse xmlns="http://tempuri.org/">` +
                         `<Risposta xmlns:a="http://schemas.datacontract.org/2004/07/PMessageBox.Contract"><a:Errori xmlns:b="http://schemas.microsoft.com/2003/10/Serialization/Arrays">` +
@@ -90,6 +111,7 @@ describe('cassa Passepartout: preconto e chiusura dopo il preconto', () => {
     beforeEach(() => {
         chiamate.length = 0;
         erroriMessaggio = [];
+        ignoraSconto = false;
         // Il conto che il preconto lascia: Aperto, coperto dai contanti precompilati.
         conti = [{ id: 82583, comanda: 78532, stato: 'Aperto', sospeso: 0, daPagare: 3, pagato: 3 }];
     });
@@ -106,6 +128,36 @@ describe('cassa Passepartout: preconto e chiusura dopo il preconto', () => {
         expect(put).toContain('<c:TipoDocumentoEnum>Proforma</c:TipoDocumentoEnum>');
         // Ordine del data contract: Pagamenti prima di TipoDocumentoEnum.
         expect(put.indexOf('<c:Pagamenti>')).toBeLessThan(put.indexOf('<c:TipoDocumentoEnum>'));
+    });
+
+    it('conto del CRM scontato: preconto, sconto sul conto, poi la chiusura del netto', async () => {
+        conti = [];
+        const esito = await chiudiComandaCompleta({ idComanda: 78532, tipoPagamento: 'ESTERNO', proforma: true, scontoEuro: 1 });
+        expect(esito).toMatchObject({ chiuso: true, stato: 'Pagato', totaleDaPagare: 2 });
+        const ops = chiamate.map(c => c.action.replace(/"/g, '').split('/').pop());
+        expect(ops.filter(o => o === 'RiceviMessaggio' || o === 'PutConto')).toEqual(['RiceviMessaggio', 'PutConto', 'PutConto']);
+        const [sconto, chiusura] = chiamate.filter(c => c.action.endsWith('/PutConto"')).map(c => c.body);
+        expect(sconto).not.toContain('ComandoEnum');
+        expect(sconto).toContain('<c:ScontoEuro>1.00</c:ScontoEuro><c:ScontoFormato>1,00</c:ScontoFormato>');
+        expect(chiusura).toContain('<c:ComandoEnum>Chiudi</c:ComandoEnum>');
+        expect(chiusura).toContain('<c:Importo>2.00</c:Importo>');
+        expect(ultima('ContoComanda')).toBeUndefined();
+    });
+
+    it('conto del CRM senza sconto su un preconto scontato dalla cassa: lo sconto torna quello del CRM', async () => {
+        conti = [{ id: 82583, comanda: 78532, stato: 'Aperto', sospeso: 0, daPagare: 2.5, pagato: 2.5, documento: 3, sconto: 0.5 }];
+        await chiudiComandaCompleta({ idComanda: 78532, tipoPagamento: 'ESTERNO', proforma: true, scontoEuro: 0 });
+        const [sconto, chiusura] = chiamate.filter(c => c.action.endsWith('/PutConto"')).map(c => c.body);
+        expect(sconto).toContain('<c:ScontoEuro>0.00</c:ScontoEuro>');
+        expect(chiusura).toContain('<c:Importo>3.00</c:Importo>');
+    });
+
+    it('se la cassa non applica lo sconto, non chiude', async () => {
+        conti = [];
+        ignoraSconto = true;
+        await expect(chiudiComandaCompleta({ idComanda: 78532, tipoPagamento: 'ESTERNO', proforma: true, scontoEuro: 1 }))
+            .rejects.toThrow(/non applicato/);
+        expect(chiamate.filter(c => c.action.endsWith('/PutConto"') && c.body.includes('ComandoEnum'))).toEqual([]);
     });
 
     it('con lo scontrino lo emette: «ChiudiEStampa»', async () => {

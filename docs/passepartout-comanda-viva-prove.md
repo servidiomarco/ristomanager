@@ -176,3 +176,40 @@ Prove fatte subito dopo sulla comanda di prova 1421 (SOPRA 11):
 - **Prima di stampare, il ripiego chiede alla cassa.** Le righe che la cassa ha già mandato si segnano come mandate. Le altre, se la cassa risponde, le manda lei: le righe già in cassa al prossimo giro o al suo «Invia», e la scrittura in sospeso quando passa. Il CRM stampa solo se la cassa non risponde, oppure per righe che in cassa non arriveranno: scrittura rifiutata, ordine fermo, tavolo non più abbinato.
 - **L'agente non rimanda un'uscita le cui righe sono già tutte partite.** Risulta comunque mandata.
 - **Resta un caso senza rimedio.** Se la cassa non risponde il CRM stampa, e quando la cassa torna le righe ci arrivano non mandate: il primo «Invia» della cassa le ristampa.
+
+## Sconto sul conto e stampanti della demo, 09/10/2026 pomeriggio
+
+Per la fase 4c («conto: il CRM») l'utente ha scelto che lo sconto del CRM vada **sul conto in cassa**, come lo fa la cassa, con le righe a prezzo pieno. `ContrattoConto` ha i campi `ScontoEuro`, `ScontoFormato`, `CausaleSconto` e `DettaglioSconti`. La strada da provare:
+1. preconto della comanda (crea il conto Aperto);
+2. `PutConto` su quel conto con `ScontoEuro`, `CausaleSconto` e il pagamento esterno del netto;
+3. «Chiudi» (proforma) o «ChiudiEStampa» (scontrino).
+
+Prima prova sulla demo, comanda 1426 su SOPRA 10:
+
+| Prova | Esito |
+|---|---|
+| Preconto via `RiceviMessaggio` | **Fallito**: «Settings to access printer 'COMANDE' are not valid». Il conto non nasce |
+| Stampanti della cassa (tabella `Stampante`, sola lettura) | COMANDE, EPSON e AnyDesk Printer, attive ma su dispositivi che sulla VM non ci sono. Su Windows c'è «Microsoft Print to PDF» |
+
+**Cosa vuol dire:** sulla demo fallisce tutto ciò che stampa (preconto, `ContoComanda`, proforma). Con ogni probabilità è anche la causa del `ContoComanda` sempre in errore del 09/10 mattina, non il tipo di pagamento 3DSECURE.
+
+**Rimedio sulla VM, senza toccare la cassa:** una stampante di Windows chiamata «COMANDE» col driver «Microsoft Print To PDF» su una porta file (`C:\Prova\stampe\comande.pdf`). COMANDE è una stampante Windows (`tipoStampante` 0), ed è quella delle sale per preconto e proforma. EPSON resta l'RT in rete (192.168.88.46), che sulla demo non c'è: sulla demo niente scontrini, si prova con la proforma.
+
+Prove dopo il rimedio:
+
+| Prova | Esito |
+|---|---|
+| Preconto sulla comanda 1426, quella del primo tentativo | Errore interno `NullReferenceException` in `PagamentoFBO.IsCancellabile` (dal `pmbLog`): il primo preconto, fallito sulla stampante, aveva lasciato un conto a metà (conto 210) |
+| Comanda nuova 1427 su SOPRA 8, mandata, poi preconto | **Riuscito**: PDF stampato, conto 211 Aperto da 30,00 coi contanti precompilati. `GetContiGiorno` letto dallo script di prova non lo mostrava: il conto si è letto dal database |
+| `PutConto` con «Chiudi», pagamento esterno del netto (29,00) e `ScontoEuro` 1,00 in un colpo solo | **Rifiutato**: «Per le fatture e i conti in sospeso occorre indicare il cliente». La cassa ignora lo sconto insieme al «Chiudi», e il netto lascia 1,00 in sospeso |
+| `PutConto` **senza comando**, con `ScontoEuro` 1.00 e `ScontoFormato` «1,00» | **Riuscito**: conto 211 con sconto 1,00 (descrizione «1,00»), totale documento 30,00, da pagare 29,00; il pagamento precompilato scende da solo a 29,00 |
+| Poi `PutConto` «Chiudi», proforma, ESTERNO 29,00 | **Riuscito**: conto Pagato, un solo pagamento ESTERNO da 29,00 (i contanti sostituiti), comanda 1427 chiusa |
+
+**Cosa decide** (fase 4c, PR #895):
+- con «conto: il CRM» il CRM accetta gli sconti;
+- alla chiusura l'agente fa preconto (se manca), sconto sul conto senza comando, poi la chiusura del conto del preconto (`chiudiConSconto`, capacità `chiudi-con-sconto`);
+- il conto del CRM porta sempre il suo sconto, anche zero: uno sconto messo dalla cassa sul preconto si sostituisce;
+- il controllo dei totali confronta le righe a prezzo pieno;
+- lo scontrino con l'RT (`ChiudiEStampa`) resta da provare al Frantoio.
+
+**Da chiudere dal Menu Client:** comanda 1426 su SOPRA 10, con il conto a metà 210.

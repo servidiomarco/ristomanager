@@ -38,6 +38,8 @@ export const CAPACITA: Record<string, string> = {
   'comanda-viva': 'pp.capComandaViva',
   'comanda-viva-invio': 'pp.capComandaVivaInvio',
   'comanda-viva-coperto': 'pp.capComandaVivaCoperto',
+  'chiudi-senza-invio': 'pp.capChiudiSenzaInvio',
+  'chiudi-con-sconto': 'pp.capChiudiConSconto',
 };
 
 const oraBreve = (iso: string) =>
