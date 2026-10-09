@@ -325,6 +325,10 @@
     "scrittaTitolo": "The order is in the table's order on the till",
     "inAttesa": "Going to the till",
     "errore": "Till error",
-    "erroreDettaglio": "Passepartout till: {{errore}}"
+    "erroreDettaglio": "Passepartout till: {{errore}}",
+    "righeTitolo": "From the till",
+    "righeTotale": "Table at the till {{importo}}",
+    "righeNonDisponibili": "The till isn't responding right now: items rung up there can't be shown.",
+    "rigaPartita": "in the kitchen"
   }
 }

@@ -90,7 +90,7 @@ import {
     startPassepartoutTavoliApertiSync, elencoTavoliAperti, aggiornaTavoliAperti, comandaApertaSuiTavoli,
 } from './services/passepartoutTavoliAperti.js';
 import { accodaSpecchio, avviaSpecchio, startPassepartoutSpecchioSync } from './services/passepartoutSpecchio.js';
-import { avviaComandeVive, lavoraComandeVive, riprovaComandaViva, startPassepartoutComandeVive, statiComandeVive, uscitaPerCassa } from './services/passepartoutComandeVive.js';
+import { avviaComandeVive, lavoraComandeVive, righeDallaCassa, riprovaComandaViva, startPassepartoutComandeVive, statiComandeVive, uscitaPerCassa } from './services/passepartoutComandeVive.js';
 import {
     SUPPORT_CATEGORIES, SUPPORT_STATUSES, SUPPORT_SUBJECT_MAX, SUPPORT_BODY_MAX, SUPPORT_ATTACHMENTS_MAX, SUPPORT_RATING_COMMENT_MAX,
     sanitizeClientContext, supportTenantTag, supportPlatformTag,
@@ -37880,6 +37880,21 @@ app.get('/orders/:id', authenticate, requirePermission('orders:view'), async (re
     }
 });
 
+// Le righe battute in cassa sulla comanda di un ordine del CRM (fase 5 della
+// comanda viva): il pad le mostra in sola lettura, col totale del tavolo in
+// cassa. Fuori da GET /orders/:id, che non deve aspettare la cassa.
+app.get('/orders/:id/righe-cassa', authenticate, requirePermission('orders:view'), async (req, res) => {
+    try {
+        if (!(await ordersEnabledGuard(req, res))) return;
+        const id = parseInt(req.params.id, 10);
+        if (!Number.isFinite(id)) return res.status(400).json({ error: 'id non valido' });
+        res.json(await righeDallaCassa(req.tenantId!, id));
+    } catch (err: any) {
+        console.error('GET /orders/:id/righe-cassa error:', err);
+        res.status(500).json({ error: 'Internal server error', detail: err?.message });
+    }
+});
+
 // Stato dei conti per la griglia comande: i tavoli del servizio selezionato
 // con un conto attivo non ancora incassato. Una chiamata sola per tutta la
 // griglia — il cameriere deve vedere chi sta ancora per pagare, non scoprirlo
@@ -44360,6 +44375,9 @@ const startServer = async () => {
                             },
                             stampaDalCrm: stampaComandeViveDalCrm,
                             chiudiOrdineChiusoInCassa,
+                            avvisaRigheCassa: (t, orderId) => {
+                                try { socketService?.broadcastToAll(t, 'passepartout:righe-cassa', { order_id: orderId }); } catch (_) {}
+                            },
                         });
                     }
                     console.log('✅ Passepartout agent bridge attivo su /pp-agent');

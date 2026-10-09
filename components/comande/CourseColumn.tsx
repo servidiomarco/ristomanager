@@ -2,7 +2,7 @@ import React from 'react';
 import { useTranslation } from 'react-i18next';
 import { Ban, Check, ChevronUp, ChevronsUpDown, Loader2, Plus, Send, SendHorizontal } from 'lucide-react';
 import { CourseChips } from './CourseChips';
-import type { OrderItem, OrderWithItems } from '../../types';
+import type { OrderItem, OrderWithItems, RigheDallaCassa } from '../../types';
 import { StatusPill } from '../ds';
 import {
   BAR_COURSE_NO,
@@ -68,12 +68,15 @@ interface CourseListProps {
   showBar?: boolean;
   /** Sezione «Dolci» in coda: stessa regola, per le categorie da dolci. */
   showDessert?: boolean;
+  /** Le righe battute in cassa sulla comanda dell'ordine (comanda viva con
+   *  Passepartout): in coda, in sola lettura, col totale del tavolo in cassa. */
+  righeCassa?: RigheDallaCassa | null;
 }
 
 export const CourseList: React.FC<CourseListProps> = ({
   order, cart, course, onCourse, busy, onBump, onDrop, onVoid, onRecall, onFire, onEditLine, onUnfire,
   onMoveLine, onMoveItem, onMoveCourse, onDragLine, onDragItem, onDragCourse, showBar, showDessert,
-  catIndexOf,
+  catIndexOf, righeCassa,
 }) => {
   const { t } = useTranslation('comande', { useSuspense: false });
   const dnd = useCourseDrag({
@@ -414,8 +417,50 @@ export const CourseList: React.FC<CourseListProps> = ({
         </section>
       );
     })}
+    {righeCassa && (righeCassa.righe.length > 0 || !righeCassa.disponibile) && (
+      <RigheCassa righe={righeCassa} />
+    )}
     {dnd.ghost}
   </div>
+  );
+};
+
+/* ── Le righe della cassa ─────────────────────────────────────────────────
+   Quello che sul tavolo hanno battuto la cassa o il palmare Passepartout,
+   sotto le uscite del CRM: il cameriere vede tutto il tavolo. Sola lettura —
+   in cucina le ha già mandate la cassa, e si correggono in cassa. */
+const RigheCassa: React.FC<{ righe: RigheDallaCassa }> = ({ righe }) => {
+  const { t } = useTranslation('comande', { useSuspense: false });
+  return (
+    <section
+      aria-label={t('cassa.righeTitolo')}
+      className="rounded-[var(--ds-radius)] border border-dashed border-[var(--ds-border-strong)] p-3"
+    >
+      <div className="flex items-baseline justify-between gap-3 px-1">
+        <h3 className="text-[14px] font-semibold text-[var(--ds-text-secondary)]">{t('cassa.righeTitolo')}</h3>
+        {righe.totale_cents != null && (
+          <span className="text-[13px] tabular-nums text-[var(--ds-text-muted)]">
+            {t('cassa.righeTotale', { importo: euro(righe.totale_cents) })}
+          </span>
+        )}
+      </div>
+      {!righe.disponibile ? (
+        <p className="mt-2 px-1 text-[13px] text-[var(--ds-text-muted)]">{t('cassa.righeNonDisponibili')}</p>
+      ) : (
+        <div className="mt-2 flex flex-col gap-1.5">
+          {righe.righe.map(r => (
+            <div key={r.id} className="flex items-center gap-3 rounded-[var(--ds-radius)] bg-[var(--ds-surface-row)] px-3 py-2">
+              <span className="w-8 flex-shrink-0 text-[15px] font-semibold tabular-nums text-[var(--ds-text-primary)]">{r.pezzi}×</span>
+              <span className="min-w-0 flex-1 truncate text-[15px] text-[var(--ds-text-primary)]">{r.descrizione}</span>
+              {(r.stato === 'InProduzione' || r.stato === 'Fatto') && (
+                <StatusPill tone="info">{t('cassa.rigaPartita')}</StatusPill>
+              )}
+              <span className="flex-shrink-0 text-[15px] tabular-nums text-[var(--ds-text-muted)]">{euro(r.totale_cents)}</span>
+            </div>
+          ))}
+        </div>
+      )}
+    </section>
   );
 };
 

@@ -222,6 +222,9 @@ export const DOMAIN_EVENTS: Record<string, DomainEventSpec> = {
     // l'etichetta del palmare; la verità resta passepartout_comande_vive,
     // riletta con l'ordine.
     'passepartout:comanda-viva': spec('transient'),
+    // La comanda in cassa di un ordine è cambiata (righe battute in cassa o
+    // dal palmare): il pad rilegge le righe della cassa; nessun dato a bordo.
+    'passepartout:righe-cassa': spec('transient'),
 };
 
 export const eventSpec = (type: string): DomainEventSpec | undefined => DOMAIN_EVENTS[type];
