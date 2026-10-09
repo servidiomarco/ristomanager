@@ -14450,6 +14450,14 @@ async function nodeOwnsBills(tenantId: number): Promise<boolean> {
     return isServiceNode ? false : getFeatureFlag(tenantId, 'sala_node_authority_enabled', false);
 }
 
+/** Le comande in cassa (comanda viva) del ristorante le scrive un altro
+ *  processo: il nodo col servizio in sala, il cloud senza (fase 6). Sul
+ *  nodo nodeOwnsBills è sempre falso, quindi qui si legge l'interruttore. */
+async function comandeViveAltrove(tenantId: number): Promise<boolean> {
+    const inSala = await getFeatureFlag(tenantId, 'sala_node_authority_enabled', false);
+    return isServiceNode ? !inSala : inSala;
+}
+
 async function autoCloseSettledBill(tenantId: number, billId: number): Promise<any | null> {
     const prima = await queryWithRetry(
         `SELECT external_ref, opened_by_user_id FROM table_bills WHERE id = $1 AND tenant_id = $2`,
@@ -37480,7 +37488,7 @@ async function stampaComandaVivaInTx(
     }
     const cassaManda = r.v_stato !== 'FAILED'
         && passepartoutAgentSupports(tenantId, 'comanda-viva-invio')
-        && !(await nodeOwnsBills(tenantId))
+        && !(await comandeViveAltrove(tenantId))
         && await isFeatureEnabledForTenant(tenantId, 'passepartout');
     if (cassaManda && !uscitaDelCrm) return { daStampare: [], segna: [] };
     return { daStampare: rows, segna: rows.map((x: any) => Number(x.id)) };
@@ -43348,6 +43356,13 @@ const SNAPSHOT_TABLES: SnapshotTableSpec[] = [
     // I domini del tenant: la allowlist CORS del nodo li legge dal SUO
     // database — senza, il server del nodo rifiuterebbe i client CRM.
     { name: 'tenant_domains' },
+    // Comanda viva, fase 6: col servizio in sala gli ordini del CRM li
+    // scrive in cassa il nodo, che deve sapere come (interruttore, chi
+    // stampa, chi fa il conto, articolo per i piatti del CRM) e su quale
+    // tavolo della cassa. Niente segreti: le credenziali della cassa
+    // stanno sul PC. Prima i tavoli (FK), che vengono prima nell'elenco.
+    { name: 'passepartout_config' },
+    { name: 'passepartout_tavoli' },
     // Stato del servizio, finestrato: il nodo serve la sala, non lo storico
     // (i report restano sul cloud). 60 giorni coprono anche la ripresa di
     // una comanda appesa di un servizio passato.
@@ -44568,19 +44583,22 @@ const startServer = async () => {
                         startPassepartoutSpecchioSync({
                             tipoPagamentoEsterno: async (t) => (await getPassepartoutChiusuraConfig(t))?.tipoPagamento ?? null,
                         });
-                        // Gli ordini del CRM nella comanda in cassa del tavolo vero.
-                        startPassepartoutComandeVive({
-                            nodeOwnsBills,
-                            avvisa: (t, stato) => {
-                                try { socketService?.broadcastToAll(t, 'passepartout:comanda-viva', stato); } catch (_) {}
-                            },
-                            stampaDalCrm: stampaComandeViveDalCrm,
-                            chiudiOrdineChiusoInCassa,
-                            avvisaRigheCassa: (t, orderId) => {
-                                try { socketService?.broadcastToAll(t, 'passepartout:righe-cassa', { order_id: orderId }); } catch (_) {}
-                            },
-                        });
                     }
+                    // Gli ordini del CRM nella comanda in cassa del tavolo
+                    // vero: li scrive chi ha gli ordini, il cloud o (col
+                    // servizio in sala) il nodo — fase 6. L'agente è
+                    // collegato a tutti e due.
+                    startPassepartoutComandeVive({
+                        altrove: comandeViveAltrove,
+                        avvisa: (t, stato) => {
+                            try { socketService?.broadcastToAll(t, 'passepartout:comanda-viva', stato); } catch (_) {}
+                        },
+                        stampaDalCrm: stampaComandeViveDalCrm,
+                        chiudiOrdineChiusoInCassa,
+                        avvisaRigheCassa: (t, orderId) => {
+                            try { socketService?.broadcastToAll(t, 'passepartout:righe-cassa', { order_id: orderId }); } catch (_) {}
+                        },
+                    });
                     console.log('✅ Passepartout agent bridge attivo su /pp-agent');
                 }
                 // Sempre attivo, come il pp-agent: il token è per-tenant a DB,
