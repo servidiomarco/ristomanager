@@ -30,6 +30,9 @@ export const PAY_NAMESPACE = 'paytable';
 // questi caricati on-demand da useTranslation, mai in `ns`.
 export const RECEIPT_NAMESPACE = 'receipt';
 export const QUOTE_NAMESPACE = 'quote';
+// «La tua prenotazione» (/r/:token): l'ospite conferma o annulla dal link
+// dei messaggi. Stesso schema, caricato on-demand.
+export const BOOKING_NAMESPACE = 'booking';
 
 i18n
     .use(Backend)

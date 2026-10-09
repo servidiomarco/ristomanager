@@ -16,7 +16,7 @@ import { MessaggiPanel } from './prenotazione/MessaggiPanel';
 import { Reservation, PaymentStatus, BanquetMenu, Table, TableStatus, Shift, Room, TableShape, ArrivalStatus, ReservationStatus, ReservationSource, TableMerge, TableHiddenOverride, RoomClosedOverride, Customer, PaymentRequest, TableBillWithSplits, TableBill, NoteSelection, TableAssignmentSuggestion } from '../types';
 import { Banknote, Calendar, CreditCard, Clock, AlertCircle, Plus, Users, X, Trash2, Edit2, Wand2, Sun, Moon, Sunset, MapPin, ListFilter, Map as MapIcon, List, MessageCircle, Mail, Armchair, BellRing, CheckSquare, Square, UserCheck, UserX, Combine, Scissors, Check, CheckCheck, ChevronDown, ChevronLeft, ChevronRight, AlertTriangle, AlertOctagon, StickyNote, Mic, Loader2, Info, RotateCcw, Printer, Eye, EyeOff, BookUser, BookOpen, MoreHorizontal, Ban, Globe, Phone, Send, Star, Copy, ExternalLink, SlidersHorizontal, DoorClosed, CornerDownLeft, ArrowDownLeft, ArrowUpRight, Reply, Receipt, QrCode, Maximize2, Minimize2 } from 'lucide-react';
 import { QRCodeSVG } from 'qrcode.react';
-import { sendWhatsAppConfirmation, sendEmailConfirmation, sendCustomEmail, getTableMerges, getTableHidden, createTableHidden, deleteTableHidden, getRoomClosed, getCustomers, getReservationNotePresets, getReservationAllergenPresets, getPaymentRequests, createPaymentRequest, revokePaymentRequest, getReservationMessages, sendReservationReminder, OutboundMessage, getLegalSettings, getFeatureFlags, getOpeningHours, OpeningHoursRow, getActivePaymentProvider, getChannelSettings, RoomOccupancyCap, getTableAssignmentSuggestions, confirmTableAssignmentSuggestion, dismissTableAssignmentSuggestion } from '../services/apiService';
+import { sendWhatsAppConfirmation, sendEmailConfirmation, sendCustomEmail, getTableMerges, getTableHidden, createTableHidden, deleteTableHidden, getRoomClosed, getCustomers, getReservationNotePresets, getReservationAllergenPresets, getPaymentRequests, createPaymentRequest, revokePaymentRequest, getReservationMessages, sendReservationReminder, createReservationGuestLink, OutboundMessage, getLegalSettings, getFeatureFlags, getOpeningHours, OpeningHoursRow, getActivePaymentProvider, getChannelSettings, RoomOccupancyCap, getTableAssignmentSuggestions, confirmTableAssignmentSuggestion, dismissTableAssignmentSuggestion } from '../services/apiService';
 import { billsApiService, printBill } from '../services/billsApiService';
 import { swrConfig } from '../services/configCache';
 import { CustomerPickerModal } from './CustomerPickerModal';
@@ -287,6 +287,30 @@ const renderReminderIcon = (res: Reservation, tv: (k: string, o?: Record<string,
       <BellRing className="h-3.5 w-3.5" />
     </span>
   );
+};
+
+// L'ospite ha risposto dal link «Gestisci la prenotazione»: ha confermato
+// che ci sarà (verde, come la consegna riuscita) oppure ha annullato lui.
+// Il secondo vale anche sulla card annullata: dice chi l'ha fatto, così
+// nessuno richiama un ospite che ha già disdetto.
+const renderGuestAnswerIcon = (res: Reservation, tv: (k: string, o?: Record<string, unknown>) => string): React.ReactNode => {
+  if (res.guest_cancelled_at && res.reservation_status === ReservationStatus.CANCELLED) {
+    const title = tv('guestCancelled', { quando: formatConfirmationTs(res.guest_cancelled_at) });
+    return (
+      <span className={ATTR_BADGE} title={title} aria-label={title}>
+        <UserX className="h-3.5 w-3.5" />
+      </span>
+    );
+  }
+  if (res.guest_confirmed_at && res.reservation_status !== ReservationStatus.CANCELLED) {
+    const title = tv('guestConfirmed', { quando: formatConfirmationTs(res.guest_confirmed_at) });
+    return (
+      <span className={`${ATTR_BADGE} bg-[var(--ds-seated-tint)] text-[var(--ds-seated-text)]`} title={title} aria-label={title}>
+        <UserCheck className="h-3.5 w-3.5" />
+      </span>
+    );
+  }
+  return null;
 };
 
 // Payment badge (icon + tooltip) is now a shared component in
@@ -2879,6 +2903,20 @@ export const ReservationList: React.FC<ReservationListProps> = ({
       }
   };
 
+  // Il link «Gestisci la prenotazione» negli appunti: per chi scrive
+  // all'ospite da una chat sua, o glielo detta al telefono.
+  const handleCopyGuestLink = async () => {
+      const id = formData.id;
+      if (!id) return;
+      try {
+          const { url } = await createReservationGuestLink(id as number);
+          await navigator.clipboard.writeText(url);
+          showToast(tv('toast.guestLinkCopied'), 'success');
+      } catch {
+          showToast(tv('toast.copyFailed'), 'error');
+      }
+  };
+
   const handlePickConfirmationChannel = async (channel: 'sms' | 'whatsapp' | 'email') => {
       const target = confirmationPicker?.reservation;
       if (!target) return;
@@ -3453,6 +3491,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
         {renderChannelIcon(res, tv)}
         {renderConfirmationIcon(res, tv)}
         {renderReminderIcon(res, tv)}
+        {renderGuestAnswerIcon(res, tv)}
         {matchedNoteIcons.map(m => {
           const Icon = m.Icon!;
           return (
@@ -6395,6 +6434,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                           onSendReminder={handleSendReminder}
                           reminderSending={reminderSending}
                           reminderSent={formData.reminder_sent === true}
+                          onCopyGuestLink={handleCopyGuestLink}
                         />
                       </div>
                     )}

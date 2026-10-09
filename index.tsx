@@ -8,6 +8,7 @@ import { TodosProvider } from './contexts/TodosContext';
 import { PublicPayPageEntry } from './components/PublicPayPage';
 import { PublicReceiptPage } from './components/PublicReceiptPage';
 import { PublicQuotePage } from './components/PublicQuotePage';
+import { PublicReservationPage } from './components/PublicReservationPage';
 import I18nProvider from './i18n/I18nProvider';
 import './index.css';
 import { installClientErrorReporter } from './services/clientErrorReporter';
@@ -46,6 +47,9 @@ const isPublicReceiptRoute = /^\/scontrino\//.test(window.location.pathname);
 // Preventivo banchetto condiviso: il cliente apre il link ricevuto via
 // WhatsApp o email, niente login.
 const isPublicQuoteRoute = /^\/preventivo\//.test(window.location.pathname);
+// «La tua prenotazione»: il link «Gestisci la prenotazione» di conferma e
+// promemoria, dove l'ospite conferma o annulla da solo. Niente login.
+const isPublicReservationRoute = /^\/r\//.test(window.location.pathname);
 
 root.render(
   <React.StrictMode>
@@ -60,6 +64,10 @@ root.render(
     ) : isPublicQuoteRoute ? (
       <I18nProvider>
         <PublicQuotePage />
+      </I18nProvider>
+    ) : isPublicReservationRoute ? (
+      <I18nProvider>
+        <PublicReservationPage />
       </I18nProvider>
     ) : (
       // Anche la SPA autenticata passa dall'istanza i18n: la lingua qui non

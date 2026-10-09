@@ -295,6 +295,11 @@ export interface Reservation {
   banquet_menu_id?: number | null;
   enable_reminder?: boolean;
   reminder_sent?: boolean;
+  // «La tua prenotazione»: l'ospite ha confermato la presenza o annullato
+  // dal link nei messaggi (services/guestManage.ts). Assenti su un backend
+  // che non li conosce ancora.
+  guest_confirmed_at?: string | null;
+  guest_cancelled_at?: string | null;
   arrival_status?: ArrivalStatus;
   source?: ReservationSource;
   requires_review?: boolean;
