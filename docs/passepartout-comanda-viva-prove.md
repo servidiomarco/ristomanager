@@ -138,3 +138,17 @@ Sulla demo Passepartout del rivenditore (VM di prova, Menu 2026C1), collegata al
   - non tenere aperto in cassa un tavolo che riceve ordini dal CRM;
   - una comanda rimasta aperta in cassa su un tavolo blocca le righe del CRM su quel tavolo finché non si chiude o si sposta l'ordine.
 
+## Prove sulla demo del 09/10/2026, per la fase 4
+
+Comande di prova 1415, 1416 e 1417 sui tavoli SOPRA 8, 10 e 11, scritte via Web Service.
+
+| Prova | Esito |
+|---|---|
+| Comanda nuova con `Coperti` 2 e nessuna riga coperto | **Ignorato**: la cassa segna 1 coperto e non aggiunge la sua riga. Dipende dalla configurazione della sala |
+| `Coperti` cambiato su una comanda già aperta, o i `Pezzi` della riga coperto | **Ignorato**, sia prima sia dopo l'invio in produzione |
+| Riga coperto (`TipoEnum` Coperto, articolo del coperto) **senza `Prezzo`** | **Riuscito**: la cassa la prezza col suo listino (2 × 2,00 € nella demo) e segna i coperti giusti |
+| Modifiche e `ContoComanda` su una comanda mai mandata in produzione (stato 0) | Errore interno `NullReferenceException` in `PagamentoFBO.IsCancellabile`. Spiega la comanda vecchia del tavolo SOTTO 2. Al Frantoio invece funziona |
+| `ContoComanda` sulla demo, con qualunque tipo di pagamento e documento | Sempre «errore interno»: sulla demo la chiusura via Web Service non si può provare. Il sospetto è il tipo di pagamento «3DSECURE» legato a un provider non configurato. Le comande di prova restano da chiudere dal Menu Client |
+
+**Cosa decide:** con «conto: la cassa» (scelta dell'utente del 09/10: il coperto lo decide la cassa) il CRM scrive la riga coperto con i coperti e senza prezzo. Un cambio dei coperti dopo la prima scrittura può non arrivare in cassa: lì si corregge in cassa.
+

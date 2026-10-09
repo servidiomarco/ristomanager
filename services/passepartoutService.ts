@@ -1091,6 +1091,9 @@ export interface RigaViva {
     varianti: VarianteViva[];
     /** La riga coperto: TipoEnum Coperto sull'articolo del coperto. */
     coperto?: boolean;
+    /** Senza prezzo: lo mette la cassa dal suo listino (il coperto della
+     *  cassa con «conto: la cassa»; provato sulla demo il 09/10). */
+    prezzoDellaCassa?: boolean;
     /** Coperto e servizio del CRM: solo su una comanda nata dal CRM. Sul
      *  tavolo aperto dal palmare coperti e servizio sono quelli della cassa. */
     soloComandaNostra?: boolean;
@@ -1157,6 +1160,8 @@ function rigaVivaXml(f: {
     idRiga?: number | null;
     pezzi: number;
     prezzoCents: number;
+    /** Niente Prezzo né Totale: la cassa prende quello del suo listino. */
+    senzaPrezzo?: boolean;
     coperto?: boolean;
     uscita?: number | null;
     varianti?: VarianteViva[];
@@ -1170,10 +1175,10 @@ function rigaVivaXml(f: {
         (f.descrizione ? `<c:Descrizione>${xmlEscape(f.descrizione)}</c:Descrizione>` : '') +
         (f.idRiga != null ? `<c:IdGestionale>${f.idRiga}</c:IdGestionale>` : '') +
         `<c:Pezzi>${f.pezzi}</c:Pezzi>` +
-        `<c:Prezzo>${euro(f.prezzoCents)}</c:Prezzo>` +
+        (f.senzaPrezzo ? '' : `<c:Prezzo>${euro(f.prezzoCents)}</c:Prezzo>`) +
         (f.coperto ? '<c:TipoEnum>Coperto</c:TipoEnum>' : '') +
         '<c:Tool_EseguiInvio>false</c:Tool_EseguiInvio>' +
-        `<c:Totale>${euro(f.prezzoCents * f.pezzi)}</c:Totale>` +
+        (f.senzaPrezzo ? '' : `<c:Totale>${euro(f.prezzoCents * f.pezzi)}</c:Totale>`) +
         (f.uscita != null ? `<c:Uscita>${f.uscita}</c:Uscita>` : '') +
         (varianti.length
             ? '<c:Varianti>' + varianti.map((v) => '<c:PMBRigaVariante>' +
@@ -1187,7 +1192,7 @@ function rigaVivaXml(f: {
 
 /** La riga com'è in cassa, rimandata col suo IdGestionale e i campi da
  *  cambiare (come nelle prove 5a e 5c). */
-function rigaEsistenteXml(r: PassepartoutRigaComanda, cambia: { pezzi?: number; prezzoCents?: number; daCancellare?: boolean }): string {
+function rigaEsistenteXml(r: PassepartoutRigaComanda, cambia: { pezzi?: number; prezzoCents?: number; daCancellare?: boolean; prezzoDellaCassa?: boolean }): string {
     return rigaVivaXml({
         articolo: r.articolo,
         daCancellare: cambia.daCancellare,
@@ -1195,6 +1200,7 @@ function rigaEsistenteXml(r: PassepartoutRigaComanda, cambia: { pezzi?: number; 
         idRiga: r.idGestionale,
         pezzi: cambia.pezzi ?? Math.round(r.pezzi ?? 1),
         prezzoCents: cambia.prezzoCents ?? Math.round((r.prezzo ?? 0) * 100),
+        senzaPrezzo: cambia.prezzoDellaCassa,
         uscita: r.uscita,
     });
 }
@@ -1255,8 +1261,11 @@ export async function scriviComandaViva(
                 continue;
             }
             const cambiaPezzi = Math.round(inCassa.pezzi ?? 0) !== pezzi;
-            const cambiaPrezzo = Math.round((inCassa.prezzo ?? 0) * 100) !== r.prezzoCents;
-            if (cambiaPezzi || cambiaPrezzo) xmlRighe.push(rigaEsistenteXml(inCassa, { pezzi, prezzoCents: r.prezzoCents }));
+            // Il prezzo della cassa non si confronta: è suo.
+            const cambiaPrezzo = !r.prezzoDellaCassa && Math.round((inCassa.prezzo ?? 0) * 100) !== r.prezzoCents;
+            if (cambiaPezzi || cambiaPrezzo) {
+                xmlRighe.push(rigaEsistenteXml(inCassa, r.prezzoDellaCassa ? { pezzi, prezzoDellaCassa: true } : { pezzi, prezzoCents: r.prezzoCents }));
+            }
             esiti.set(r.chiave, { chiave: r.chiave, idRiga: idNoto, statoEnum: inCassa.statoEnum ?? null });
             continue;
         }
@@ -1273,9 +1282,12 @@ export async function scriviComandaViva(
         }
         // Sull'articolo generico il nome è quello del CRM; sugli articoli
         // della cassa la descrizione la completa la cassa dal catalogo.
-        const descrizione = r.coperto || art === generico || art?.codice == null
-            ? testoPerCassa(r.coperto ? 'Coperto' : r.descrizione, 60) || 'Voce'
-            : null;
+        // Il coperto della cassa prende anche la descrizione dal suo listino.
+        const descrizione = r.prezzoDellaCassa && art?.codice
+            ? null
+            : r.coperto || art === generico || art?.codice == null
+                ? testoPerCassa(r.coperto ? 'Coperto' : r.descrizione, 60) || 'Voce'
+                : null;
         // Il coperto senza uscita: in cassa sta sull'uscita 0 (prova 1).
         const uscita = r.coperto ? null : r.uscita;
         xmlRighe.push(rigaVivaXml({
@@ -1283,6 +1295,7 @@ export async function scriviComandaViva(
             descrizione,
             pezzi,
             prezzoCents: r.prezzoCents,
+            senzaPrezzo: r.prezzoDellaCassa === true && !!art?.codice,
             coperto: r.coperto,
             uscita,
             varianti: r.varianti,
