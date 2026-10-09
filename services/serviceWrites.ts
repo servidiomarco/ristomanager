@@ -39,6 +39,9 @@ export const SERVICE_WRITE_ROUTES: ServiceWriteRoute[] = [
     // Fase B5: la chiusura sul gestionale Passepartout la fa chi possiede il
     // conto — l'agente è collegato anche al nodo.
     { path: /^\/bills\/\d+\/passepartout-close$/ },
+    // Comanda viva, fase 6: il «Riprova» di un ordine fermo lo fa chi
+    // scrive gli ordini in cassa.
+    { path: /^\/passepartout\/comande-vive\/ordini\/\d+\/riprova$/, method: /^POST$/ },
     { path: /^\/cash\/session(\/\d+(\/close)?)?$/ },
     { path: /^\/print-jobs$/, method: /^POST$/ },
     // Il conto dell'asporto è un conto come gli altri.
