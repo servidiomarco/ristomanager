@@ -120,7 +120,7 @@ import { authenticate, authorize, requirePermission, requireAnyPermission, requi
 import { AuthService } from './auth/authService.js';
 import { publicKeysForNodes } from './auth/jwtKeys.js';
 import { serviceWriteRoute } from './services/serviceWrites.js';
-import { RolePermissionService, isReportsAdmin, ALL_PERMISSIONS, ALL_PERMISSION_KEYS, type Permission } from './auth/permissionService.js';
+import { RolePermissionService, isReportsAdmin, ALL_PERMISSIONS, ALL_PERMISSION_KEYS, clearPermissionCaches, type Permission } from './auth/permissionService.js';
 import { canAssignToRole } from './auth/permissions.js';
 import { LogService, ActivityAction, ResourceType } from './activityLogs/logService.js';
 import { isPushConfigured, getVapidPublicKey, sendToUser as pushSendToUser, sendToRoles as pushSendToRoles, sendToPlatformAdmins as pushSendToPlatformAdmins, setNotificationPersistListener } from './services/pushService.js';
@@ -44239,6 +44239,9 @@ const startServer = async () => {
                         clearTenantFeaturesCache();
                         // Stessa ragione per valuta/fuso/paese del tenant.
                         clearTenantLocaleCache();
+                        // E per la matrice dei permessi, che createSchema e
+                        // le migration seminano riga per riga.
+                        clearPermissionCaches();
                         // L'outbox parte solo a migration riuscite (la sua
                         // tabella deve esistere). Il primo giro consegna ciò
                         // che un eventuale crash aveva lasciato indietro.
