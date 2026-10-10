@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="ISO-8859-1"?>
+<p:FatturaElettronica versione="FPR12" xmlns:p="http://ivaservizi.agenziaentrate.gov.it/docs/xsd/fatture/v1.2">
+<FatturaElettronicaHeader>
+<DatiTrasmissione><IdTrasmittente><IdPaese>IT</IdPaese><IdCodice>33333333331</IdCodice></IdTrasmittente><ProgressivoInvio>1</ProgressivoInvio><FormatoTrasmissione>FPR12</FormatoTrasmissione><CodiceDestinatario>ABC1234</CodiceDestinatario></DatiTrasmissione>
+<CedentePrestatore><DatiAnagrafici><IdFiscaleIVA><IdPaese>IT</IdPaese><IdCodice>33333333331</IdCodice></IdFiscaleIVA><Anagrafica><Nome>Mario</Nome><Cognome>Caseificio Prova</Cognome></Anagrafica><RegimeFiscale>RF01</RegimeFiscale></DatiAnagrafici><Sede><Indirizzo>Via del Latte 4</Indirizzo><CAP>00400</CAP><Comune>Prova</Comune><Nazione>IT</Nazione></Sede></CedentePrestatore>
+<CessionarioCommittente><DatiAnagrafici><IdFiscaleIVA><IdPaese>IT</IdPaese><IdCodice>01234567897</IdCodice></IdFiscaleIVA><Anagrafica><Denominazione>RISTORANTE DI PROVA S.R.L.</Denominazione></Anagrafica></DatiAnagrafici><Sede><Indirizzo>Via delle Prove 1</Indirizzo><CAP>00100</CAP><Comune>Paese di Prova</Comune><Nazione>IT</Nazione></Sede></CessionarioCommittente>
+</FatturaElettronicaHeader>
+<FatturaElettronicaBody>
+<DatiGenerali><DatiGeneraliDocumento><TipoDocumento>TD01</TipoDocumento><Divisa>EUR</Divisa><Data>2026-10-05</Data><Numero>A/77</Numero><ImportoTotaleDocumento>43.54</ImportoTotaleDocumento><Causale>Merce consegnata</Causale><Causale>al mattino</Causale></DatiGeneraliDocumento>
+<DatiDDT><NumeroDDT>D-9</NumeroDDT><DataDDT>2026-10-04</DataDDT></DatiDDT></DatiGenerali>
+<DatiBeniServizi>
+<DettaglioLinee><NumeroLinea>1</NumeroLinea><CodiceArticolo><CodiceTipo>INTERNO</CodiceTipo><CodiceValore>MOZZ-1</CodiceValore></CodiceArticolo><Descrizione>Mozzarella fior di latte   caffè latte kg 1</Descrizione><Quantita>4.00</Quantita><UnitaMisura>KG</UnitaMisura><PrezzoUnitario>10.00</PrezzoUnitario><ScontoMaggiorazione><Tipo>SC</Tipo><Percentuale>10.00</Percentuale></ScontoMaggiorazione><PrezzoTotale>36.00</PrezzoTotale><AliquotaIVA>4.00</AliquotaIVA><AltriDatiGestionali><TipoDato>N.LOTTO</TipoDato><RiferimentoTesto>L-4455</RiferimentoTesto></AltriDatiGestionali><AltriDatiGestionali><TipoDato>SCADENZA</TipoDato><RiferimentoData>2026-10-20</RiferimentoData></AltriDatiGestionali></DettaglioLinee>
+<DettaglioLinee><NumeroLinea>2</NumeroLinea><Descrizione>Ricotta omaggio</Descrizione><Quantita>2.00</Quantita><UnitaMisura>PZ</UnitaMisura><PrezzoUnitario>0.00</PrezzoUnitario><PrezzoTotale>0.00</PrezzoTotale><AliquotaIVA>4.00</AliquotaIVA></DettaglioLinee>
+<DettaglioLinee><NumeroLinea>3</NumeroLinea><TipoCessionePrestazione>AC</TipoCessionePrestazione><Descrizione>Trasporto</Descrizione><Quantita>1.00</Quantita><PrezzoUnitario>5.00</PrezzoUnitario><PrezzoTotale>5.00</PrezzoTotale><AliquotaIVA>22.00</AliquotaIVA></DettaglioLinee>
+<DatiRiepilogo><AliquotaIVA>4.00</AliquotaIVA><ImponibileImporto>36.00</ImponibileImporto><Imposta>1.44</Imposta></DatiRiepilogo>
+<DatiRiepilogo><AliquotaIVA>22.00</AliquotaIVA><ImponibileImporto>5.00</ImponibileImporto><Imposta>1.10</Imposta></DatiRiepilogo>
+</DatiBeniServizi>
+<DatiPagamento><CondizioniPagamento>TP02</CondizioniPagamento><DettaglioPagamento><ModalitaPagamento>MP05</ModalitaPagamento><DataScadenzaPagamento>2026-11-05</DataScadenzaPagamento><ImportoPagamento>43.54</ImportoPagamento><IstitutoFinanziario>Banca di Prova</IstitutoFinanziario><IBAN>IT60X0542811101000000123456</IBAN></DettaglioPagamento></DatiPagamento>
+</FatturaElettronicaBody>
+<FatturaElettronicaBody>
+<DatiGenerali><DatiGeneraliDocumento><TipoDocumento>TD04</TipoDocumento><Divisa>EUR</Divisa><Data>2026-10-06</Data><Numero>NC/3</Numero><ImportoTotaleDocumento>10.40</ImportoTotaleDocumento></DatiGeneraliDocumento></DatiGenerali>
+<DatiBeniServizi>
+<DettaglioLinee><NumeroLinea>1</NumeroLinea><CodiceArticolo><CodiceTipo>INTERNO</CodiceTipo><CodiceValore>MOZZ-1</CodiceValore></CodiceArticolo><Descrizione>Reso mozzarella</Descrizione><Quantita>1.00</Quantita><UnitaMisura>KG</UnitaMisura><PrezzoUnitario>10.00</PrezzoUnitario><PrezzoTotale>10.00</PrezzoTotale><AliquotaIVA>4.00</AliquotaIVA></DettaglioLinee>
+<DatiRiepilogo><AliquotaIVA>4.00</AliquotaIVA><ImponibileImporto>10.00</ImponibileImporto><Imposta>0.40</Imposta></DatiRiepilogo>
+</DatiBeniServizi>
+</FatturaElettronicaBody>
+</p:FatturaElettronica>

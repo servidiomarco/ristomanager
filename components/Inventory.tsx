@@ -28,9 +28,12 @@ import { useAuth } from '../contexts/AuthContext';
 import { toTitleCase } from '../utils/text';
 import {
   Loader2, Plus, Pencil, Trash2, Boxes, GripVertical, Check, MoreVertical,
-  ChefHat, Wine, GlassWater, AlertTriangle, Tag, Search, Printer, Container,
+  ChefHat, Wine, GlassWater, AlertTriangle, Tag, Search, Printer, Container, Receipt,
 } from 'lucide-react';
 import { PrintInventoryModal } from './PrintInventoryModal';
+import { FattureFornitori } from './fatture/FattureFornitori';
+import { fattureFornitoriApi } from '../services/fattureFornitoriApiService';
+import { onSocketEvent } from '../services/socketEvents';
 import { SkeletonProductList } from './SkeletonCards';
 import {
   ModalShell, Sheet, SegmentedControl, SearchField, SectionHeader, StatStrip,
@@ -81,6 +84,13 @@ export const Inventory: React.FC<Props> = ({ showToast, autoOpenNewProduct, onAu
   const areaLabel = (a: InventoryArea) => t(`area.${a}`, AREA_LABEL[a]);
   const { hasPermission } = useAuth();
   const canEdit = hasPermission('inventory:full');
+  // Le fatture dei fornitori portano i prezzi d'acquisto: le vede solo chi ha
+  // inventory:invoices (la cucina carica e scarica, ma i prezzi no).
+  const canInvoices = hasPermission('inventory:invoices');
+  const [fattureAperte, setFattureAperte] = useState(false);
+  const [fattureDaControllare, setFattureDaControllare] = useState(0);
+  // Un carico da fattura cambia le giacenze: tornando qui si rileggono.
+  const [ricarica, setRicarica] = useState(0);
 
   const [activeArea, setActiveArea] = useState<InventoryArea>(InventoryArea.CUCINA);
   // null = "Totale" tab (sum across all locations of the area)
@@ -205,7 +215,16 @@ export const Inventory: React.FC<Props> = ({ showToast, autoOpenNewProduct, onAu
     return () => {
       cancelled = true;
     };
-  }, [activeArea]);
+  }, [activeArea, ricarica]);
+
+  useEffect(() => {
+    if (!canInvoices) return undefined;
+    const leggi = () => {
+      fattureFornitoriApi.conteggio().then(r => setFattureDaControllare(r.daControllare)).catch(() => {});
+    };
+    leggi();
+    return onSocketEvent('fatture:changed', leggi);
+  }, [canInvoices]);
 
   // A new search is a new question — the previous cross-area answer would be
   // about a term nobody typed any more.
@@ -742,6 +761,14 @@ export const Inventory: React.FC<Props> = ({ showToast, autoOpenNewProduct, onAu
   // containers: a dropdown where there is a pointer, a bottom sheet where there
   // is a thumb.
   const manageActions = [
+    ...(canInvoices
+      ? [{
+          icon: Receipt,
+          label: t('supplierInvoices', 'Fatture fornitori'),
+          meta: fattureDaControllare > 0 ? String(fattureDaControllare) : null as string | null,
+          onClick: () => setFattureAperte(true),
+        }]
+      : []),
     { icon: Printer, label: t('print'), meta: null as string | null, onClick: () => setPrintModalOpen(true) },
     ...(canEdit
       ? [
@@ -981,6 +1008,22 @@ export const Inventory: React.FC<Props> = ({ showToast, autoOpenNewProduct, onAu
     );
   };
 
+  if (fattureAperte) {
+    return (
+      <div className="flex h-full min-h-0 flex-col">
+        <div className="min-h-0 flex-1 overflow-y-auto p-4 sm:p-6 lg:p-8">
+          <div className="mx-auto max-w-3xl">
+            <FattureFornitori
+              showToast={showToast}
+              onConteggio={setFattureDaControllare}
+              onBack={() => { setFattureAperte(false); setRicarica(n => n + 1); }}
+            />
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     // La pagina possiede il proprio scorrimento invece di lasciar scorrere il
     // contenitore dell'app: è quello che tiene il contenuto SOPRA la barra di
@@ -1018,7 +1061,7 @@ export const Inventory: React.FC<Props> = ({ showToast, autoOpenNewProduct, onAu
         <div className="flex flex-shrink-0 items-center gap-2">
           <StatStrip
             layout="stacked"
-            className="min-w-0 flex-1 lg:w-[300px] lg:flex-none"
+            className={`min-w-0 flex-1 lg:flex-none ${canInvoices ? 'lg:w-[440px]' : 'lg:w-[300px]'}`}
             stats={[
               { value: products.length, label: t('products') },
               {
@@ -1029,6 +1072,16 @@ export const Inventory: React.FC<Props> = ({ showToast, autoOpenNewProduct, onAu
                 onClick: lowStockProducts.length > 0 ? () => setOnlyLowStock(v => !v) : undefined,
                 title: onlyLowStock ? t('showAllProducts') : t('showOnlyLow'),
               },
+              ...(canInvoices
+                ? [{
+                    value: fattureDaControllare,
+                    label: t('invoicesToCheck', 'fatture', { count: fattureDaControllare }),
+                    tone: (fattureDaControllare > 0 ? 'pending' : 'neutral') as 'pending' | 'neutral',
+                    tint: fattureDaControllare > 0,
+                    onClick: () => setFattureAperte(true),
+                    title: t('supplierInvoices', 'Fatture fornitori'),
+                  }]
+                : []),
             ]}
           />
           {/* Everything you do to the inventory rather than in it. A dropdown on

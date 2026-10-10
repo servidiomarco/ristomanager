@@ -310,6 +310,7 @@ import {
 import { formatMoneyMinor } from './utils/money.js';
 import { createHaccpRouter, haccpSensorWatchTick, runHaccpExpiryReminder, runHaccpMissingReminder, type HaccpDeps } from './services/haccpRoutes.js';
 import { createFoodCostRouter } from './services/foodCostRoutes.js';
+import { createFattureFornitoriRouter } from './services/fattureFornitoriRoutes.js';
 import { shoppingReminderBody } from './utils/shoppingReminder.js';
 import { describeShiftChanges, shiftDayLabel, type ShiftDayChange } from './utils/staffShiftChange.js';
 import { buildEReceiptPayload, buildFatturaPaXml, getFiscalDriver, type FiscalSeller, type InvoiceBuyer } from './services/fiscalService.js';
@@ -29033,6 +29034,24 @@ app.use('/food-cost', createFoodCostRouter({
     categorieSenzaRicetta: async tenantId => {
         const prefs = await getMenuCategoryPrefs(tenantId);
         return Object.entries(prefs).filter(([, p]) => p?.wine === true || p?.bar === true).map(([c]) => c);
+    },
+}));
+
+// Fatture fornitori: dall'XML della fattura al carico del magazzino e ai
+// prezzi del food cost. Le rotte stanno in services/fattureFornitoriRoutes.ts;
+// da qui il socket, l'entitlement del food cost, la P.IVA del locale e la
+// chiusura delle push «scorta bassa» quando un carico le risolve.
+app.use('/fatture-fornitori', createFattureFornitoriRouter({
+    broadcast: (tenantId, event, data, excludeSocketId) => {
+        socketService?.broadcastToAll(tenantId, event, data, excludeSocketId);
+    },
+    foodCostAttivo: tenantId => isFeatureEnabledForTenant(tenantId, 'food_cost'),
+    partitaIvaLocale: tenantId => getFiscalVatNumber(tenantId),
+    dopoCarico: async (tenantId, variazioni) => {
+        const tags = variazioni
+            .filter(v => v.prima <= LOW_STOCK_THRESHOLD && v.dopo > LOW_STOCK_THRESHOLD)
+            .map(v => lowStockTag(v.productId));
+        if (tags.length) await markSharedNotificationsRead(tenantId, tags);
     },
 }));
 

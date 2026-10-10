@@ -1,0 +1,140 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no"?><ns3:FatturaElettronica xmlns:ns2="http://www.w3.org/2000/09/xmldsig#" xmlns:ns3="http://ivaservizi.agenziaentrate.gov.it/docs/xsd/fatture/v1.2" versione="FPR12">
+    <FatturaElettronicaHeader>
+        <DatiTrasmissione>
+            <IdTrasmittente>
+                <IdPaese>IT</IdPaese>
+                <IdCodice>09876543210</IdCodice>
+            </IdTrasmittente>
+            <ProgressivoInvio>I2KME</ProgressivoInvio>
+            <FormatoTrasmissione>FPR12</FormatoTrasmissione>
+            <CodiceDestinatario>ABC1234</CodiceDestinatario>
+            <ContattiTrasmittente>
+                <Telefono>000-111111</Telefono>
+            </ContattiTrasmittente>
+        </DatiTrasmissione>
+        <CedentePrestatore>
+            <DatiAnagrafici>
+                <IdFiscaleIVA>
+                    <IdPaese>IT</IdPaese>
+                    <IdCodice>11111111115</IdCodice>
+                </IdFiscaleIVA>
+                <CodiceFiscale>11111111115</CodiceFiscale>
+                <Anagrafica>
+                    <Denominazione>Ortofrutta di Prova S.R.L.</Denominazione>
+                </Anagrafica>
+                <RegimeFiscale>RF01</RegimeFiscale>
+            </DatiAnagrafici>
+            <Sede>
+                <Indirizzo>Via degli Orti 2</Indirizzo>
+                <CAP>00200</CAP>
+                <Comune>Borgo di Prova</Comune>
+                <Provincia>RM</Provincia>
+                <Nazione>IT</Nazione>
+            </Sede>
+            <Contatti>
+                <Telefono>000-000000</Telefono>
+                <Email>ortofrutta@example.com</Email>
+            </Contatti>
+        </CedentePrestatore>
+        <CessionarioCommittente>
+            <DatiAnagrafici>
+                <IdFiscaleIVA>
+                    <IdPaese>IT</IdPaese>
+                    <IdCodice>01234567897</IdCodice>
+                </IdFiscaleIVA>
+                <Anagrafica>
+                    <Denominazione>RISTORANTE DI PROVA S.R.L.</Denominazione>
+                </Anagrafica>
+            </DatiAnagrafici>
+            <Sede>
+                <Indirizzo>Via delle Prove 1</Indirizzo>
+                <CAP>00100</CAP>
+                <Comune>Paese di Prova</Comune>
+                <Provincia>RM</Provincia>
+                <Nazione>IT</Nazione>
+            </Sede>
+        </CessionarioCommittente>
+        <TerzoIntermediarioOSoggettoEmittente>
+            <DatiAnagrafici>
+                <IdFiscaleIVA>
+                    <IdPaese>IT</IdPaese>
+                    <IdCodice>09876543210</IdCodice>
+                </IdFiscaleIVA>
+                <CodiceFiscale>09876543210</CodiceFiscale>
+                <Anagrafica>
+                    <Denominazione>INTERMEDIARIO DI PROVA SRL</Denominazione>
+                </Anagrafica>
+            </DatiAnagrafici>
+        </TerzoIntermediarioOSoggettoEmittente>
+        <SoggettoEmittente>TZ</SoggettoEmittente>
+    </FatturaElettronicaHeader>
+    <FatturaElettronicaBody>
+        <DatiGenerali>
+            <DatiGeneraliDocumento>
+                <TipoDocumento>TD01</TipoDocumento>
+                <Divisa>EUR</Divisa>
+                <Data>2026-09-30</Data>
+                <Numero>4014</Numero>
+                <ImportoTotaleDocumento>249.60</ImportoTotaleDocumento>
+            </DatiGeneraliDocumento>
+        </DatiGenerali>
+        <DatiBeniServizi>
+            <DettaglioLinee>
+                <NumeroLinea>1</NumeroLinea>
+                <CodiceArticolo>
+                    <CodiceTipo>AswArtFor</CodiceTipo>
+                    <CodiceValore>0192</CodiceValore>
+                </CodiceArticolo>
+                <Descrizione>OLIVE FRESCHE BELLE DI CERIGNOLA CAL22</Descrizione>
+                <Quantita>150.00</Quantita>
+                <UnitaMisura>COLLI</UnitaMisura>
+                <PrezzoUnitario>1.60</PrezzoUnitario>
+                <PrezzoTotale>240.00</PrezzoTotale>
+                <AliquotaIVA>4.00</AliquotaIVA>
+                <AltriDatiGestionali>
+                    <TipoDato>LOTTO</TipoDato>
+                    <RiferimentoTesto>030613080526</RiferimentoTesto>
+                </AltriDatiGestionali>
+            </DettaglioLinee>
+            <DettaglioLinee>
+                <NumeroLinea>2</NumeroLinea>
+                <Descrizione>-</Descrizione>
+                <PrezzoUnitario>0.00</PrezzoUnitario>
+                <PrezzoTotale>0.00</PrezzoTotale>
+                <AliquotaIVA>4.00</AliquotaIVA>
+                <AltriDatiGestionali>
+                    <TipoDato>INFO</TipoDato>
+                    <RiferimentoTesto>Origine come da etichetta/lotto imballaggio, se non</RiferimentoTesto>
+                </AltriDatiGestionali>
+                <AltriDatiGestionali>
+                    <TipoDato>INFO</TipoDato>
+                    <RiferimentoTesto>specificata si intende di cat. II è di prov. IT, ed il</RiferimentoTesto>
+                </AltriDatiGestionali>
+                <AltriDatiGestionali>
+                    <TipoDato>INFO</TipoDato>
+                    <RiferimentoTesto>lotto corrisponde alla data del documento.</RiferimentoTesto>
+                </AltriDatiGestionali>
+            </DettaglioLinee>
+            <DatiRiepilogo>
+                <AliquotaIVA>4.00</AliquotaIVA>
+                <ImponibileImporto>240.00</ImponibileImporto>
+                <Imposta>9.60</Imposta>
+                <EsigibilitaIVA>I</EsigibilitaIVA>
+            </DatiRiepilogo>
+        </DatiBeniServizi>
+        <DatiPagamento>
+            <CondizioniPagamento>TP02</CondizioniPagamento>
+            <DettaglioPagamento>
+                <ModalitaPagamento>MP01</ModalitaPagamento>
+                <DataScadenzaPagamento>2026-09-30</DataScadenzaPagamento>
+                <ImportoPagamento>249.60</ImportoPagamento>
+            </DettaglioPagamento>
+        </DatiPagamento>
+        <Allegati>
+            <NomeAttachment>Fattura.pdf</NomeAttachment>
+            <FormatoAttachment>PDF</FormatoAttachment>
+            <DescrizioneAttachment>Copia di cortesia</DescrizioneAttachment>
+            <Attachment>JVBERi0xLjQKJSBjb3BpYSBkaSBjb3J0ZXNpYSBkaSBwcm92YQolJUVPRgo=</Attachment>
+        </Allegati>
+    </FatturaElettronicaBody>
+</ns3:FatturaElettronica>

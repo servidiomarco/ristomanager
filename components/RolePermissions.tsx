@@ -62,6 +62,9 @@ const PERMISSION_LABELS: Record<string, { key: string; it: string }> = {
   'haccp:view':              { key: 'perm.p.haccpView', it: 'Visualizza registri e report' },
   'haccp:record':            { key: 'perm.p.haccpRecord', it: 'Compila e corregge' },
   'haccp:manage':            { key: 'perm.p.haccpManage', it: 'Configura punti e limiti' },
+  'inventory:view':          { key: 'perm.p.view', it: 'Visualizza' },
+  'inventory:full':          { key: 'perm.p.edit', it: 'Modifica' },
+  'inventory:invoices':      { key: 'perm.p.inventoryInvoices', it: 'Fatture fornitori e prezzi d\'acquisto' },
   'foodcost:view':           { key: 'perm.p.foodcostView', it: 'Visualizza costi e margini' },
   'foodcost:manage':         { key: 'perm.p.foodcostManage', it: 'Modifica prezzi e schede' }
 };
