@@ -517,6 +517,14 @@
     "hereError": "Can't connect: reload the page",
     "hereHint": "It needs the microphone (the browser asks on the first call) and the CRM page open. A headset works best.",
     "device": "Device",
-    "removeDevice": "Turn this device off"
+    "removeDevice": "Turn this device off",
+    "outsideSlots": "Outside the time slots",
+    "slotFrom": "From",
+    "slotTo": "To",
+    "slotRemove": "Remove this time slot",
+    "slotDays": "Days",
+    "slotMode": "In this time slot",
+    "slotInvalid": "Pick at least one day and two different times",
+    "slotAdd": "Time slot"
   }
 }

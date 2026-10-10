@@ -517,6 +517,14 @@
     "hereError": "Non riesco a collegarmi: ricarica la pagina",
     "hereHint": "Serve il microfono (il browser lo chiede alla prima chiamata) e la pagina del CRM aperta. Meglio con una cuffia.",
     "device": "Dispositivo",
-    "removeDevice": "Spegni questo dispositivo"
+    "removeDevice": "Spegni questo dispositivo",
+    "outsideSlots": "Fuori dalle fasce",
+    "slotFrom": "Dalle",
+    "slotTo": "Alle",
+    "slotRemove": "Togli questa fascia",
+    "slotDays": "Giorni",
+    "slotMode": "In questa fascia",
+    "slotInvalid": "Scegli almeno un giorno e due orari diversi",
+    "slotAdd": "Fascia oraria"
   }
 }

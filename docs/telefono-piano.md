@@ -144,11 +144,11 @@ Il banner ha la fase (`stage`: ringing / sofia / staff, evento `phoneCall:update
   - con «Rifiuta» la chiamata è passata a Sofia: `DialCallStatus = busy`, `CallStatus = ringing`;
   - lasciando squillare il CRM per 15 s, la chiamata si è chiusa invece di passare a Sofia. Twilio ha mandato ad `after-dial` `CallStatus = no-answer` (con `answerOnBridge` la chiamata del cliente risulta «no-answer» finché non viene collegata, come dice il changelog TwiML del 2020-12-09) e `after-dial` l'ha letto come cliente andato via. La status callback «no-answer» è arrivata nello stesso istante.
   - **Correzione:** il `<Dial>` dello squillo non usa più `answerOnBridge`: Twilio risponde subito e fa sentire lo squillo italiano (`ringTone="it"`), come nella prova della Fase 0, in cui dopo il «no-answer» Sofia ha preso la chiamata. `after-dial` considera chiusa la chiamata solo con `completed`, `canceled` o `failed`. Lo squillo resta a carico del chiamante come una chiamata risposta: sono i secondi di attesa.
-- **Restano per dopo:**
-  - regole per fascia oraria e interruttore rapido «Sofia risponde adesso»;
-  - pagina del registro;
-  - nota a fine chiamata;
-  - collegamento automatico della prenotazione fatta in chiamata a `phone_calls`.
+- **Completata il 10/10 (seconda PR):**
+  - **fasce orarie** nella stessa riga `app_settings.phone_routing` (`slots`: giorni 1–7, dalle–alle, anche oltre mezzanotte, al massimo 8) e **interruttore rapido** (`override`: modo e scadenza; 1 ora, 2 ore o «fino a stanotte» = le 4). Chi risponde adesso lo decide `effectivePhoneMode` in `utils/phoneSchedule.ts`, condiviso fra server (inbound) e CRM (pastiglia in testata, `GET/PUT /phone/mode`, evento `phoneRouting:changed`);
+  - **registro** in Chiamate › Registro (`GET /phone/calls`, filtri all/missed/staff/sofia/outbound, ricerca, pagine da 50);
+  - **nota a fine chiamata** (`phone_calls.note`, `PUT /phone/calls/:id|CallSid/note`): la card «chi chiama» mostra l'ultima nota dello stesso numero (`card.last_note`);
+  - **prenotazione collegata** (`phone_calls.reservation_id`): esplicita da «Nuova prenotazione» nella card o nel registro (`POST /phone/calls/:ref/reservation`), automatica in `POST /reservations` per una chiamata presa dal locale o in uscita con lo stesso numero negli ultimi 45 minuti. Per Sofia vale `voice_calls.reservation_id`.
 
 **Piano originale:**
 - **Twilio Voice JS SDK** (`@twilio/voice-sdk`), con TwiML App e API key in nuove variabili `TWILIO_API_KEY_*` e `TWILIO_TWIML_APP_SID`.

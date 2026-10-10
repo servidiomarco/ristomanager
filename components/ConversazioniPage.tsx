@@ -28,6 +28,7 @@ import {
 import type { PillTone } from './ds';
 import { sessionTimeZone } from '../utils/displayTime';
 import { callFromCrm } from '../services/softphone';
+import { PhoneCallLog } from './phone/PhoneCallLog';
 
 const formatDuration = (secs: number | null | undefined): string => {
   if (secs == null || !Number.isFinite(secs) || secs < 0) return '—';
@@ -717,14 +718,19 @@ interface ConversazioniPageProps {
   onFollowUpChanged?: () => void;
   onCreateReservationFromCall?: (prefill: { callId: number; customer_name: string; phone: string }) => void;
   onOpenCustomerProfile?: (args: { phone: string }) => void;
+  /** «Crea prenotazione» dal registro: la prenotazione si aggancia alla chiamata. */
+  onCreateReservationFromPhoneCall?: (prefill: { phone_call_ref: string; customer_name?: string; phone?: string }) => void;
   // Bumped by App when a background mutation touches voice_calls (e.g. the
   // quick-create flow links the call to the new reservation) so list and
   // open detail refetch without a manual page reload.
   refreshTick?: number;
 }
 
-const ConversazioniPage: React.FC<ConversazioniPageProps> = ({ reservations, onFollowUpChanged, onCreateReservationFromCall, onOpenCustomerProfile, refreshTick }) => {
+const ConversazioniPage: React.FC<ConversazioniPageProps> = ({ reservations, onFollowUpChanged, onCreateReservationFromCall, onOpenCustomerProfile, onCreateReservationFromPhoneCall, refreshTick }) => {
   const { t } = useTranslation('chiamate', { useSuspense: false });
+  // Due viste: le conversazioni di Sofia (da ricontattare, trascrizioni) e il
+  // registro di tutte le chiamate del numero, prese dal locale comprese.
+  const [pane, setPane] = useState<'sofia' | 'log'>('sofia');
   // Riparte dall'ultimo stato noto della vista di partenza (cache
   // modulo-level, pre-riempita al login): la pagina viene smontata a ogni
   // cambio vista e senza questo ogni rientro mostrava lo spinner. Il fetch
@@ -1039,6 +1045,33 @@ const ConversazioniPage: React.FC<ConversazioniPageProps> = ({ reservations, onF
     );
   };
 
+  const switcher = (
+    <SegmentedControl
+      value={pane}
+      onChange={next => setPane(next === 'log' ? 'log' : 'sofia')}
+      ariaLabel={t('log.view')}
+      size="sm"
+      options={[
+        { value: 'sofia', label: t('log.tabSofia') },
+        { value: 'log', label: t('log.tabLog') },
+      ]}
+    />
+  );
+
+  if (pane === 'log') {
+    return (
+      <>
+        <h1 className="sr-only">{t('pageTitle')}</h1>
+        <PhoneCallLog
+          switcher={switcher}
+          onOpenSofiaCall={(id) => { setPane('sofia'); setSelectedId(id); }}
+          onOpenCustomerProfile={onOpenCustomerProfile}
+          onCreateReservation={onCreateReservationFromPhoneCall}
+        />
+      </>
+    );
+  }
+
   return (
     <>
       {/* No visible page title: the desktop sidebar and the mobile switcher
@@ -1048,6 +1081,7 @@ const ConversazioniPage: React.FC<ConversazioniPageProps> = ({ reservations, onF
         detailOpen={selectedId !== null}
         toolbar={
           <div className="space-y-3">
+            {switcher}
             {/* One row: search, filters, sync. Filters live behind the toggle
                 because they cost more vertical space than the first two rows
                 of results. */}

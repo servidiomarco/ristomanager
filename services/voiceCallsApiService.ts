@@ -1,6 +1,7 @@
 import { authApiService } from './authApiService';
 import { socketClient } from './socketClient';
 import { buildApiError } from './apiError';
+import type { EffectivePhoneMode, PhoneAnswerMode, PhoneRoutingOverride, PhoneRoutingSlot } from '../utils/phoneSchedule';
 
 const API_URL = import.meta.env.VITE_API_URL || 'https://ristomanager-production.up.railway.app';
 
@@ -128,6 +129,9 @@ export interface CallerCard {
     children: number | null;
     reservation_status: string;
   }[];
+  /** L'ultima nota a fine chiamata per questo numero. Assente dai server
+   *  precedenti al registro. */
+  last_note?: { text: string; at: string } | null;
 }
 
 export type LiveCallStage = 'ringing' | 'sofia' | 'staff';
@@ -145,10 +149,44 @@ export interface LiveCall {
 
 /** Chi risponde al numero di Sofia (services/phoneRouting.ts sul server). */
 export interface PhoneRouting {
-  mode: 'solo_sofia' | 'prima_locale';
+  mode: PhoneAnswerMode;
   mobiles: string[];
   ring_seconds: number;
+  /** Assenti dai server precedenti alle fasce: leggerli come vuoti. */
+  slots?: PhoneRoutingSlot[];
+  override?: PhoneRoutingOverride | null;
+  effective?: EffectivePhoneMode;
 }
+
+/** Chi risponde adesso, per la testata. */
+export interface PhoneModeState {
+  effective: EffectivePhoneMode;
+  base_mode: PhoneAnswerMode;
+  override: PhoneRoutingOverride | null;
+}
+
+/** Una riga del registro (GET /phone/calls). */
+export interface PhoneCallRow {
+  id: number;
+  call_sid: string;
+  direction: 'inbound' | 'outbound';
+  /** L'altro capo: chi ha chiamato, o chi è stato chiamato dal CRM. */
+  phone: string | null;
+  customer: { id: number; name: string; phone: string | null } | null;
+  status: 'ringing' | 'sofia' | 'answered' | 'missed';
+  missed_reason: string | null;
+  routing: string;
+  answered_by: { kind: 'user'; name: string | null } | { kind: 'mobile'; number: string } | null;
+  started_at: string;
+  answered_at: string | null;
+  duration_seconds: number | null;
+  note: string | null;
+  voice_call_id: number | null;
+  follow_up_status: string | null;
+  reservation: { id: number; reservation_time: string; guests: number } | null;
+}
+
+export type PhoneCallsFilter = 'all' | 'missed' | 'staff' | 'sofia' | 'outbound';
 
 export interface PhoneDevice {
   id: number;
@@ -320,6 +358,45 @@ class VoiceCallsApiService {
       method: 'PUT',
       headers: { ...getHeaders(), 'Content-Type': 'application/json' },
       body: JSON.stringify(routing),
+    });
+  }
+
+  async phoneMode(): Promise<PhoneModeState> {
+    return apiRequest<PhoneModeState>(`${API_URL}/phone/mode`, { headers: getHeaders() });
+  }
+
+  /** Interruttore rapido: `mode` null torna alla regola. */
+  async setPhoneMode(body: { mode: PhoneAnswerMode | null; minutes?: number; until?: 'tonight' }): Promise<PhoneModeState> {
+    return apiRequest<PhoneModeState>(`${API_URL}/phone/mode`, {
+      method: 'PUT',
+      headers: { ...getHeaders(), 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+  }
+
+  async phoneCalls(params: { filter?: PhoneCallsFilter; q?: string; before?: string }): Promise<{ calls: PhoneCallRow[]; next_before: string | null }> {
+    const qs = new URLSearchParams();
+    if (params.filter && params.filter !== 'all') qs.set('filter', params.filter);
+    if (params.q) qs.set('q', params.q);
+    if (params.before) qs.set('before', params.before);
+    const query = qs.toString();
+    return apiRequest(`${API_URL}/phone/calls${query ? `?${query}` : ''}`, { headers: getHeaders() });
+  }
+
+  /** `ref` è l'id del registro o il CallSid (dalla card «chi chiama»). */
+  async setPhoneCallNote(ref: string | number, note: string): Promise<{ id: number; note: string | null; note_updated_at: string }> {
+    return apiRequest(`${API_URL}/phone/calls/${encodeURIComponent(String(ref))}/note`, {
+      method: 'PUT',
+      headers: { ...getHeaders(), 'Content-Type': 'application/json' },
+      body: JSON.stringify({ note }),
+    });
+  }
+
+  async linkPhoneCallReservation(ref: string | number, reservationId: number): Promise<void> {
+    await apiRequest(`${API_URL}/phone/calls/${encodeURIComponent(String(ref))}/reservation`, {
+      method: 'POST',
+      headers: { ...getHeaders(), 'Content-Type': 'application/json' },
+      body: JSON.stringify({ reservation_id: reservationId }),
     });
   }
 

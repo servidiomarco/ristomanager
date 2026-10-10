@@ -90,5 +90,55 @@
   "confirmQ": "Sure?",
   "markAll": "Mark them all",
   "allCalls": "All the calls",
-  "pickCall": "Pick a call from the list"
+  "pickCall": "Pick a call from the list",
+  "log": {
+    "view": "View",
+    "tabSofia": "Sofia",
+    "tabLog": "Call log",
+    "searchPh": "Search number, name or note",
+    "filter": {
+      "all": "All",
+      "missed": "Missed",
+      "staff": "Staff",
+      "sofia": "Sofia",
+      "outbound": "Outgoing"
+    },
+    "empty": "No calls",
+    "loadError": "Call log not loaded",
+    "today": "Today",
+    "yesterday": "Yesterday",
+    "outbound": "Called from the CRM",
+    "outboundBy": "Called by {{name}}",
+    "answeredBy": "{{name}} answered",
+    "answeredCrm": "Answered from the CRM",
+    "answeredMobile": "Answered on mobile {{number}}",
+    "answered": "Answered by the staff",
+    "sofia": "Sofia answered",
+    "missed": {
+      "riattaccata_in_attesa": "Missed: hung up while ringing",
+      "riattaccata": "Hung up right away",
+      "sofia_non_disponibile": "Missed: Sofia unreachable",
+      "sofia_muta": "Missed: Sofia did not speak",
+      "voce_non_attiva": "Missed: Sofia switched off",
+      "other": "Missed"
+    },
+    "ringing": "In progress",
+    "hidden": "Hidden number",
+    "booked": "Booked {{date}} {{time}} · {{n}}",
+    "more": "Load more",
+    "kind": {
+      "missed": "Missed",
+      "staff": "Staff",
+      "sofia": "Sofia",
+      "outbound": "Outgoing",
+      "ringing": "In progress"
+    },
+    "when": "When",
+    "outcome": "Outcome",
+    "note": "Note",
+    "notePh": "What they asked, what is left to do",
+    "noteError": "Note not saved, try again",
+    "openSofia": "Conversation with Sofia",
+    "openFollowUp": "Open in To call back"
+  }
 }

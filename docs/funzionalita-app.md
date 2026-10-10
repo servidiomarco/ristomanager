@@ -193,11 +193,15 @@ Agente conversazionale AI (ElevenLabs) che **risponde al telefono del ristorante
 
 **Chi risponde al telefono** (Impostazioni › AI)
 - Si sceglie se le chiamate al numero di Sofia le prende subito Sofia o se prima squilla il locale, per un numero di secondi a scelta (di serie 15). Se nessuno risponde in tempo, risponde Sofia.
+- **Fasce orarie:** in certi giorni e orari vale un'altra regola, per esempio Sofia durante il servizio della sera e il locale a pranzo. Una fascia può passare la mezzanotte.
+- **Interruttore rapido in testata:** la pastiglia «Sofia» o «Locale» dice chi risponde adesso. Con un tocco si passa il telefono a Sofia, o lo si riprende, per un'ora, due ore o fino a stanotte; poi torna da solo alla regola.
 - **Il CRM squilla come un telefono:** su ogni PC, tablet o telefono col CRM aperto si può accendere «Questo dispositivo squilla». Quando arriva una chiamata, la card «chi chiama» mostra **Rispondi** e **Rifiuta**. Si parla dal browser, meglio con una cuffia (il microfono si autorizza alla prima chiamata). In linea ci sono durata, microfono spento o acceso, **Nuova prenotazione** già compilata col cliente e riaggancia. Gli altri dispositivi vedono «Ha risposto …».
 - **Cellulari (facoltativi):** fino a tre squillano insieme al CRM, come telefonate normali e anche a schermo bloccato, dal numero di Sofia. Chi risponde sente un annuncio breve («Vecchio Frantoio: chiama Giulia Ferraro. Premi 1», oppure «un numero non in rubrica») e preme 1 per prenderla. Se risponde la segreteria, la chiamata passa a Sofia.
 - **Richiama dal CRM:** col telefono acceso, «Chiama» e «Richiama» in Chiamate partono dal CRM, e il cliente vede il numero di Sofia. Solo numeri italiani.
 - Se il cliente riattacca mentre squilla il locale, la chiamata compare in Chiamate › Da ricontattare con la push «Chiamata persa».
 - Nel CRM la card «chi chiama» segue la chiamata: «Squilla il cellulare del locale» o «Squilla qui», poi «Ha risposto …» o «Sofia sta parlando con…».
+- **Nota a fine chiamata:** quando il locale ha risposto, la card lascia scrivere una nota («vuole il tavolo in veranda»). La nota compare nella card la volta dopo che lo stesso numero chiama, e nel registro.
+- **Prenotazione collegata alla chiamata:** quella creata da «Nuova prenotazione» nella card, o a mano subito dopo una chiamata presa dal locale con lo stesso numero, resta legata alla chiamata.
 - L'elenco dei dispositivi accesi è nella stessa card: chi gestisce le impostazioni può spegnerli.
 
 **Sezione Chiamate nel CRM**
@@ -205,6 +209,7 @@ Agente conversazionale AI (ElevenLabs) che **risponde al telefono del ristorante
 - Per ogni chiamata: **riassunto AI, trascrizione completa, registrazione audio** riascoltabile, durata, esito.
 - Azioni: richiama, segna ricontattato, **crea prenotazione dalla chiamata** (dati precompilati), apri scheda cliente, storico messaggi verso quel numero.
 - Badge "da ricontattare" sempre visibile nel menu.
+- **Registro:** accanto alle conversazioni di Sofia, l'elenco di tutte le chiamate del numero, giorno per giorno: prese dal locale (chi ha risposto, dal CRM o dal cellulare), da Sofia, perse (e perché) e le chiamate fatte dal CRM. Filtri Tutte / Perse / Locale / Sofia / In uscita, ricerca per numero, nome o nota. Ogni chiamata mostra durata, nota e prenotazione nata dalla chiamata; da lì si richiama, si apre la scheda cliente o la conversazione con Sofia.
 - Se lo stesso numero richiama e Sofia lo serve (prenota, sposta o disdice), i suoi tentativi a vuoto delle 24 ore prima si chiudono da soli; restano aperti quelli con una richiesta propria (richiamata chiesta, gruppo grande, conferma senza prenotazione).
 
 ---
@@ -877,6 +882,7 @@ Pagina unica a blocchi, con chip-àncora per saltare alla sezione e una **ricerc
 
 | Data | Sezione | Modifica |
 |---|---|---|
+| 2026-10-10 | Agente vocale "Sofia", Impostazioni, Chiamate | **Chi risponde adesso.** In Impostazioni › AI si aggiungono fasce orarie con una regola diversa (per esempio Sofia la sera); in testata la pastiglia «Sofia» o «Locale» passa il telefono a Sofia, o lo riprende, per un'ora, due ore o fino a stanotte. In Chiamate c'è il **Registro** di tutte le chiamate, con chi ha risposto, le perse e le chiamate fatte dal CRM. A fine chiamata si lascia una nota, che torna nella card quando il cliente richiama, e la prenotazione fatta al telefono resta legata alla chiamata. |
 | 2026-10-10 | Agente vocale "Sofia" | «Prima il locale»: se nessuno risponde dal CRM o dal cellulare entro i secondi scelti, ora la chiamata passa davvero a Sofia; prima, lasciata squillare, si chiudeva. |
 | 2026-10-10 | Agente vocale "Sofia", Impostazioni, Chiamate | **Il CRM squilla come un telefono.** In Impostazioni › AI si accende «Questo dispositivo squilla» e si sceglie «Prima il locale»: le chiamate al numero di Sofia squillano nel CRM (e sui cellulari indicati) prima di passare a lei. Dalla card «chi chiama» si risponde, si spegne il microfono, si apre una nuova prenotazione già compilata e si riaggancia; gli altri vedono chi ha risposto. «Chiama» e «Richiama» in Chiamate partono dal CRM col numero del locale. |
 | 2026-10-10 | Agente vocale "Sofia" | «Prima il cellulare»: l'annuncio sul cellulare è più corto («Vecchio Frantoio: chiama Giulia Ferraro. Premi 1»), e un cliente che riattacca mentre squilla il cellulare finisce in Chiamate › Da ricontattare con la push «Chiamata persa». |

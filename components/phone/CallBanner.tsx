@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Bell, BellOff, CalendarDays, CalendarPlus, Mic, MicOff, Phone, PhoneCall, PhoneIncoming, PhoneOff, PhoneOutgoing, Wand2, X } from 'lucide-react';
+import { Bell, BellOff, CalendarDays, CalendarPlus, Loader2, Mic, MicOff, NotebookPen, Phone, PhoneCall, PhoneIncoming, PhoneOff, PhoneOutgoing, Wand2, X } from 'lucide-react';
 import { Avatar, StatusPill, dsButton } from '../ds';
 import { useSoftphone, answer, decline, hangUp, toggleMute, type SoftphoneCall } from '../../services/softphone';
 import { socketClient } from '../../services/socketClient';
@@ -20,7 +20,9 @@ import { chime } from '../../utils/chime';
 
    Il telaio che gira è .ds-ai-frame: «la macchina sta lavorando, guarda».
    Si ferma quando la chiamata finisce, e la card mostra l'esito per qualche
-   secondo prima di sparire. */
+   secondo prima di sparire. Una chiamata presa dal locale lascia scrivere
+   una nota: mentre la si scrive la card resta, e la nota torna nella card
+   la volta dopo che lo stesso numero chiama. */
 
 const ENDED_VISIBLE_MS = 15_000;
 // Specchio del TTL del server: una chiamata senza post-call non resta a vita.
@@ -30,7 +32,12 @@ const MUTE_KEY = 'sympotia.callBanner.muted';
 
 type BannerCall = LiveCall & { ended?: LiveCallEnded; answeredByName?: string | null };
 
-export interface CallPrefill { customer_name?: string; phone?: string }
+export interface CallPrefill {
+  customer_name?: string;
+  phone?: string;
+  /** CallSid della chiamata: la prenotazione creata si aggancia a lei. */
+  phone_call_ref?: string;
+}
 
 const duration = (since: number): string => {
   const s = Math.max(0, Math.floor((Date.now() - since) / 1000));
@@ -65,6 +72,9 @@ export const CallBanner: React.FC<{
   // Chiuse a mano: una rilettura di /phone/live non deve farle ricomparire.
   const dismissed = useRef<Set<string>>(new Set());
   const announced = useRef<Set<string>>(new Set());
+  // Card con la nota aperta: non spariscono allo scadere dell'esito.
+  const pinned = useRef<Set<string>>(new Set());
+  const [notes, setNotes] = useState<Record<string, { draft: string; saving?: boolean; saved?: boolean; error?: boolean }>>({});
   const mutedRef = useRef(muted);
   mutedRef.current = muted;
   const callsRef = useRef(calls);
@@ -72,8 +82,28 @@ export const CallBanner: React.FC<{
 
   const dismiss = useCallback((id: string) => {
     dismissed.current.add(id);
+    pinned.current.delete(id);
     setCalls(prev => prev.filter(c => c.id !== id));
+    setNotes(prev => {
+      if (!(id in prev)) return prev;
+      const { [id]: _drop, ...rest } = prev;
+      return rest;
+    });
   }, []);
+
+  const saveNote = async (id: string, ref: string) => {
+    const draft = (notes[id]?.draft ?? '').trim();
+    if (!draft) return;
+    setNotes(prev => ({ ...prev, [id]: { draft, saving: true } }));
+    try {
+      await voiceCallsApiService.setPhoneCallNote(ref, draft);
+      setNotes(prev => ({ ...prev, [id]: { draft, saved: true } }));
+      pinned.current.delete(id);
+      setTimeout(() => dismiss(id), 2500);
+    } catch {
+      setNotes(prev => ({ ...prev, [id]: { draft, error: true } }));
+    }
+  };
 
   const toggleMuted = () => {
     setMuted(prev => {
@@ -121,7 +151,7 @@ export const CallBanner: React.FC<{
       if (!match) return;
       setCalls(prev => prev.map(c => (c.id === match.id ? { ...c, ended: end } : c)));
       setTimeout(() => {
-        if (alive) setCalls(prev => prev.filter(c => c.id !== match.id));
+        if (alive && !pinned.current.has(match.id)) setCalls(prev => prev.filter(c => c.id !== match.id));
       }, ENDED_VISIBLE_MS);
     };
 
@@ -341,6 +371,13 @@ export const CallBanner: React.FC<{
                 </p>
               )}
 
+              {card.last_note && !ended && (
+                <p className="mt-2 flex gap-1.5 text-[13px] text-[var(--ds-text-secondary)]">
+                  <NotebookPen className="mt-0.5 h-3.5 w-3.5 flex-shrink-0" aria-hidden />
+                  <span className="line-clamp-2">{t('phone.lastNote', { date: shortDate(card.last_note.at), text: card.last_note.text })}</span>
+                </p>
+              )}
+
               {(booking ? [{ id: booking.id, reservation_time: booking.reservation_time, guests: booking.guests }] : card.upcoming.slice(0, 2)).map(r => (
                 <button
                   key={r.id}
@@ -356,7 +393,46 @@ export const CallBanner: React.FC<{
               ))}
 
               {!ended && isHere(soft.incoming, call.id) && ringButtons}
-              {!ended && isHere(soft.active, call.id) && inCallBar(soft.active!, { customer_name: name || undefined, phone: customer?.phone || card.phone })}
+              {!ended && isHere(soft.active, call.id) && inCallBar(soft.active!, { customer_name: name || undefined, phone: customer?.phone || card.phone, phone_call_ref: call.call_sid || call.id })}
+
+              {/* La nota a fine chiamata, per le chiamate prese dal locale. */}
+              {ended?.outcome === 'answered' && (() => {
+                const n = notes[call.id];
+                if (!n) {
+                  return (
+                    <button
+                      type="button"
+                      onClick={() => { pinned.current.add(call.id); setNotes(prev => ({ ...prev, [call.id]: { draft: '' } })); }}
+                      className="mt-2 inline-flex h-9 items-center gap-1.5 rounded-[var(--ds-radius-control)] px-3 text-[13px] font-semibold text-[var(--ds-arriving-text)] transition-colors hover:bg-[var(--ds-arriving-tint)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+                    >
+                      <NotebookPen className="h-4 w-4" aria-hidden /> {t('phone.addNote')}
+                    </button>
+                  );
+                }
+                if (n.saved) return <p className="mt-2 text-[13px] text-[var(--ds-seated-text)]">{t('phone.noteSaved')}</p>;
+                return (
+                  <div className="mt-2 space-y-2">
+                    <textarea
+                      autoFocus
+                      rows={2}
+                      maxLength={1000}
+                      value={n.draft}
+                      onChange={e => setNotes(prev => ({ ...prev, [call.id]: { draft: e.target.value } }))}
+                      placeholder={t('phone.notePlaceholder')}
+                      aria-label={t('phone.addNote')}
+                      className="w-full resize-none rounded-[var(--ds-radius-sm)] bg-[var(--ds-surface-row)] px-3 py-2 text-[14px] text-[var(--ds-text-primary)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+                    />
+                    {n.error && <p className="text-[13px] text-[var(--ds-critical-text)]">{t('phone.noteError')}</p>}
+                    <div className="flex gap-2">
+                      <button type="button" onClick={() => saveNote(call.id, call.call_sid || call.id)} disabled={!n.draft.trim() || n.saving} className={`${dsButton.primary} flex-1`}>
+                        {n.saving && <Loader2 className="h-4 w-4 animate-spin" aria-hidden />}
+                        {t('phone.saveNote')}
+                      </button>
+                      <button type="button" onClick={() => dismiss(call.id)} className={dsButton.quiet}>{t('phone.close')}</button>
+                    </div>
+                  </div>
+                );
+              })()}
 
               {ended && (ended.outcome === 'callback' || ended.outcome === 'follow_up' || ended.outcome === 'missed') && (
                 <button

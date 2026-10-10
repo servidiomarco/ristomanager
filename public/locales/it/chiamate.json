@@ -90,5 +90,55 @@
   "confirmQ": "Confermi?",
   "markAll": "Segna tutte",
   "allCalls": "Tutte le chiamate",
-  "pickCall": "Seleziona una chiamata dalla lista"
+  "pickCall": "Seleziona una chiamata dalla lista",
+  "log": {
+    "view": "Vista",
+    "tabSofia": "Sofia",
+    "tabLog": "Registro",
+    "searchPh": "Cerca numero, nome o nota",
+    "filter": {
+      "all": "Tutte",
+      "missed": "Perse",
+      "staff": "Locale",
+      "sofia": "Sofia",
+      "outbound": "In uscita"
+    },
+    "empty": "Nessuna chiamata",
+    "loadError": "Registro non caricato",
+    "today": "Oggi",
+    "yesterday": "Ieri",
+    "outbound": "Chiamata dal CRM",
+    "outboundBy": "Chiamata da {{name}}",
+    "answeredBy": "Ha risposto {{name}}",
+    "answeredCrm": "Risposta dal CRM",
+    "answeredMobile": "Risposta dal cellulare {{number}}",
+    "answered": "Risposta dal locale",
+    "sofia": "Ha risposto Sofia",
+    "missed": {
+      "riattaccata_in_attesa": "Persa: ha riattaccato mentre squillava",
+      "riattaccata": "Ha riattaccato subito",
+      "sofia_non_disponibile": "Persa: Sofia non raggiungibile",
+      "sofia_muta": "Persa: Sofia non ha parlato",
+      "voce_non_attiva": "Persa: Sofia spenta",
+      "other": "Persa"
+    },
+    "ringing": "In corso",
+    "hidden": "Numero nascosto",
+    "booked": "Prenotato {{date}} {{time}} · {{n}}",
+    "more": "Carica altre",
+    "kind": {
+      "missed": "Persa",
+      "staff": "Locale",
+      "sofia": "Sofia",
+      "outbound": "In uscita",
+      "ringing": "In corso"
+    },
+    "when": "Quando",
+    "outcome": "Esito",
+    "note": "Nota",
+    "notePh": "Cosa ha chiesto, cosa resta da fare",
+    "noteError": "Nota non salvata, riprova",
+    "openSofia": "Conversazione con Sofia",
+    "openFollowUp": "Apri in Da ricontattare"
+  }
 }

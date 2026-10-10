@@ -64,7 +64,8 @@ describe('telefono: prima il cellulare, poi Sofia', () => {
         expect(badRing.status).toBe(400);
         const ok = await api().put('/settings/phone-routing').set(bearer(token)).send({ mode: 'prima_cellulare', mobiles: ['328 990 0011'], ring_seconds: 15 });
         expect(ok.status).toBe(200);
-        expect(ok.body).toEqual({ mode: 'prima_locale', mobiles: [CELLULARE], ring_seconds: 15 });
+        expect(ok.body).toMatchObject({ mode: 'prima_locale', mobiles: [CELLULARE], ring_seconds: 15, slots: [], override: null });
+        expect(ok.body.effective).toMatchObject({ mode: 'prima_locale', source: 'base' });
         expect((await api().get('/settings/phone-routing').set(bearer(token))).body.mobiles).toEqual([CELLULARE]);
     });
 

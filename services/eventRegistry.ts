@@ -160,6 +160,9 @@ export const DOMAIN_EVENTS: Record<string, DomainEventSpec> = {
     'phoneCall:started': spec('transient'),
     'phoneCall:ended': spec('transient'),
     'phoneCall:updated': spec('transient'),
+    // Chi risponde adesso cambiato (regola, fasce, interruttore rapido): la
+    // testata si aggiorna; lo stato vero resta in app_settings.
+    'phoneRouting:changed': spec('transient'),
 
     // --- Gestione (staff, turni, spesa, todo, fornitori): tolleranza alta
     //     alla latenza, conflitti rari — master in cloud.
