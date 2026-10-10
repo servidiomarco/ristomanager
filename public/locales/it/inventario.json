@@ -125,5 +125,8 @@
     "colQty": "Quantità",
     "colSpread": "Distribuzione",
     "printedOn": "Stampato il {{quando}}"
-  }
+  },
+  "supplierInvoices": "Fatture fornitori",
+  "invoicesToCheck_one": "fattura",
+  "invoicesToCheck_other": "fatture"
 }

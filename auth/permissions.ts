@@ -32,6 +32,7 @@ export type Permission =
   | 'customers:full'
   | 'inventory:view'
   | 'inventory:full'
+  | 'inventory:invoices'
   | 'voice_calls:view'
   | 'reception:view'
   | 'payments:view'
@@ -140,6 +141,7 @@ const ROLE_PERMISSIONS: Record<UserRole, Permission[]> = {
     'customers:full',
     'inventory:view',
     'inventory:full',
+    'inventory:invoices',
     'voice_calls:view',
     'reception:view',
     'payments:view',
@@ -192,6 +194,7 @@ const ROLE_PERMISSIONS: Record<UserRole, Permission[]> = {
     'customers:full',
     'inventory:view',
     'inventory:full',
+    'inventory:invoices',
     'voice_calls:view',
     'reception:view',
     'payments:view',
@@ -237,6 +240,7 @@ const ROLE_PERMISSIONS: Record<UserRole, Permission[]> = {
     'customers:full',
     'inventory:view',
     'inventory:full',
+    'inventory:invoices',
     'voice_calls:view',
     'reception:view',
     'payments:view',
@@ -279,6 +283,7 @@ const ROLE_PERMISSIONS: Record<UserRole, Permission[]> = {
     'customers:full',
     'inventory:view',
     'inventory:full',
+    'inventory:invoices',
     'voice_calls:view',
     'reception:view',
     'payments:view',

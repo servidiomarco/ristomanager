@@ -1,0 +1,1007 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<b:FatturaElettronica versione="FPR12" xmlns:ds="http://www.w3.org/2000/09//xmldsig#" xmlns:b="http://ivaservizi.agenziaentrate.gov.it/docs/xsd/fatture/v1.2" xmlns:xs="http://www.w3.org/2001/XMLSchema-instance">
+<FatturaElettronicaHeader>
+<DatiTrasmissione>
+<IdTrasmittente>
+<IdPaese>IT</IdPaese>
+<IdCodice>22222222220</IdCodice>
+</IdTrasmittente>
+<ProgressivoInvio>5931000081</ProgressivoInvio>
+<FormatoTrasmissione>FPR12</FormatoTrasmissione>
+<CodiceDestinatario>ABC1234</CodiceDestinatario>
+<ContattiTrasmittente>
+</ContattiTrasmittente>
+</DatiTrasmissione>
+<CedentePrestatore>
+<DatiAnagrafici>
+<IdFiscaleIVA>
+<IdPaese>IT</IdPaese>
+<IdCodice>22222222220</IdCodice>
+</IdFiscaleIVA>
+<Anagrafica>
+<Denominazione>CASH E CARRY DI PROVA S.R.L.</Denominazione>
+</Anagrafica>
+<RegimeFiscale>RF01</RegimeFiscale>
+</DatiAnagrafici>
+<Sede>
+<Indirizzo>VIA DEL MERCATO 3</Indirizzo>
+<CAP>00300</CAP>
+<Comune>CITTA DI PROVA</Comune>
+<Provincia>RM</Provincia>
+<Nazione>IT</Nazione>
+</Sede>
+<StabileOrganizzazione>
+<Indirizzo>VIA DEL MERCATO 3</Indirizzo>
+<CAP>00300</CAP>
+<Comune>CITTA DI PROVA</Comune>
+<Provincia>RM</Provincia>
+<Nazione>IT</Nazione>
+</StabileOrganizzazione>
+</CedentePrestatore>
+<CessionarioCommittente>
+<DatiAnagrafici>
+<IdFiscaleIVA>
+<IdPaese>IT</IdPaese>
+<IdCodice>01234567897</IdCodice>
+</IdFiscaleIVA>
+<Anagrafica>
+<Denominazione>RISTORANTE DI PROVA S.R.L.</Denominazione>
+</Anagrafica>
+</DatiAnagrafici>
+<Sede>
+<Indirizzo>VIA DELLE PROVE 1</Indirizzo>
+<CAP>00100</CAP>
+<Comune>PAESE DI PROVA</Comune>
+<Provincia>RM</Provincia>
+<Nazione>IT</Nazione>
+</Sede>
+</CessionarioCommittente>
+</FatturaElettronicaHeader>
+<FatturaElettronicaBody>
+<DatiGenerali>
+<DatiGeneraliDocumento>
+<TipoDocumento>TD01</TipoDocumento>
+<Divisa>EUR</Divisa>
+<Data>2026-10-02</Data>
+<Numero>17031/V</Numero>
+<ImportoTotaleDocumento>297.99</ImportoTotaleDocumento>
+<Causale>FATTURAZIONE CASH</Causale>
+</DatiGeneraliDocumento>
+<DatiOrdineAcquisto>
+<IdDocumento>N</IdDocumento>
+<Data>2026-10-02</Data>
+</DatiOrdineAcquisto>
+<DatiContratto>
+<IdDocumento>N</IdDocumento>
+<Data>2026-10-02</Data>
+</DatiContratto>
+<DatiDDT>
+<NumeroDDT>1</NumeroDDT>
+<DataDDT>2026-10-02</DataDDT>
+<RiferimentoNumeroLinea>1</RiferimentoNumeroLinea>
+<RiferimentoNumeroLinea>2</RiferimentoNumeroLinea>
+<RiferimentoNumeroLinea>3</RiferimentoNumeroLinea>
+<RiferimentoNumeroLinea>4</RiferimentoNumeroLinea>
+<RiferimentoNumeroLinea>5</RiferimentoNumeroLinea>
+<RiferimentoNumeroLinea>6</RiferimentoNumeroLinea>
+<RiferimentoNumeroLinea>7</RiferimentoNumeroLinea>
+<RiferimentoNumeroLinea>8</RiferimentoNumeroLinea>
+<RiferimentoNumeroLinea>9</RiferimentoNumeroLinea>
+<RiferimentoNumeroLinea>10</RiferimentoNumeroLinea>
+<RiferimentoNumeroLinea>11</RiferimentoNumeroLinea>
+<RiferimentoNumeroLinea>12</RiferimentoNumeroLinea>
+<RiferimentoNumeroLinea>13</RiferimentoNumeroLinea>
+<RiferimentoNumeroLinea>14</RiferimentoNumeroLinea>
+<RiferimentoNumeroLinea>15</RiferimentoNumeroLinea>
+<RiferimentoNumeroLinea>16</RiferimentoNumeroLinea>
+<RiferimentoNumeroLinea>17</RiferimentoNumeroLinea>
+<RiferimentoNumeroLinea>18</RiferimentoNumeroLinea>
+<RiferimentoNumeroLinea>19</RiferimentoNumeroLinea>
+<RiferimentoNumeroLinea>20</RiferimentoNumeroLinea>
+<RiferimentoNumeroLinea>21</RiferimentoNumeroLinea>
+<RiferimentoNumeroLinea>22</RiferimentoNumeroLinea>
+<RiferimentoNumeroLinea>23</RiferimentoNumeroLinea>
+<RiferimentoNumeroLinea>24</RiferimentoNumeroLinea>
+</DatiDDT>
+<DatiDDT>
+<NumeroDDT>2</NumeroDDT>
+<DataDDT>2026-10-02</DataDDT>
+<RiferimentoNumeroLinea>25</RiferimentoNumeroLinea>
+<RiferimentoNumeroLinea>26</RiferimentoNumeroLinea>
+<RiferimentoNumeroLinea>27</RiferimentoNumeroLinea>
+<RiferimentoNumeroLinea>28</RiferimentoNumeroLinea>
+<RiferimentoNumeroLinea>29</RiferimentoNumeroLinea>
+<RiferimentoNumeroLinea>30</RiferimentoNumeroLinea>
+<RiferimentoNumeroLinea>31</RiferimentoNumeroLinea>
+<RiferimentoNumeroLinea>32</RiferimentoNumeroLinea>
+<RiferimentoNumeroLinea>33</RiferimentoNumeroLinea>
+<RiferimentoNumeroLinea>34</RiferimentoNumeroLinea>
+<RiferimentoNumeroLinea>35</RiferimentoNumeroLinea>
+<RiferimentoNumeroLinea>36</RiferimentoNumeroLinea>
+<RiferimentoNumeroLinea>37</RiferimentoNumeroLinea>
+<RiferimentoNumeroLinea>38</RiferimentoNumeroLinea>
+<RiferimentoNumeroLinea>39</RiferimentoNumeroLinea>
+<RiferimentoNumeroLinea>40</RiferimentoNumeroLinea>
+<RiferimentoNumeroLinea>41</RiferimentoNumeroLinea>
+<RiferimentoNumeroLinea>42</RiferimentoNumeroLinea>
+<RiferimentoNumeroLinea>43</RiferimentoNumeroLinea>
+<RiferimentoNumeroLinea>44</RiferimentoNumeroLinea>
+<RiferimentoNumeroLinea>45</RiferimentoNumeroLinea>
+<RiferimentoNumeroLinea>46</RiferimentoNumeroLinea>
+<RiferimentoNumeroLinea>47</RiferimentoNumeroLinea>
+<RiferimentoNumeroLinea>48</RiferimentoNumeroLinea>
+<RiferimentoNumeroLinea>49</RiferimentoNumeroLinea>
+</DatiDDT>
+</DatiGenerali>
+<DatiBeniServizi>
+<DettaglioLinee>
+<NumeroLinea>1</NumeroLinea>
+<CodiceArticolo>
+<CodiceTipo>Codice Interno</CodiceTipo>
+<CodiceValore>000005875</CodiceValore>
+</CodiceArticolo>
+<CodiceArticolo>
+<CodiceTipo>EAN</CodiceTipo>
+<CodiceValore>08003490048677</CodiceValore>
+</CodiceArticolo>
+<Descrizione>RISO GALLO BLOND RISOTTI KG5        </Descrizione>
+<Quantita>2.000</Quantita>
+<UnitaMisura>PZ</UnitaMisura>
+<PrezzoUnitario>8.100000</PrezzoUnitario>
+<PrezzoTotale>16.200000</PrezzoTotale>
+<AliquotaIVA>4.00</AliquotaIVA>
+</DettaglioLinee>
+<DettaglioLinee>
+<NumeroLinea>2</NumeroLinea>
+<CodiceArticolo>
+<CodiceTipo>Codice Interno</CodiceTipo>
+<CodiceValore>000000997</CodiceValore>
+</CodiceArticolo>
+<CodiceArticolo>
+<CodiceTipo>EAN</CodiceTipo>
+<CodiceValore>08001440559112</CodiceValore>
+</CodiceArticolo>
+<Descrizione>MAIS VALFRUTTA LATTINA GR 326X3 T 3 49        </Descrizione>
+<Quantita>8.000</Quantita>
+<UnitaMisura>PZ</UnitaMisura>
+<PrezzoUnitario>2.490000</PrezzoUnitario>
+<PrezzoTotale>19.920000</PrezzoTotale>
+<AliquotaIVA>10.00</AliquotaIVA>
+</DettaglioLinee>
+<DettaglioLinee>
+<NumeroLinea>3</NumeroLinea>
+<CodiceArticolo>
+<CodiceTipo>Codice Interno</CodiceTipo>
+<CodiceValore>011136976</CodiceValore>
+</CodiceArticolo>
+<CodiceArticolo>
+<CodiceTipo>EAN</CodiceTipo>
+<CodiceValore>08002910028763</CodiceValore>
+</CodiceArticolo>
+<Descrizione>DET LIQ LAV SOLE COLORE 41LAV ML 1840        </Descrizione>
+<Quantita>3.000</Quantita>
+<UnitaMisura>PZ</UnitaMisura>
+<PrezzoUnitario>2.850000</PrezzoUnitario>
+<PrezzoTotale>8.550000</PrezzoTotale>
+<AliquotaIVA>22.00</AliquotaIVA>
+</DettaglioLinee>
+<DettaglioLinee>
+<NumeroLinea>4</NumeroLinea>
+<CodiceArticolo>
+<CodiceTipo>Codice Interno</CodiceTipo>
+<CodiceValore>011141002</CodiceValore>
+</CodiceArticolo>
+<CodiceArticolo>
+<CodiceTipo>EAN</CodiceTipo>
+<CodiceValore>08001280034008</CodiceValore>
+</CodiceArticolo>
+<Descrizione>AMM FELCE AZZ 40 LAV  CLASSICO        </Descrizione>
+<Quantita>2.000</Quantita>
+<UnitaMisura>PZ</UnitaMisura>
+<PrezzoUnitario>1.490000</PrezzoUnitario>
+<PrezzoTotale>2.980000</PrezzoTotale>
+<AliquotaIVA>22.00</AliquotaIVA>
+</DettaglioLinee>
+<DettaglioLinee>
+<NumeroLinea>5</NumeroLinea>
+<CodiceArticolo>
+<CodiceTipo>Codice Interno</CodiceTipo>
+<CodiceValore>011143164</CodiceValore>
+</CodiceArticolo>
+<CodiceArticolo>
+<CodiceTipo>EAN</CodiceTipo>
+<CodiceValore>08720181593512</CodiceValore>
+</CodiceArticolo>
+<Descrizione>DET LIQ LAV COCCOLINO ULTRA CLEAN 37 LAV        </Descrizione>
+<Quantita>1.000</Quantita>
+<UnitaMisura>PZ</UnitaMisura>
+<PrezzoUnitario>3.590000</PrezzoUnitario>
+<PrezzoTotale>3.590000</PrezzoTotale>
+<AliquotaIVA>22.00</AliquotaIVA>
+</DettaglioLinee>
+<DettaglioLinee>
+<NumeroLinea>6</NumeroLinea>
+<CodiceArticolo>
+<CodiceTipo>Codice Interno</CodiceTipo>
+<CodiceValore>011116362</CodiceValore>
+</CodiceArticolo>
+<CodiceArticolo>
+<CodiceTipo>EAN</CodiceTipo>
+<CodiceValore>08003490048677</CodiceValore>
+</CodiceArticolo>
+<Descrizione>ROBERTO PIADINA OLIO EXTRAV GR 330        </Descrizione>
+<Quantita>4.000</Quantita>
+<UnitaMisura>PZ</UnitaMisura>
+<PrezzoUnitario>1.135000</PrezzoUnitario>
+<PrezzoTotale>4.540000</PrezzoTotale>
+<AliquotaIVA>4.00</AliquotaIVA>
+</DettaglioLinee>
+<DettaglioLinee>
+<NumeroLinea>7</NumeroLinea>
+<CodiceArticolo>
+<CodiceTipo>Codice Interno</CodiceTipo>
+<CodiceValore>011139669</CodiceValore>
+</CodiceArticolo>
+<CodiceArticolo>
+<CodiceTipo>EAN</CodiceTipo>
+<CodiceValore>08001561038732</CodiceValore>
+</CodiceArticolo>
+<Descrizione>TONNO CALLIPO O O  GR 70X3 STRAPPO        </Descrizione>
+<Quantita>8.000</Quantita>
+<UnitaMisura>PZ</UnitaMisura>
+<PrezzoUnitario>2.659000</PrezzoUnitario>
+<PrezzoTotale>21.272000</PrezzoTotale>
+<AliquotaIVA>10.00</AliquotaIVA>
+</DettaglioLinee>
+<DettaglioLinee>
+<NumeroLinea>8</NumeroLinea>
+<CodiceArticolo>
+<CodiceTipo>Codice Interno</CodiceTipo>
+<CodiceValore>011136847</CodiceValore>
+</CodiceArticolo>
+<CodiceArticolo>
+<CodiceTipo>EAN</CodiceTipo>
+<CodiceValore>08003650024008</CodiceValore>
+</CodiceArticolo>
+<Descrizione>OMINO BIANCO CANDEGGINA ALPINA DELICATA LT 2        </Descrizione>
+<Quantita>6.000</Quantita>
+<UnitaMisura>PZ</UnitaMisura>
+<PrezzoUnitario>2.050000</PrezzoUnitario>
+<PrezzoTotale>12.300000</PrezzoTotale>
+<AliquotaIVA>22.00</AliquotaIVA>
+</DettaglioLinee>
+<DettaglioLinee>
+<NumeroLinea>9</NumeroLinea>
+<CodiceArticolo>
+<CodiceTipo>Codice Interno</CodiceTipo>
+<CodiceValore>011099674</CodiceValore>
+</CodiceArticolo>
+<CodiceArticolo>
+<CodiceTipo>EAN</CodiceTipo>
+<CodiceValore>08008970055367</CodiceValore>
+</CodiceArticolo>
+<Descrizione>BAGNOSCH VIDAL TALCO LIQUIDO ML 500        </Descrizione>
+<Quantita>8.000</Quantita>
+<UnitaMisura>PZ</UnitaMisura>
+<PrezzoUnitario>1.090000</PrezzoUnitario>
+<PrezzoTotale>8.720000</PrezzoTotale>
+<AliquotaIVA>22.00</AliquotaIVA>
+</DettaglioLinee>
+<DettaglioLinee>
+<NumeroLinea>10</NumeroLinea>
+<CodiceArticolo>
+<CodiceTipo>Codice Interno</CodiceTipo>
+<CodiceValore>011104720</CodiceValore>
+</CodiceArticolo>
+<CodiceArticolo>
+<CodiceTipo>EAN</CodiceTipo>
+<CodiceValore>08007223000284</CodiceValore>
+</CodiceArticolo>
+<Descrizione>AMMONIACA TERS PROF LT 2        </Descrizione>
+<Quantita>1.000</Quantita>
+<UnitaMisura>PZ</UnitaMisura>
+<PrezzoUnitario>1.020000</PrezzoUnitario>
+<PrezzoTotale>1.020000</PrezzoTotale>
+<AliquotaIVA>22.00</AliquotaIVA>
+</DettaglioLinee>
+<DettaglioLinee>
+<NumeroLinea>11</NumeroLinea>
+<CodiceArticolo>
+<CodiceTipo>Codice Interno</CodiceTipo>
+<CodiceValore>011137667</CodiceValore>
+</CodiceArticolo>
+<CodiceArticolo>
+<CodiceTipo>EAN</CodiceTipo>
+<CodiceValore>08006130503567</CodiceValore>
+</CodiceArticolo>
+<Descrizione>SCALA CANDEGGINA CLASSICA LT 4        </Descrizione>
+<Quantita>2.000</Quantita>
+<UnitaMisura>PZ</UnitaMisura>
+<PrezzoUnitario>1.790000</PrezzoUnitario>
+<PrezzoTotale>3.580000</PrezzoTotale>
+<AliquotaIVA>22.00</AliquotaIVA>
+</DettaglioLinee>
+<DettaglioLinee>
+<NumeroLinea>12</NumeroLinea>
+<CodiceArticolo>
+<CodiceTipo>Codice Interno</CodiceTipo>
+<CodiceValore>000004964</CodiceValore>
+</CodiceArticolo>
+<CodiceArticolo>
+<CodiceTipo>EAN</CodiceTipo>
+<CodiceValore>08003640035014</CodiceValore>
+</CodiceArticolo>
+<Descrizione>AMM SOFT MAGIC PASSION 50 LAV LT2 75        </Descrizione>
+<Quantita>1.000</Quantita>
+<UnitaMisura>PZ</UnitaMisura>
+<PrezzoUnitario>1.580000</PrezzoUnitario>
+<PrezzoTotale>1.580000</PrezzoTotale>
+<AliquotaIVA>22.00</AliquotaIVA>
+</DettaglioLinee>
+<DettaglioLinee>
+<NumeroLinea>13</NumeroLinea>
+<CodiceArticolo>
+<CodiceTipo>Codice Interno</CodiceTipo>
+<CodiceValore>011139050</CodiceValore>
+</CodiceArticolo>
+<CodiceArticolo>
+<CodiceTipo>EAN</CodiceTipo>
+<CodiceValore>08002910060398</CodiceValore>
+</CodiceArticolo>
+<Descrizione>DET LIQ LAV NAPISAN COLOR 23LAV        </Descrizione>
+<Quantita>1.000</Quantita>
+<UnitaMisura>PZ</UnitaMisura>
+<PrezzoUnitario>2.650000</PrezzoUnitario>
+<PrezzoTotale>2.650000</PrezzoTotale>
+<AliquotaIVA>22.00</AliquotaIVA>
+</DettaglioLinee>
+<DettaglioLinee>
+<NumeroLinea>14</NumeroLinea>
+<CodiceArticolo>
+<CodiceTipo>Codice Interno</CodiceTipo>
+<CodiceValore>011116692</CodiceValore>
+</CodiceArticolo>
+<CodiceArticolo>
+<CodiceTipo>EAN</CodiceTipo>
+<CodiceValore>08000500205051</CodiceValore>
+</CodiceArticolo>
+<Descrizione>FERRERO TRONKY T5 FAM        </Descrizione>
+<Quantita>1.000</Quantita>
+<UnitaMisura>PZ</UnitaMisura>
+<PrezzoUnitario>1.885000</PrezzoUnitario>
+<PrezzoTotale>1.885000</PrezzoTotale>
+<AliquotaIVA>10.00</AliquotaIVA>
+</DettaglioLinee>
+<DettaglioLinee>
+<NumeroLinea>15</NumeroLinea>
+<CodiceArticolo>
+<CodiceTipo>Codice Interno</CodiceTipo>
+<CodiceValore>011145021</CodiceValore>
+</CodiceArticolo>
+<CodiceArticolo>
+<CodiceTipo>EAN</CodiceTipo>
+<CodiceValore>08000500434161</CodiceValore>
+</CodiceArticolo>
+<Descrizione>FERRERO KINDER CRISPY T5X16        </Descrizione>
+<Quantita>2.000</Quantita>
+<UnitaMisura>PZ</UnitaMisura>
+<PrezzoUnitario>3.039000</PrezzoUnitario>
+<PrezzoTotale>6.078000</PrezzoTotale>
+<AliquotaIVA>10.00</AliquotaIVA>
+</DettaglioLinee>
+<DettaglioLinee>
+<NumeroLinea>16</NumeroLinea>
+<CodiceArticolo>
+<CodiceTipo>Codice Interno</CodiceTipo>
+<CodiceValore>000012153</CodiceValore>
+</CodiceArticolo>
+<CodiceArticolo>
+<CodiceTipo>EAN</CodiceTipo>
+<CodiceValore>08714789162607</CodiceValore>
+</CodiceArticolo>
+<Descrizione>SPAZZ COLGATE EXTRA CLEAN DUO COPRISETOLE        </Descrizione>
+<Quantita>1.000</Quantita>
+<UnitaMisura>PZ</UnitaMisura>
+<PrezzoUnitario>1.050000</PrezzoUnitario>
+<PrezzoTotale>1.050000</PrezzoTotale>
+<AliquotaIVA>22.00</AliquotaIVA>
+</DettaglioLinee>
+<DettaglioLinee>
+<NumeroLinea>17</NumeroLinea>
+<CodiceArticolo>
+<CodiceTipo>Codice Interno</CodiceTipo>
+<CodiceValore>011136975</CodiceValore>
+</CodiceArticolo>
+<CodiceArticolo>
+<CodiceTipo>EAN</CodiceTipo>
+<CodiceValore>08002910028787</CodiceValore>
+</CodiceArticolo>
+<Descrizione>DET LIQ LAV SOLE BIANCO SOLARE 41LAV ML 1840        </Descrizione>
+<Quantita>3.000</Quantita>
+<UnitaMisura>PZ</UnitaMisura>
+<PrezzoUnitario>2.850000</PrezzoUnitario>
+<PrezzoTotale>8.550000</PrezzoTotale>
+<AliquotaIVA>22.00</AliquotaIVA>
+</DettaglioLinee>
+<DettaglioLinee>
+<NumeroLinea>18</NumeroLinea>
+<CodiceArticolo>
+<CodiceTipo>Codice Interno</CodiceTipo>
+<CodiceValore>000005173</CodiceValore>
+</CodiceArticolo>
+<CodiceArticolo>
+<CodiceTipo>EAN</CodiceTipo>
+<CodiceValore>08003650012944</CodiceValore>
+</CodiceArticolo>
+<Descrizione>WC NET PROFUMOSO CM GEL ML 700        </Descrizione>
+<Quantita>1.000</Quantita>
+<UnitaMisura>PZ</UnitaMisura>
+<PrezzoUnitario>1.330000</PrezzoUnitario>
+<PrezzoTotale>1.330000</PrezzoTotale>
+<AliquotaIVA>22.00</AliquotaIVA>
+</DettaglioLinee>
+<DettaglioLinee>
+<NumeroLinea>19</NumeroLinea>
+<CodiceArticolo>
+<CodiceTipo>Codice Interno</CodiceTipo>
+<CodiceValore>011139233</CodiceValore>
+</CodiceArticolo>
+<CodiceArticolo>
+<CodiceTipo>EAN</CodiceTipo>
+<CodiceValore>08388776980026</CodiceValore>
+</CodiceArticolo>
+<Descrizione>AMM DEO DUE FIORI ROSA LT 1 50 LAV        </Descrizione>
+<Quantita>1.000</Quantita>
+<UnitaMisura>PZ</UnitaMisura>
+<PrezzoUnitario>3.850000</PrezzoUnitario>
+<PrezzoTotale>3.850000</PrezzoTotale>
+<AliquotaIVA>22.00</AliquotaIVA>
+</DettaglioLinee>
+<DettaglioLinee>
+<NumeroLinea>20</NumeroLinea>
+<CodiceArticolo>
+<CodiceTipo>Codice Interno</CodiceTipo>
+<CodiceValore>011137602</CodiceValore>
+</CodiceArticolo>
+<CodiceArticolo>
+<CodiceTipo>EAN</CodiceTipo>
+<CodiceValore>08002910029470</CodiceValore>
+</CodiceArticolo>
+<Descrizione>RIC LAV SOLE 26 MISURINI GR 1300        </Descrizione>
+<Quantita>1.000</Quantita>
+<UnitaMisura>PZ</UnitaMisura>
+<PrezzoUnitario>2.980000</PrezzoUnitario>
+<PrezzoTotale>2.980000</PrezzoTotale>
+<AliquotaIVA>22.00</AliquotaIVA>
+</DettaglioLinee>
+<DettaglioLinee>
+<NumeroLinea>21</NumeroLinea>
+<CodiceArticolo>
+<CodiceTipo>Codice Interno</CodiceTipo>
+<CodiceValore>011139049</CodiceValore>
+</CodiceArticolo>
+<CodiceArticolo>
+<CodiceTipo>EAN</CodiceTipo>
+<CodiceValore>08002910060411</CodiceValore>
+</CodiceArticolo>
+<Descrizione>DET LIQ LAV NAPISAN CLASSICO 23LAV        </Descrizione>
+<Quantita>2.000</Quantita>
+<UnitaMisura>PZ</UnitaMisura>
+<PrezzoUnitario>2.650000</PrezzoUnitario>
+<PrezzoTotale>5.300000</PrezzoTotale>
+<AliquotaIVA>22.00</AliquotaIVA>
+</DettaglioLinee>
+<DettaglioLinee>
+<NumeroLinea>22</NumeroLinea>
+<CodiceArticolo>
+<CodiceTipo>Codice Interno</CodiceTipo>
+<CodiceValore>011140137</CodiceValore>
+</CodiceArticolo>
+<CodiceArticolo>
+<CodiceTipo>EAN</CodiceTipo>
+<CodiceValore>08024151807273</CodiceValore>
+</CodiceArticolo>
+<Descrizione>GUANTI NITRILE DR PROTEC BLU M PZ 100 NON TALCATI        </Descrizione>
+<Quantita>1.000</Quantita>
+<UnitaMisura>PZ</UnitaMisura>
+<PrezzoUnitario>2.950000</PrezzoUnitario>
+<PrezzoTotale>2.950000</PrezzoTotale>
+<AliquotaIVA>5.00</AliquotaIVA>
+</DettaglioLinee>
+<DettaglioLinee>
+<NumeroLinea>23</NumeroLinea>
+<CodiceArticolo>
+<CodiceTipo>Codice Interno</CodiceTipo>
+<CodiceValore>011138681</CodiceValore>
+</CodiceArticolo>
+<CodiceArticolo>
+<CodiceTipo>EAN</CodiceTipo>
+<CodiceValore>08017331090084</CodiceValore>
+</CodiceArticolo>
+<Descrizione>DENT BLANX BLACK CARBONI ATTIVI ML 75        </Descrizione>
+<Quantita>2.000</Quantita>
+<UnitaMisura>PZ</UnitaMisura>
+<PrezzoUnitario>2.150000</PrezzoUnitario>
+<PrezzoTotale>4.300000</PrezzoTotale>
+<AliquotaIVA>22.00</AliquotaIVA>
+</DettaglioLinee>
+<DettaglioLinee>
+<NumeroLinea>24</NumeroLinea>
+<CodiceArticolo>
+<CodiceTipo>Codice Interno</CodiceTipo>
+<CodiceValore>011137202</CodiceValore>
+</CodiceArticolo>
+<CodiceArticolo>
+<CodiceTipo>EAN</CodiceTipo>
+<CodiceValore>08009432042642</CodiceValore>
+</CodiceArticolo>
+<Descrizione>BRAWN EASY CATTURACOLORE PZ 12        </Descrizione>
+<Quantita>6.000</Quantita>
+<UnitaMisura>PZ</UnitaMisura>
+<PrezzoUnitario>0.470000</PrezzoUnitario>
+<PrezzoTotale>2.820000</PrezzoTotale>
+<AliquotaIVA>22.00</AliquotaIVA>
+</DettaglioLinee>
+<DettaglioLinee>
+<NumeroLinea>25</NumeroLinea>
+<CodiceArticolo>
+<CodiceTipo>Codice Interno</CodiceTipo>
+<CodiceValore>000004496</CodiceValore>
+</CodiceArticolo>
+<CodiceArticolo>
+<CodiceTipo>EAN</CodiceTipo>
+<CodiceValore>08004260278386</CodiceValore>
+</CodiceArticolo>
+<Descrizione>CARTA IG REGINA ROTOLONI PZ 4        </Descrizione>
+<Quantita>7.000</Quantita>
+<UnitaMisura>PZ</UnitaMisura>
+<PrezzoUnitario>2.600000</PrezzoUnitario>
+<PrezzoTotale>18.200000</PrezzoTotale>
+<AliquotaIVA>22.00</AliquotaIVA>
+</DettaglioLinee>
+<DettaglioLinee>
+<NumeroLinea>26</NumeroLinea>
+<CodiceArticolo>
+<CodiceTipo>Codice Interno</CodiceTipo>
+<CodiceValore>011138376</CodiceValore>
+</CodiceArticolo>
+<CodiceArticolo>
+<CodiceTipo>EAN</CodiceTipo>
+<CodiceValore>08006783626507</CodiceValore>
+</CodiceArticolo>
+<Descrizione>ROTOLONI VIT CASA LAVORO 800X2 KG 2        </Descrizione>
+<Quantita>1.000</Quantita>
+<UnitaMisura>PZ</UnitaMisura>
+<PrezzoUnitario>4.200000</PrezzoUnitario>
+<PrezzoTotale>4.200000</PrezzoTotale>
+<AliquotaIVA>22.00</AliquotaIVA>
+</DettaglioLinee>
+<DettaglioLinee>
+<NumeroLinea>27</NumeroLinea>
+<CodiceArticolo>
+<CodiceTipo>Codice Interno</CodiceTipo>
+<CodiceValore>011122275</CodiceValore>
+</CodiceArticolo>
+<CodiceArticolo>
+<CodiceTipo>EAN</CodiceTipo>
+<CodiceValore>08057149130589</CodiceValore>
+</CodiceArticolo>
+<Descrizione>BICCHIERI MAJOR ROYAL PP 200CC DUPLO B CO        </Descrizione>
+<Quantita>4.000</Quantita>
+<UnitaMisura>PZ</UnitaMisura>
+<PrezzoUnitario>0.660000</PrezzoUnitario>
+<PrezzoTotale>2.640000</PrezzoTotale>
+<AliquotaIVA>22.00</AliquotaIVA>
+</DettaglioLinee>
+<DettaglioLinee>
+<NumeroLinea>28</NumeroLinea>
+<CodiceArticolo>
+<CodiceTipo>Codice Interno</CodiceTipo>
+<CodiceValore>011140922</CodiceValore>
+</CodiceArticolo>
+<CodiceArticolo>
+<CodiceTipo>EAN</CodiceTipo>
+<CodiceValore>08057149130534</CodiceValore>
+</CodiceArticolo>
+<Descrizione>BICCHIERI MAJOR PP CC 80X100PZ BIANCO        </Descrizione>
+<Quantita>2.000</Quantita>
+<UnitaMisura>PZ</UnitaMisura>
+<PrezzoUnitario>0.590000</PrezzoUnitario>
+<PrezzoTotale>1.180000</PrezzoTotale>
+<AliquotaIVA>22.00</AliquotaIVA>
+</DettaglioLinee>
+<DettaglioLinee>
+<NumeroLinea>29</NumeroLinea>
+<CodiceArticolo>
+<CodiceTipo>Codice Interno</CodiceTipo>
+<CodiceValore>011141400</CodiceValore>
+</CodiceArticolo>
+<CodiceArticolo>
+<CodiceTipo>EAN</CodiceTipo>
+<CodiceValore>08000697048776</CodiceValore>
+</CodiceArticolo>
+<Descrizione>GUANTI CHEF NERO X SUSHI WALKING TG M L PZ 200        </Descrizione>
+<Quantita>1.000</Quantita>
+<UnitaMisura>PZ</UnitaMisura>
+<PrezzoUnitario>3.200000</PrezzoUnitario>
+<PrezzoTotale>3.200000</PrezzoTotale>
+<AliquotaIVA>5.00</AliquotaIVA>
+</DettaglioLinee>
+<DettaglioLinee>
+<NumeroLinea>30</NumeroLinea>
+<CodiceArticolo>
+<CodiceTipo>Codice Interno</CodiceTipo>
+<CodiceValore>000007970</CodiceValore>
+</CodiceArticolo>
+<CodiceArticolo>
+<CodiceTipo>EAN</CodiceTipo>
+<CodiceValore>08021719110134</CodiceValore>
+</CodiceArticolo>
+<Descrizione>PELLICOLA OTTIMO MT 300        </Descrizione>
+<Quantita>1.000</Quantita>
+<UnitaMisura>PZ</UnitaMisura>
+<PrezzoUnitario>3.990000</PrezzoUnitario>
+<PrezzoTotale>3.990000</PrezzoTotale>
+<AliquotaIVA>22.00</AliquotaIVA>
+</DettaglioLinee>
+<DettaglioLinee>
+<NumeroLinea>31</NumeroLinea>
+<CodiceArticolo>
+<CodiceTipo>Codice Interno</CodiceTipo>
+<CodiceValore>000007960</CodiceValore>
+</CodiceArticolo>
+<CodiceArticolo>
+<CodiceTipo>EAN</CodiceTipo>
+<CodiceValore>08021719001340</CodiceValore>
+</CodiceArticolo>
+<Descrizione>ALLUMINIO OTTIMO MT 150        </Descrizione>
+<Quantita>1.000</Quantita>
+<UnitaMisura>PZ</UnitaMisura>
+<PrezzoUnitario>9.900000</PrezzoUnitario>
+<PrezzoTotale>9.900000</PrezzoTotale>
+<AliquotaIVA>22.00</AliquotaIVA>
+</DettaglioLinee>
+<DettaglioLinee>
+<NumeroLinea>32</NumeroLinea>
+<CodiceArticolo>
+<CodiceTipo>Codice Interno</CodiceTipo>
+<CodiceValore>011140800</CodiceValore>
+</CodiceArticolo>
+<CodiceArticolo>
+<CodiceTipo>EAN</CodiceTipo>
+<CodiceValore>05391532124155</CodiceValore>
+</CodiceArticolo>
+<Descrizione>BARRETTE FULFIL CIOC  LATTE CROCC  GR 55X15        </Descrizione>
+<Quantita>1.000</Quantita>
+<UnitaMisura>PZ</UnitaMisura>
+<PrezzoUnitario>1.719000</PrezzoUnitario>
+<PrezzoTotale>1.719000</PrezzoTotale>
+<AliquotaIVA>10.00</AliquotaIVA>
+</DettaglioLinee>
+<DettaglioLinee>
+<NumeroLinea>33</NumeroLinea>
+<CodiceArticolo>
+<CodiceTipo>Codice Interno</CodiceTipo>
+<CodiceValore>011112436</CodiceValore>
+</CodiceArticolo>
+<CodiceArticolo>
+<CodiceTipo>EAN</CodiceTipo>
+<CodiceValore>04023103242944</CodiceValore>
+</CodiceArticolo>
+<Descrizione>VILEDA ABRASIVO RAINBOW PZ10        </Descrizione>
+<Quantita>1.000</Quantita>
+<UnitaMisura>PZ</UnitaMisura>
+<PrezzoUnitario>0.890000</PrezzoUnitario>
+<PrezzoTotale>0.890000</PrezzoTotale>
+<AliquotaIVA>22.00</AliquotaIVA>
+</DettaglioLinee>
+<DettaglioLinee>
+<NumeroLinea>34</NumeroLinea>
+<CodiceArticolo>
+<CodiceTipo>Codice Interno</CodiceTipo>
+<CodiceValore>000005629</CodiceValore>
+</CodiceArticolo>
+<CodiceArticolo>
+<CodiceTipo>EAN</CodiceTipo>
+<CodiceValore>08003980100618</CodiceValore>
+</CodiceArticolo>
+<Descrizione>VASCH CUKI CALDO GELO C C 8PORZ X2 R98        </Descrizione>
+<Quantita>3.000</Quantita>
+<UnitaMisura>PZ</UnitaMisura>
+<PrezzoUnitario>1.020000</PrezzoUnitario>
+<PrezzoTotale>3.060000</PrezzoTotale>
+<AliquotaIVA>22.00</AliquotaIVA>
+</DettaglioLinee>
+<DettaglioLinee>
+<NumeroLinea>35</NumeroLinea>
+<CodiceArticolo>
+<CodiceTipo>Codice Interno</CodiceTipo>
+<CodiceValore>011143965</CodiceValore>
+</CodiceArticolo>
+<CodiceArticolo>
+<CodiceTipo>EAN</CodiceTipo>
+<CodiceValore>03600524194451</CodiceValore>
+</CodiceArticolo>
+<Descrizione>SHAMPOO ELVIVE ML 300 OLIO DI COCCO        </Descrizione>
+<Quantita>2.000</Quantita>
+<UnitaMisura>PZ</UnitaMisura>
+<PrezzoUnitario>2.280000</PrezzoUnitario>
+<PrezzoTotale>4.560000</PrezzoTotale>
+<AliquotaIVA>22.00</AliquotaIVA>
+</DettaglioLinee>
+<DettaglioLinee>
+<NumeroLinea>36</NumeroLinea>
+<CodiceArticolo>
+<CodiceTipo>Codice Interno</CodiceTipo>
+<CodiceValore>000021019</CodiceValore>
+</CodiceArticolo>
+<CodiceArticolo>
+<CodiceTipo>EAN</CodiceTipo>
+<CodiceValore>08004120060359</CodiceValore>
+</CodiceArticolo>
+<Descrizione>MIL MIL CREMA RIGENERANTE KARITE  ML 500        </Descrizione>
+<Quantita>1.000</Quantita>
+<UnitaMisura>PZ</UnitaMisura>
+<PrezzoUnitario>1.290000</PrezzoUnitario>
+<PrezzoTotale>1.290000</PrezzoTotale>
+<AliquotaIVA>22.00</AliquotaIVA>
+</DettaglioLinee>
+<DettaglioLinee>
+<NumeroLinea>37</NumeroLinea>
+<CodiceArticolo>
+<CodiceTipo>Codice Interno</CodiceTipo>
+<CodiceValore>011138951</CodiceValore>
+</CodiceArticolo>
+<CodiceArticolo>
+<CodiceTipo>EAN</CodiceTipo>
+<CodiceValore>08720181389504</CodiceValore>
+</CodiceArticolo>
+<Descrizione>SVELTO PIATTI LIMONE ML 930        </Descrizione>
+<Quantita>1.000</Quantita>
+<UnitaMisura>PZ</UnitaMisura>
+<PrezzoUnitario>1.100000</PrezzoUnitario>
+<PrezzoTotale>1.100000</PrezzoTotale>
+<AliquotaIVA>22.00</AliquotaIVA>
+</DettaglioLinee>
+<DettaglioLinee>
+<NumeroLinea>38</NumeroLinea>
+<CodiceArticolo>
+<CodiceTipo>Codice Interno</CodiceTipo>
+<CodiceValore>011139240</CodiceValore>
+</CodiceArticolo>
+<CodiceArticolo>
+<CodiceTipo>EAN</CodiceTipo>
+<CodiceValore>00806891059734</CodiceValore>
+</CodiceArticolo>
+<Descrizione>DEO DUE PAVIMENTI FLOREALE ML 750        </Descrizione>
+<Quantita>1.000</Quantita>
+<UnitaMisura>PZ</UnitaMisura>
+<PrezzoUnitario>2.330000</PrezzoUnitario>
+<PrezzoTotale>2.330000</PrezzoTotale>
+<AliquotaIVA>22.00</AliquotaIVA>
+</DettaglioLinee>
+<DettaglioLinee>
+<NumeroLinea>39</NumeroLinea>
+<CodiceArticolo>
+<CodiceTipo>Codice Interno</CodiceTipo>
+<CodiceValore>011105307</CodiceValore>
+</CodiceArticolo>
+<CodiceArticolo>
+<CodiceTipo>EAN</CodiceTipo>
+<CodiceValore>08076809580724</CodiceValore>
+</CodiceArticolo>
+<Descrizione>PESTO ALLA GENOVESE S AGLIO BARILLA GR 190        </Descrizione>
+<Quantita>2.000</Quantita>
+<UnitaMisura>PZ</UnitaMisura>
+<PrezzoUnitario>1.649000</PrezzoUnitario>
+<PrezzoTotale>3.298000</PrezzoTotale>
+<AliquotaIVA>10.00</AliquotaIVA>
+</DettaglioLinee>
+<DettaglioLinee>
+<NumeroLinea>40</NumeroLinea>
+<CodiceArticolo>
+<CodiceTipo>Codice Interno</CodiceTipo>
+<CodiceValore>011102134</CodiceValore>
+</CodiceArticolo>
+<CodiceArticolo>
+<CodiceTipo>EAN</CodiceTipo>
+<CodiceValore>08015100579617</CodiceValore>
+</CodiceArticolo>
+<Descrizione>PRIL BRILLANTANTE CLASSICO ML 500        </Descrizione>
+<Quantita>2.000</Quantita>
+<UnitaMisura>PZ</UnitaMisura>
+<PrezzoUnitario>2.100000</PrezzoUnitario>
+<PrezzoTotale>4.200000</PrezzoTotale>
+<AliquotaIVA>22.00</AliquotaIVA>
+</DettaglioLinee>
+<DettaglioLinee>
+<NumeroLinea>41</NumeroLinea>
+<CodiceArticolo>
+<CodiceTipo>Codice Interno</CodiceTipo>
+<CodiceValore>011134343</CodiceValore>
+</CodiceArticolo>
+<CodiceArticolo>
+<CodiceTipo>EAN</CodiceTipo>
+<CodiceValore>08008758900162</CodiceValore>
+</CodiceArticolo>
+<Descrizione>SACC NETT HOME LINE 90X120 GIALLO X10 RACC DIFFER        </Descrizione>
+<Quantita>1.000</Quantita>
+<UnitaMisura>PZ</UnitaMisura>
+<PrezzoUnitario>1.170000</PrezzoUnitario>
+<PrezzoTotale>1.170000</PrezzoTotale>
+<AliquotaIVA>22.00</AliquotaIVA>
+</DettaglioLinee>
+<DettaglioLinee>
+<NumeroLinea>42</NumeroLinea>
+<CodiceArticolo>
+<CodiceTipo>Codice Interno</CodiceTipo>
+<CodiceValore>011134691</CodiceValore>
+</CodiceArticolo>
+<CodiceArticolo>
+<CodiceTipo>EAN</CodiceTipo>
+<CodiceValore>08002910060183</CodiceValore>
+</CodiceArticolo>
+<Descrizione>FINISH POWER GEL REGULAR 100  STOVIGLIE PRO ML 600        </Descrizione>
+<Quantita>2.000</Quantita>
+<UnitaMisura>PZ</UnitaMisura>
+<PrezzoUnitario>2.870000</PrezzoUnitario>
+<PrezzoTotale>5.740000</PrezzoTotale>
+<AliquotaIVA>22.00</AliquotaIVA>
+</DettaglioLinee>
+<DettaglioLinee>
+<NumeroLinea>43</NumeroLinea>
+<CodiceArticolo>
+<CodiceTipo>Codice Interno</CodiceTipo>
+<CodiceValore>011138246</CodiceValore>
+</CodiceArticolo>
+<CodiceArticolo>
+<CodiceTipo>EAN</CodiceTipo>
+<CodiceValore>08019138523420</CodiceValore>
+</CodiceArticolo>
+<Descrizione>SALMONE NORVEGESE GR 100 LE ROI FUMEE        </Descrizione>
+<Quantita>1.000</Quantita>
+<UnitaMisura>PZ</UnitaMisura>
+<PrezzoUnitario>2.880000</PrezzoUnitario>
+<PrezzoTotale>2.880000</PrezzoTotale>
+<AliquotaIVA>10.00</AliquotaIVA>
+</DettaglioLinee>
+<DettaglioLinee>
+<NumeroLinea>44</NumeroLinea>
+<CodiceArticolo>
+<CodiceTipo>Codice Interno</CodiceTipo>
+<CodiceValore>000003315</CodiceValore>
+</CodiceArticolo>
+<CodiceArticolo>
+<CodiceTipo>EAN</CodiceTipo>
+<CodiceValore>08001590640258</CodiceValore>
+</CodiceArticolo>
+<Descrizione>PHILADELPHIA GR 250        </Descrizione>
+<Quantita>3.000</Quantita>
+<UnitaMisura>PZ</UnitaMisura>
+<PrezzoUnitario>2.370000</PrezzoUnitario>
+<PrezzoTotale>7.110000</PrezzoTotale>
+<AliquotaIVA>4.00</AliquotaIVA>
+</DettaglioLinee>
+<DettaglioLinee>
+<NumeroLinea>45</NumeroLinea>
+<CodiceArticolo>
+<CodiceTipo>Codice Interno</CodiceTipo>
+<CodiceValore>011140648</CodiceValore>
+</CodiceArticolo>
+<CodiceArticolo>
+<CodiceTipo>EAN</CodiceTipo>
+<CodiceValore>08720181306624</CodiceValore>
+</CodiceArticolo>
+<Descrizione>DEO DOVE SPRAY ADV CARE PEAR ALOE ML 150        </Descrizione>
+<Quantita>6.000</Quantita>
+<UnitaMisura>PZ</UnitaMisura>
+<PrezzoUnitario>2.170000</PrezzoUnitario>
+<PrezzoTotale>13.020000</PrezzoTotale>
+<AliquotaIVA>22.00</AliquotaIVA>
+</DettaglioLinee>
+<DettaglioLinee>
+<NumeroLinea>46</NumeroLinea>
+<CodiceArticolo>
+<CodiceTipo>Codice Interno</CodiceTipo>
+<CodiceValore>011146400</CodiceValore>
+</CodiceArticolo>
+<CodiceArticolo>
+<CodiceTipo>EAN</CodiceTipo>
+<CodiceValore>08001480721395</CodiceValore>
+</CodiceArticolo>
+<Descrizione>ACE SPRAY BAGNO CANDEGGINA ML 600 NEW        </Descrizione>
+<Quantita>2.000</Quantita>
+<UnitaMisura>PZ</UnitaMisura>
+<PrezzoUnitario>1.650000</PrezzoUnitario>
+<PrezzoTotale>3.300000</PrezzoTotale>
+<AliquotaIVA>22.00</AliquotaIVA>
+</DettaglioLinee>
+<DettaglioLinee>
+<NumeroLinea>47</NumeroLinea>
+<CodiceArticolo>
+<CodiceTipo>Codice Interno</CodiceTipo>
+<CodiceValore>011106654</CodiceValore>
+</CodiceArticolo>
+<CodiceArticolo>
+<CodiceTipo>EAN</CodiceTipo>
+<CodiceValore>08032680392573</CodiceValore>
+</CodiceArticolo>
+<Descrizione>DUALPOWER SGRASSATORE ULTRA LIMONE ML 750        </Descrizione>
+<Quantita>2.000</Quantita>
+<UnitaMisura>PZ</UnitaMisura>
+<PrezzoUnitario>1.080000</PrezzoUnitario>
+<PrezzoTotale>2.160000</PrezzoTotale>
+<AliquotaIVA>22.00</AliquotaIVA>
+</DettaglioLinee>
+<DettaglioLinee>
+<NumeroLinea>48</NumeroLinea>
+<CodiceArticolo>
+<CodiceTipo>Codice Interno</CodiceTipo>
+<CodiceValore>011123403</CodiceValore>
+</CodiceArticolo>
+<CodiceArticolo>
+<CodiceTipo>EAN</CodiceTipo>
+<CodiceValore>08002295031334</CodiceValore>
+</CodiceArticolo>
+<Descrizione>SMACCHIOTUTTO TRIGGER MADEL ML 500        </Descrizione>
+<Quantita>2.000</Quantita>
+<UnitaMisura>PZ</UnitaMisura>
+<PrezzoUnitario>2.000000</PrezzoUnitario>
+<PrezzoTotale>4.000000</PrezzoTotale>
+<AliquotaIVA>22.00</AliquotaIVA>
+</DettaglioLinee>
+<DettaglioLinee>
+<NumeroLinea>49</NumeroLinea>
+<CodiceArticolo>
+<CodiceTipo>Codice Interno</CodiceTipo>
+<CodiceValore>011140373</CodiceValore>
+</CodiceArticolo>
+<CodiceArticolo>
+<CodiceTipo>EAN</CodiceTipo>
+<CodiceValore>08008731005570</CodiceValore>
+</CodiceArticolo>
+<Descrizione>QUASAR VETRI ML 580        </Descrizione>
+<Quantita>1.000</Quantita>
+<UnitaMisura>PZ</UnitaMisura>
+<PrezzoUnitario>1.690000</PrezzoUnitario>
+<PrezzoTotale>1.690000</PrezzoTotale>
+<AliquotaIVA>22.00</AliquotaIVA>
+</DettaglioLinee>
+<DatiRiepilogo>
+<AliquotaIVA>22.00</AliquotaIVA>
+<ImponibileImporto>163.77</ImponibileImporto>
+<Imposta>36.03</Imposta>
+<EsigibilitaIVA>I</EsigibilitaIVA>
+</DatiRiepilogo>
+<DatiRiepilogo>
+<AliquotaIVA>4.00</AliquotaIVA>
+<ImponibileImporto>27.85</ImponibileImporto>
+<Imposta>1.11</Imposta>
+<EsigibilitaIVA>I</EsigibilitaIVA>
+</DatiRiepilogo>
+<DatiRiepilogo>
+<AliquotaIVA>10.00</AliquotaIVA>
+<ImponibileImporto>57.06</ImponibileImporto>
+<Imposta>5.71</Imposta>
+<EsigibilitaIVA>I</EsigibilitaIVA>
+</DatiRiepilogo>
+<DatiRiepilogo>
+<AliquotaIVA>5.00</AliquotaIVA>
+<ImponibileImporto>6.15</ImponibileImporto>
+<Imposta>0.31</Imposta>
+<EsigibilitaIVA>I</EsigibilitaIVA>
+</DatiRiepilogo>
+</DatiBeniServizi>
+<DatiPagamento>
+<CondizioniPagamento>TP02</CondizioniPagamento>
+<DettaglioPagamento>
+<ModalitaPagamento>MP01</ModalitaPagamento>
+<DataRiferimentoTerminiPagamento>2026-10-02</DataRiferimentoTerminiPagamento>
+<ImportoPagamento>297.99</ImportoPagamento>
+<IBAN>IT82C0538781020000043030889</IBAN>
+<ABI>05387</ABI>
+<CAB>81020</CAB>
+</DettaglioPagamento>
+</DatiPagamento>
+</FatturaElettronicaBody>
+</b:FatturaElettronica>

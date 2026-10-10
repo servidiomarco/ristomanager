@@ -125,5 +125,8 @@
     "colQty": "Quantity",
     "colSpread": "Spread",
     "printedOn": "Printed on {{quando}}"
-  }
+  },
+  "supplierInvoices": "Supplier invoices",
+  "invoicesToCheck_one": "invoice",
+  "invoicesToCheck_other": "invoices"
 }

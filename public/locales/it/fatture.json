@@ -1,0 +1,157 @@
+{
+  "abbina": {
+    "alKg": "al kg",
+    "alLitro": "al litro",
+    "alPezzo": "al pezzo",
+    "area": "Area",
+    "carico": "In magazzino",
+    "categoria": "Conta nella spesa come",
+    "categoriaHint": "Non entra in magazzino. Le prossime fatture la ignorano da sole.",
+    "cerca": "Cerca",
+    "confezione": "In magazzino",
+    "contenuto": "Contenuto della confezione",
+    "entrano": "Entrano {{q}} {{u}}",
+    "ignora": "Ignora",
+    "modo": "Cosa fare della riga",
+    "nessuno": "Nessun prodotto con questo nome",
+    "nome": "Nome",
+    "nonAggiornare": "non aggiornare",
+    "nuovo": "Nuovo prodotto",
+    "prezzo": "Prezzo nel food cost",
+    "prezzoAnteprima": "{{prezzo}} al {{u}}",
+    "prezzoNo": "Il prezzo del prodotto non cambia.",
+    "prodotto": "Prodotto di magazzino",
+    "salva": "Salva",
+    "unita": "Si conta in",
+    "unitaDiversa": "Nel food cost questo prodotto si paga al {{u}}"
+  },
+  "altre": {
+    "apri": "Altre righe ({{n}})",
+    "chiudi": "Nascondi le altre righe"
+  },
+  "altroDestinatario": "È intestata a un'altra partita IVA: controlla che sia del locale.",
+  "annulla": "Annulla carico",
+  "annullaTesto": "La merce esce dal magazzino con una rettifica e la fattura torna da controllare. I prezzi restano nello storico.",
+  "annullaTitolo": "Annullare il carico?",
+  "annullato": "Carico annullato",
+  "area": {
+    "BAR": "bar",
+    "CUCINA": "cucina",
+    "SALA": "sala"
+  },
+  "carica": "Carica fatture",
+  "caricaInMagazzino": "Carica in magazzino",
+  "caricata": {
+    "prezzi_one": "un prezzo aggiornato",
+    "prezzi_other": "{{count}} prezzi aggiornati",
+    "righe_one": "Una riga in magazzino",
+    "righe_other": "{{count}} righe in magazzino"
+  },
+  "caricataIl": "Caricata il {{d}}{{chi}}",
+  "categoria": {
+    "altro": "Altro",
+    "bevande": "Bevande",
+    "cibo": "Cibo",
+    "monouso": "Monouso",
+    "personale": "Personale",
+    "pulizia": "Pulizia",
+    "servizi": "Servizi"
+  },
+  "cella": "Cella {{area}}",
+  "chiudi": "Chiudi la fattura",
+  "daEmail": "Arrivata per email",
+  "ddt": "DDT {{n}}",
+  "doc": {
+    "fattura": "Fattura {{n}} del {{d}}",
+    "nota": "Nota di credito {{n}} del {{d}}"
+  },
+  "elimina": "Togli la fattura",
+  "eliminaTesto": "Sparisce dall'elenco; la puoi ricaricare dal file.",
+  "eliminaTitolo": "Togliere la fattura?",
+  "eliminata": "Fattura tolta",
+  "errore": "Non salvato",
+  "erroreCaricamento": "Fattura non caricata",
+  "erroreElenco": "Fatture non caricate",
+  "erroreFile": "File non letto",
+  "esito": {
+    "doppioni_one": "{{count}} già presente",
+    "doppioni_other": "{{count}} già presenti",
+    "niente": "Nessuna fattura nel file",
+    "nuove_one": "{{count}} nuova",
+    "nuove_other": "{{count}} nuove",
+    "riconosciute_one": "Già riconosciute: {{r}} di {{count}} riga",
+    "riconosciute_other": "Già riconosciute: {{r}} di {{count}} righe",
+    "scartati_one": "{{count}} file scartato",
+    "scartati_other": "{{count}} file scartati"
+  },
+  "filtri": {
+    "caricate": "Caricate",
+    "daControllare": "Da controllare",
+    "messeDaParte": "Messe da parte",
+    "tutte": "Tutte"
+  },
+  "filtro": "Quali fatture",
+  "fornitore": {
+    "collega": "Collega",
+    "crea": "Crea",
+    "scegli": "Scegli il fornitore",
+    "suggerito": "È «{{nome}}»",
+    "titolo": "Fornitore nuovo per l'anagrafica"
+  },
+  "fornitoreCollegato": "Fornitore collegato",
+  "ignora": "Ignora",
+  "ignoraAltre": "Ignora le {{n}} da abbinare",
+  "ignoraAltreTitolo": "Ignora {{n}} righe",
+  "indietro": "Fatture",
+  "invio": "{{fatti}} di {{totali}}",
+  "iva": "IVA {{iva}}",
+  "lascia": "Lascia",
+  "magazzino": "Magazzino",
+  "mancano_one": "Manca una riga",
+  "mancano_other": "Mancano {{count}} righe",
+  "merce": "Merce",
+  "messaDaParte": "Messa da parte: non entra in magazzino.",
+  "mettiDaParte": "Metti da parte",
+  "nessunaCella": "Nessuna cella",
+  "notaDiCredito": "Una nota di credito non carica merce.",
+  "ok": "Ok",
+  "riepilogo": {
+    "carico_one": "{{count}} in magazzino",
+    "carico_other": "{{count}} in magazzino",
+    "ignorate_one": "{{count}} ignorata",
+    "ignorate_other": "{{count}} ignorate"
+  },
+  "riga": {
+    "daDecidere": "Da abbinare",
+    "ignorata": "Ignorata",
+    "iva": "IVA {{p}}%",
+    "lotto": "lotto {{lotto}}",
+    "nota": "già noto",
+    "numero": "n. {{n}} · {{d}}",
+    "prima": "Prima {{p}}",
+    "senzaDescrizione": "Riga {{n}}",
+    "soloNote": "Note"
+  },
+  "rilascia": "Rilascia qui le fatture",
+  "riprendi": "Riprendi",
+  "scadenza": "Scade il {{d}}",
+  "stato": {
+    "caricata": "Caricata",
+    "daAbbinare": "{{n}} da abbinare",
+    "ignorata": "Messa da parte",
+    "notaDiCredito": "Nota di credito",
+    "pronta": "Pronta da caricare"
+  },
+  "tipo": {
+    "merce": "merce",
+    "nota": "note",
+    "sconto": "sconto",
+    "servizio": "servizio",
+    "spesa": "spesa accessoria"
+  },
+  "titolo": "Fatture fornitori",
+  "vuoto": {
+    "altre": "Nessuna fattura qui.",
+    "daControllare": "Nessuna fattura da controllare. Carica gli XML, i p7m o lo zip del commercialista."
+  }
+}

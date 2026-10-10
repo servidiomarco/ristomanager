@@ -1,0 +1,157 @@
+{
+  "abbina": {
+    "alKg": "per kg",
+    "alLitro": "per litre",
+    "alPezzo": "per piece",
+    "area": "Area",
+    "carico": "Into stock",
+    "categoria": "Count in spending as",
+    "categoriaHint": "Doesn't go into stock. Future invoices skip it on their own.",
+    "cerca": "Search",
+    "confezione": "Into stock",
+    "contenuto": "Pack content",
+    "entrano": "{{q}} {{u}} go in",
+    "ignora": "Skip",
+    "modo": "What to do with the line",
+    "nessuno": "No product with this name",
+    "nome": "Name",
+    "nonAggiornare": "don't update",
+    "nuovo": "New product",
+    "prezzo": "Price in food cost",
+    "prezzoAnteprima": "{{prezzo}} per {{u}}",
+    "prezzoNo": "The product's price stays the same.",
+    "prodotto": "Stock product",
+    "salva": "Save",
+    "unita": "Counted in",
+    "unitaDiversa": "Food cost prices this product per {{u}}"
+  },
+  "altre": {
+    "apri": "Other lines ({{n}})",
+    "chiudi": "Hide the other lines"
+  },
+  "altroDestinatario": "It's addressed to another VAT number: check it belongs to the restaurant.",
+  "annulla": "Undo load",
+  "annullaTesto": "The goods leave stock with an adjustment and the invoice goes back to review. Prices stay in the history.",
+  "annullaTitolo": "Undo the load?",
+  "annullato": "Load undone",
+  "area": {
+    "BAR": "bar",
+    "CUCINA": "kitchen",
+    "SALA": "dining room"
+  },
+  "carica": "Upload invoices",
+  "caricaInMagazzino": "Load into stock",
+  "caricata": {
+    "prezzi_one": "one price updated",
+    "prezzi_other": "{{count}} prices updated",
+    "righe_one": "One line into stock",
+    "righe_other": "{{count}} lines into stock"
+  },
+  "caricataIl": "Loaded on {{d}}{{chi}}",
+  "categoria": {
+    "altro": "Other",
+    "bevande": "Drinks",
+    "cibo": "Food",
+    "monouso": "Disposables",
+    "personale": "Personal",
+    "pulizia": "Cleaning",
+    "servizi": "Services"
+  },
+  "cella": "{{area}} location",
+  "chiudi": "Close the invoice",
+  "daEmail": "Arrived by email",
+  "ddt": "Delivery note {{n}}",
+  "doc": {
+    "fattura": "Invoice {{n}} of {{d}}",
+    "nota": "Credit note {{n}} of {{d}}"
+  },
+  "elimina": "Remove the invoice",
+  "eliminaTesto": "It leaves the list; you can upload the file again.",
+  "eliminaTitolo": "Remove the invoice?",
+  "eliminata": "Invoice removed",
+  "errore": "Not saved",
+  "erroreCaricamento": "Invoice not loaded",
+  "erroreElenco": "Invoices not loaded",
+  "erroreFile": "File not read",
+  "esito": {
+    "doppioni_one": "{{count}} already there",
+    "doppioni_other": "{{count}} already there",
+    "niente": "No invoice in the file",
+    "nuove_one": "{{count}} new",
+    "nuove_other": "{{count}} new",
+    "riconosciute_one": "Already recognised: {{r}} of {{count}} line",
+    "riconosciute_other": "Already recognised: {{r}} of {{count}} lines",
+    "scartati_one": "{{count}} file skipped",
+    "scartati_other": "{{count}} files skipped"
+  },
+  "filtri": {
+    "caricate": "Loaded",
+    "daControllare": "To review",
+    "messeDaParte": "Set aside",
+    "tutte": "All"
+  },
+  "filtro": "Which invoices",
+  "fornitore": {
+    "collega": "Link",
+    "crea": "Create",
+    "scegli": "Choose the supplier",
+    "suggerito": "It's “{{nome}}”",
+    "titolo": "Supplier not yet in your list"
+  },
+  "fornitoreCollegato": "Supplier linked",
+  "ignora": "Skip",
+  "ignoraAltre": "Skip the {{n}} to match",
+  "ignoraAltreTitolo": "Skip {{n}} lines",
+  "indietro": "Invoices",
+  "invio": "{{fatti}} of {{totali}}",
+  "iva": "VAT {{iva}}",
+  "lascia": "Keep",
+  "magazzino": "Stock",
+  "mancano_one": "One line left",
+  "mancano_other": "{{count}} lines left",
+  "merce": "Goods",
+  "messaDaParte": "Set aside: it doesn't go into stock.",
+  "mettiDaParte": "Set aside",
+  "nessunaCella": "No location",
+  "notaDiCredito": "A credit note doesn't load goods.",
+  "ok": "Ok",
+  "riepilogo": {
+    "carico_one": "{{count}} into stock",
+    "carico_other": "{{count}} into stock",
+    "ignorate_one": "{{count}} skipped",
+    "ignorate_other": "{{count}} skipped"
+  },
+  "riga": {
+    "daDecidere": "To match",
+    "ignorata": "Skipped",
+    "iva": "VAT {{p}}%",
+    "lotto": "batch {{lotto}}",
+    "nota": "known",
+    "numero": "no. {{n}} · {{d}}",
+    "prima": "Was {{p}}",
+    "senzaDescrizione": "Line {{n}}",
+    "soloNote": "Notes"
+  },
+  "rilascia": "Drop the invoices here",
+  "riprendi": "Resume",
+  "scadenza": "Due {{d}}",
+  "stato": {
+    "caricata": "Loaded",
+    "daAbbinare": "{{n}} to match",
+    "ignorata": "Set aside",
+    "notaDiCredito": "Credit note",
+    "pronta": "Ready to load"
+  },
+  "tipo": {
+    "merce": "goods",
+    "nota": "notes",
+    "sconto": "discount",
+    "servizio": "service",
+    "spesa": "extra charge"
+  },
+  "titolo": "Supplier invoices",
+  "vuoto": {
+    "altre": "No invoices here.",
+    "daControllare": "No invoices to review. Upload the XML, p7m or the accountant's zip."
+  }
+}
