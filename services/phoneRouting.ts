@@ -122,7 +122,7 @@ export const dialMobilesTwiml = (args: {
  *  tasto la gamba si chiude e la chiamata passa a Sofia. */
 export const whisperTwiml = (args: { announce: string; confirmUrl: string }): string =>
     twimlResponse(
-        `<Gather numDigits="1" timeout="8" action="${xmlEscape(args.confirmUrl)}" method="POST">`
+        `<Gather numDigits="1" timeout="6" action="${xmlEscape(args.confirmUrl)}" method="POST">`
         + `<Say language="it-IT">${xmlEscape(args.announce)}</Say>`
         + `</Gather><Hangup/>`
     );

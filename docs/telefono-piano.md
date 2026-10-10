@@ -114,7 +114,12 @@ In attesa di softphone e cordless, prima di Sofia squilla il cellulare del local
 3. `whisper-ok` col tasto 1 → `phone_calls.status = answered`, `answered_by = cellulare:+39…`;
 4. `after-dial` → Sofia se nessuno ha preso la chiamata.
 
-Il banner ha la fase (`stage`: ringing / sofia / staff, evento `phoneCall:updated`). Costo: circa 0,045 $/min verso cellulari italiani da numero EEA. Da provare: il passaggio del numero del cliente come caller ID.
+Il banner ha la fase (`stage`: ringing / sofia / staff, evento `phoneCall:updated`).
+
+**10/10, prima prova vera:** con «Prima il cellulare» acceso sono arrivate due chiamate di un cliente vero (15:07 e 15:09). Il cellulare risultava aver risposto dopo 7 s e ha ricevuto l'annuncio, ma nessun 1. La chiamata del cliente si è chiusa nello stesso istante del cellulare, dopo 22 s e dopo 8 s, e Sofia non è entrata. Non si sa ancora se il cliente abbia riattaccato stanco dello squillo o se Twilio chiuda la chiamata alla fine dell'annuncio: serve la prova con due telefoni. L'utente ha rimesso «Solo Sofia». Correzioni:
+- niente Sofia se chi chiama ha già riattaccato;
+- chi riattacca durante lo squillo finisce in Da ricontattare;
+- annuncio corto e Gather a 6 s. Costo: circa 0,045 $/min verso cellulari italiani da numero EEA. Da provare: il passaggio del numero del cliente come caller ID.
 
 ### Fase 3: softphone nel CRM (L, 2–3 PR)
 - **Twilio Voice JS SDK** (`@twilio/voice-sdk`), con TwiML App e API key in nuove variabili `TWILIO_API_KEY_*` e `TWILIO_TWIML_APP_SID`.

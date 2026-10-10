@@ -2384,9 +2384,10 @@ const e164OrEmpty = (raw: unknown): string => {
 // considera persa. Variabile d'ambiente solo per i test.
 const SOFIA_SILENT_CHECK_MS = Number(process.env.SOFIA_SILENT_CHECK_MS) || 3 * 60 * 1000;
 
-type MissedReason = 'sofia_non_disponibile' | 'sofia_muta' | 'voce_non_attiva';
+type MissedReason = 'sofia_non_disponibile' | 'sofia_muta' | 'voce_non_attiva' | 'riattaccata_in_attesa';
 
 const MISSED_SUMMARY: Record<MissedReason, string> = {
+    riattaccata_in_attesa: 'Ha riattaccato mentre squillava il cellulare del locale, prima che rispondesse qualcuno. Da richiamare.',
     sofia_non_disponibile: 'Sofia non era raggiungibile: il cliente ha sentito il messaggio di cortesia. Da richiamare.',
     sofia_muta: 'Sofia non ha parlato con il cliente: la chiamata si è chiusa senza conversazione. Da richiamare.',
     voce_non_attiva: 'Chiamata arrivata con Sofia non attiva: il cliente ha sentito il messaggio di cortesia. Da richiamare.',
@@ -2569,7 +2570,7 @@ async function handleTwilioVoiceAfterDial(tenantId: number, req: express.Request
     }
     const callSid = String(req.body?.CallSid || '');
     const found = await queryWithRetry(
-        `SELECT status, from_number, to_number FROM phone_calls WHERE call_sid = $1 AND tenant_id = $2`,
+        `SELECT status, from_number, to_number, ended_at FROM phone_calls WHERE call_sid = $1 AND tenant_id = $2`,
         [callSid, tenantId]
     );
     const row = found.rows[0];
@@ -2578,6 +2579,15 @@ async function handleTwilioVoiceAfterDial(tenantId: number, req: express.Request
         return;
     }
     if (row.status === 'answered') {
+        res.type('text/xml').send(twimlResponse('<Hangup/>'));
+        return;
+    }
+    // Twilio chiede l'action anche quando chi chiama ha già riattaccato
+    // (prova del 10/10: status callback e after-dial nello stesso istante).
+    // Allora non c'è nessuno da passare a Sofia: register-call aprirebbe una
+    // conversazione su una chiamata finita.
+    const parentStatus = String(req.body?.CallStatus || '');
+    if (row.ended_at || ['completed', 'canceled', 'busy', 'failed', 'no-answer'].includes(parentStatus)) {
         res.type('text/xml').send(twimlResponse('<Hangup/>'));
         return;
     }
@@ -2606,10 +2616,12 @@ async function handleTwilioVoiceWhisper(tenantId: number, req: express.Request, 
     const row = found.rows[0];
     const name = String(row?.customer_name || '').trim();
     const phone = e164OrEmpty(row?.from_number);
-    // Il numero si legge a cifre, come lo dice Sofia: «tre quattro sette…».
-    const who = name || (phone ? `il numero ${spellItalianPhoneDigits(phone)}` : 'un numero nascosto');
+    // Corto: chi chiama sente squillare finché qui non si preme 1. Il numero
+    // letto a cifre allungava l'annuncio di secondi (prova del 10/10); il
+    // numero completo è nel banner del CRM.
+    const who = name || (phone ? 'un numero non in rubrica' : 'un numero nascosto');
     res.type('text/xml').send(whisperTwiml({
-        announce: `Chiamata per ${businessIdentity(tenantId).voiceName} da ${who}. Premi 1 per rispondere.`,
+        announce: `${businessIdentity(tenantId).voiceName}: chiama ${who}. Premi 1.`,
         confirmUrl: voiceStepUrl(req, 'whisper-ok', parentSid),
     }));
 }
@@ -2657,13 +2669,20 @@ async function handleTwilioVoiceStatus(tenantId: number, req: express.Request, r
     const updated = await queryWithRetry(
         `UPDATE phone_calls SET ended_at = NOW(), duration_seconds = $3
          WHERE call_sid = $1 AND tenant_id = $2
-         RETURNING status, from_number, voice_call_id`,
+         RETURNING status, routing, from_number, voice_call_id`,
         [callSid, tenantId, Number.isFinite(duration) ? Math.trunc(duration) : null]
     );
     res.status(204).send();
 
     const row = updated.rows[0];
     if (!row) return;
+    // Riattaccata mentre squillava il cellulare del locale: il cliente ha
+    // aspettato e non ha trovato nessuno, va richiamato (10/10: due chiamate
+    // vere chiuse così, mai finite in Da ricontattare).
+    if (row.status === 'ringing' && row.routing === 'prima_cellulare') {
+        await recordMissedPhoneCall(tenantId, callSid, e164OrEmpty(row.from_number), 'riattaccata_in_attesa');
+        return;
+    }
     // Riattaccata prima che rispondesse qualcuno: resta nel registro, senza
     // push (è il cliente che ha chiuso nel giro di un attimo).
     if (row.status === 'ringing') {
