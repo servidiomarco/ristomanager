@@ -1,6 +1,6 @@
 # Sympotia come centralino: il telefono dentro il CRM
 
-> Piano approvato il 10/10/2026. **Stato:** Fase 1 («chi chiama» per le chiamate di Sofia) fatta il 10/10 — `services/liveCalls.ts`, `components/phone/CallBanner.tsx`, `GET /phone/live`, eventi `phoneCall:started|ended`. Fase 0 da fare: serve un numero Twilio di prova (costo e acquisto da confermare). Le fasi 2–7 partono da qui.
+> Piano approvato il 10/10/2026. **Stato:** Fase 1 («chi chiama» per le chiamate di Sofia) fatta il 10/10 — `services/liveCalls.ts`, `components/phone/CallBanner.tsx`, `GET /phone/live`, eventi `phoneCall:started|ended`. Fase 0 da fare, senza comprare numeri: si prova col client Twilio nel browser (decisione del 10/10). Le fasi 2–7 partono da qui.
 
 ## Contesto
 
@@ -46,6 +46,11 @@ voice_fallback_url di entrambi = URL ElevenLabs di oggi: se Sympotia non rispond
 
 **Perché il numero ponte.** Twilio non dice se una chiamata arriva deviata dal fisso: `forwarded_from` coincide col numero chiamato. Senza ponte, col «Prima il locale» attivo, una chiamata deviata perché nessuno può rispondere farebbe squillare di nuovo la sala prima di arrivare a Sofia.
 
+**Il ponte non si compra su Twilio (verificato il 10/10).** Per l'Italia Twilio vende solo cellulari (45 $/mese) e numeri verdi (27 $/mese più 0,46 $/min in arrivo); i fissi 0985 non sono più in vendita, e il 010032 è di luglio. Strade da decidere prima della Fase 3, cioè quando il 010032 squillerà in sala:
+- un numero 0985 di un operatore VoIP italiano, inoltrato via SIP al SIP Domain Twilio (pochi euro al mese, da verificare);
+- chiedere a Twilio un fisso tramite il supporto;
+- niente ponte: chi devia il fisso accende anche «Sofia risponde adesso» nel CRM.
+
 **Perché register-call e non l'integrazione nativa.** Con register-call teniamo noi la chiamata Twilio e possiamo far squillare, passare la chiamata e registrare tutto.
 - Si perde il trasferimento nativo di ElevenLabs, che oggi non usiamo: lo sostituiamo con un nostro reindirizzamento via REST.
 - Va impostato l'audio μ-law 8000 sull'agente.
@@ -54,14 +59,14 @@ voice_fallback_url di entrambi = URL ElevenLabs di oggi: se Sympotia non rispond
 ## Fasi
 
 ### Fase 0: verifiche, senza toccare la produzione
-- **Prove su un numero Twilio di prova**, che può diventare poi il ponte:
+- **Prove col client Twilio nel browser** (TwiML App, circa 0,004 $/min, nessun numero da comprare). L'unica prova che non sostituisce, la chiamata vera dalla rete telefonica, si fa alla fine sul 010032 a locale chiuso:
   - webhook → register-call → Sofia risponde in μ-law;
   - le variabili dinamiche arrivano a Sofia;
   - il post-call porta il `twilio_call_sid` passato come variabile;
   - Twilio Client squilla nel browser;
   - una chiamata in corso con Sofia si può reindirizzare al `<Dial>`.
 - **Prova del cordless SIP sul Twilio SIP Domain:** registrazione dietro il doppio NAT USG → EdgeRouter → NeXXt, e se il display mostra il nome (Twilio limita il campo From).
-- **Costi da verificare:** canone mensile di un numero geografico italiano, chiamate verso i cellulari, client nel browser (circa 0,004 $/min).
+- **Costi Twilio:** chiamate in arrivo su numeri italiani 0,01 $/min, client nel browser circa 0,004 $/min; da verificare le chiamate verso i cellulari.
 - **Col Frantoio:** dove è pubblicato oggi il fisso (Google, TripAdvisor, TheFork, sito, menu QR, insegna, biglietti) e chi ha uno smartphone di servizio.
 
 ### Fase 1: «chi chiama» per le chiamate di Sofia, senza toccare la linea (S, una PR)
@@ -109,7 +114,7 @@ voice_fallback_url di entrambi = URL ElevenLabs di oggi: se Sympotia non rispond
 - **«Telefono pubblico»** (`legal_config.public_phone`) impostato sul 010032. Conferme, promemoria ed email usano già `identity.phone` («Per modifiche o imprevisti chiamaci al …», server.ts circa 26600 e 27120–27400), quindi ogni prenotazione insegna il numero nuovo. Da verificare che il fallback `IDENTITY_FALLBACK.phone` non lo sovrascriva.
 - **Prompt di Sofia** (`docs/elevenlabs-agent-prompt.md` circa 206 e 266): i rimandi al locale citano il fisso. Si aggiornano col solito script, dry-run prima.
 - **Google Business:** il 010032 come numero principale e il fisso come aggiuntivo. Poi sito, menu QR e TheFork/TripAdvisor (lo fa il locale, con una lista da spuntare).
-- **Personale:** quando non può rispondere, devia il fisso sul **ponte** e non più sul 010032. Sulle chiamate del 010032 usa invece «Sofia risponde adesso».
+- **Personale:** quando non può rispondere, devia il fisso sul **ponte** (se c'è, vedi sopra) e non più sul 010032. Sulle chiamate del 010032 usa invece «Sofia risponde adesso».
 - **Contratto:** il numero è nell'account Twilio di Sympotia, quindi va scritto che il locale può portarselo via se se ne va.
 
 ### Fase 6: Sofia passa la chiamata (S/M)
