@@ -176,7 +176,7 @@ export interface PhoneCallRow {
   status: 'ringing' | 'sofia' | 'answered' | 'missed';
   missed_reason: string | null;
   routing: string;
-  answered_by: { kind: 'user'; name: string | null } | { kind: 'mobile'; number: string } | null;
+  answered_by: { kind: 'user'; name: string | null } | { kind: 'mobile'; number: string } | { kind: 'cordless'; name: string | null } | null;
   started_at: string;
   answered_at: string | null;
   duration_seconds: number | null;
@@ -187,6 +187,20 @@ export interface PhoneCallRow {
 }
 
 export type PhoneCallsFilter = 'all' | 'missed' | 'staff' | 'sofia' | 'outbound';
+
+/** Un cordless (base DECT IP o app SIP) registrato sul dominio SIP. */
+export interface PhoneSipLine { id: number; label: string; username: string; created_at: string }
+
+export interface PhoneSipLinesResponse {
+  /** Il server ha dominio SIP e Credential List: senza, niente cordless. */
+  configured: boolean;
+  domain: string | null;
+  proxy: string | null;
+  lines: PhoneSipLine[];
+}
+
+/** Appena creato: l'unica volta in cui si vede la password. */
+export interface PhoneSipLineCreated { id: number; label: string; username: string; password: string; domain: string; proxy: string }
 
 export interface PhoneDevice {
   id: number;
@@ -398,6 +412,26 @@ class VoiceCallsApiService {
       headers: { ...getHeaders(), 'Content-Type': 'application/json' },
       body: JSON.stringify({ reservation_id: reservationId }),
     });
+  }
+
+  // Cordless (Fase 4).
+  async sipLines(): Promise<PhoneSipLinesResponse> {
+    return apiRequest<PhoneSipLinesResponse>(`${API_URL}/phone/sip-lines`, { headers: getHeaders() });
+  }
+
+  async createSipLine(label: string): Promise<PhoneSipLineCreated> {
+    return apiRequest<PhoneSipLineCreated>(`${API_URL}/phone/sip-lines`, {
+      method: 'POST',
+      headers: { ...getHeaders(), 'Content-Type': 'application/json' },
+      body: JSON.stringify({ label }),
+    });
+  }
+
+  async deleteSipLine(id: number): Promise<void> {
+    const response = await fetchWithAuth(`${API_URL}/phone/sip-lines/${id}`, { method: 'DELETE', headers: getHeaders() });
+    if (!response.ok && response.status !== 404) {
+      throw buildApiError(response.status, await response.json().catch(() => ({})));
+    }
   }
 
   // Softphone (Fase 3): i dispositivi del CRM che squillano.

@@ -144,10 +144,15 @@ export const PhoneCallLog: React.FC<Props> = ({ switcher, onOpenSofiaCall, onOpe
 
   const outcome = (c: PhoneCallRow): string => {
     const k = kindOf(c);
-    if (k === 'outbound') return c.answered_by?.kind === 'user' && c.answered_by.name ? t('log.outboundBy', { name: c.answered_by.name }) : t('log.outbound');
+    if (k === 'outbound') {
+      if (c.answered_by?.kind === 'user' && c.answered_by.name) return t('log.outboundBy', { name: c.answered_by.name });
+      if (c.answered_by?.kind === 'cordless') return c.answered_by.name ? t('log.outboundCordlessName', { name: c.answered_by.name }) : t('log.outboundCordless');
+      return t('log.outbound');
+    }
     if (k === 'staff') {
       if (c.answered_by?.kind === 'user') return c.answered_by.name ? t('log.answeredBy', { name: c.answered_by.name }) : t('log.answeredCrm');
       if (c.answered_by?.kind === 'mobile') return t('log.answeredMobile', { number: displayPhone(c.answered_by.number) });
+      if (c.answered_by?.kind === 'cordless') return c.answered_by.name ? t('log.answeredCordlessName', { name: c.answered_by.name }) : t('log.answeredCordless');
       return t('log.answered');
     }
     if (k === 'sofia') return t('log.sofia');

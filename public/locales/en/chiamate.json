@@ -139,6 +139,10 @@
     "notePh": "What they asked, what is left to do",
     "noteError": "Note not saved, try again",
     "openSofia": "Conversation with Sofia",
-    "openFollowUp": "Open in To call back"
+    "openFollowUp": "Open in To call back",
+    "answeredCordless": "Answered on the cordless",
+    "answeredCordlessName": "Answered on {{name}}",
+    "outboundCordless": "Called from the cordless",
+    "outboundCordlessName": "Called from {{name}}"
   }
 }

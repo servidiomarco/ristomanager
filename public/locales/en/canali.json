@@ -525,6 +525,23 @@
     "slotDays": "Days",
     "slotMode": "In this time slot",
     "slotInvalid": "Pick at least one day and two different times",
-    "slotAdd": "Time slot"
+    "slotAdd": "Time slot",
+    "cordless": "Cordless phones",
+    "cordlessHint": "A DECT IP base (or a SIP app) rings with the CRM, showing who is calling, and calls customers from the restaurant number.",
+    "cordlessRemove": "Remove this cordless phone",
+    "cordlessConfig": "To enter in the cordless base",
+    "sipServer": "SIP server",
+    "sipProxy": "Outbound proxy",
+    "sipUser": "Username",
+    "sipPassword": "Password",
+    "sipTransport": "Transport",
+    "copy": "Copy",
+    "copied": "Copied",
+    "cordlessOnce": "The password is shown only now. If you lose it, remove the cordless phone and add it again.",
+    "done": "Done",
+    "cordlessPh": "Name, e.g. Dining room cordless",
+    "cordlessName": "Cordless name",
+    "cordlessAdd": "Add",
+    "cordlessEmergency": "The cordless only calls Italian landlines and mobiles: not 112, 113 or 118. For emergencies use the landline."
   }
 }

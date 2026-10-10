@@ -206,7 +206,7 @@ import {
     spellItalianPhoneDigits,
 } from './services/elevenlabsService.js';
 import { buildCallerCard, addLiveCall, removeLiveCall, listLiveCalls, findRecentLiveCall, updateLiveCallStage, type LiveCall, type LiveCallStage, type CallerCard } from './services/liveCalls.js';
-import { registerSofiaCall, unavailableTwiml, twimlResponse, dialLocaleTwiml, whisperTwiml, outboundTwiml, parseRoutingMode, softphoneConfig, softphoneToken, deviceIdentity, parseDeviceIdentity, isCallableNumber, SOFTPHONE_TOKEN_TTL_SECONDS, DEFAULT_PHONE_ROUTING, PHONE_ROUTING_MAX_MOBILES, PHONE_ROUTING_RING_MIN, PHONE_ROUTING_RING_MAX, type SofiaInitData, type PhoneRouting } from './services/phoneRouting.js';
+import { registerSofiaCall, unavailableTwiml, twimlResponse, xmlEscape, dialLocaleTwiml, whisperTwiml, outboundTwiml, parseRoutingMode, softphoneConfig, softphoneToken, deviceIdentity, parseDeviceIdentity, isCallableNumber, sipConfig, sipUsername, parseSipUser, sipTargetNumber, sipDialUri, randomSipPassword, createSipCredential, deleteSipCredential, SOFTPHONE_TOKEN_TTL_SECONDS, DEFAULT_PHONE_ROUTING, PHONE_ROUTING_MAX_MOBILES, PHONE_ROUTING_RING_MIN, PHONE_ROUTING_RING_MAX, type SofiaInitData, type PhoneRouting } from './services/phoneRouting.js';
 import { effectivePhoneMode, parsePhoneSlot, untilTonight, PHONE_SLOTS_MAX, type EffectivePhoneMode, type PhoneRoutingOverride } from './utils/phoneSchedule.js';
 import {
     ROOM_OCCUPANCY_CAPS_KEY,
@@ -2559,7 +2559,8 @@ async function handleTwilioVoiceInbound(tenantId: number, req: express.Request, 
     // I dispositivi del CRM squillano solo se il softphone è configurato e
     // se si sono fatti vivi di recente: uno spento da giorni non serve.
     const clients = mode === 'prima_locale' && softphoneConfig() ? await ringingDeviceIdentities(tenantId) : [];
-    const ringLocale = mode === 'prima_locale' && (clients.length > 0 || routing.mobiles.length > 0) && !!to;
+    const sips = mode === 'prima_locale' ? await ringingSipUris(tenantId, caller) : [];
+    const ringLocale = mode === 'prima_locale' && (clients.length > 0 || sips.length > 0 || routing.mobiles.length > 0) && !!to;
 
     // Il registro per primo: anche se Sofia fallisce, la chiamata resta.
     await queryWithRetry(
@@ -2590,6 +2591,7 @@ async function handleTwilioVoiceInbound(tenantId: number, req: express.Request, 
     if (ringLocale) {
         res.type('text/xml').send(dialLocaleTwiml({
             clients,
+            sips,
             mobiles: routing.mobiles,
             ringSeconds: routing.ring_seconds,
             callerId: to,
@@ -2715,6 +2717,27 @@ async function ringingDeviceIdentities(tenantId: number): Promise<string[]> {
     return result.rows.map(r => deviceIdentity(tenantId, r.id));
 }
 
+// I cordless del locale (Fase 4): Twilio li chiama sul dominio SIP solo se
+// sono registrati, gli altri squilli non aspettano. Il nome del cliente va
+// sul display con Remote-Party-ID (sipDialUri).
+async function ringingSipUris(tenantId: number, caller: string): Promise<string[]> {
+    const config = sipConfig();
+    if (!config) return [];
+    const result = await queryWithRetry(
+        `SELECT username FROM phone_sip_lines WHERE tenant_id = $1 AND username IS NOT NULL AND credential_sid IS NOT NULL ORDER BY id LIMIT 5`,
+        [tenantId]
+    );
+    if (result.rows.length === 0) return [];
+    const customer = caller ? await findCustomerByPhone(tenantId, caller).catch(() => ({ exists: false as const })) : { exists: false as const };
+    const name = customer.exists ? toTitleCase(String(customer.customer_name || '')) : '';
+    return result.rows.map(r => sipDialUri(r.username, config.domain, caller ? { number: caller, name } : undefined));
+}
+
+async function findSipLine(tenantId: number, lineId: number): Promise<{ id: number; label: string } | null> {
+    const result = await queryWithRetry(`SELECT id, label FROM phone_sip_lines WHERE tenant_id = $1 AND id = $2`, [tenantId, lineId]);
+    return result.rows[0] ?? null;
+}
+
 /** Il dispositivo dietro un'identità Twilio, col nome di chi lo usa. */
 async function findPhoneDevice(tenantId: number, deviceId: number): Promise<{ id: number; user_id: number | null; user_name: string | null } | null> {
     const result = await queryWithRetry(
@@ -2735,10 +2758,24 @@ async function handleTwilioVoiceClientAnswered(tenantId: number, req: express.Re
     }
     res.status(204).send();
     const parentSid = String(req.query.p || req.body?.ParentCallSid || '');
-    const who = parseDeviceIdentity(req.body?.To || req.body?.Called);
-    if (!parentSid || !who || who.tenantId !== tenantId) return;
-    const device = await findPhoneDevice(tenantId, who.deviceId);
-    const answeredBy = device?.user_id ? `utente:${device.user_id}` : `dispositivo:${who.deviceId}`;
+    if (!parentSid) return;
+    // Ha risposto un browser del CRM o un cordless (Fase 4).
+    const target = req.body?.To || req.body?.Called;
+    const who = parseDeviceIdentity(target);
+    const sip = who ? null : parseSipUser(target);
+    let answeredBy: string;
+    let answeredByName: string | null;
+    if (who && who.tenantId === tenantId) {
+        const device = await findPhoneDevice(tenantId, who.deviceId);
+        answeredBy = device?.user_id ? `utente:${device.user_id}` : `dispositivo:${who.deviceId}`;
+        answeredByName = device?.user_name ?? null;
+    } else if (sip && sip.tenantId === tenantId) {
+        const line = await findSipLine(tenantId, sip.lineId);
+        answeredBy = `cordless:${sip.lineId}`;
+        answeredByName = line?.label ?? null;
+    } else {
+        return;
+    }
     const taken = await queryWithRetry(
         `UPDATE phone_calls SET status = 'answered', answered_at = NOW(), answered_by = $3
          WHERE call_sid = $1 AND tenant_id = $2 AND status = 'ringing'
@@ -2749,7 +2786,7 @@ async function handleTwilioVoiceClientAnswered(tenantId: number, req: express.Re
     const live = updateLiveCallStage(tenantId, parentSid, 'staff');
     if (live) {
         socketService?.broadcastToRolesRoom(tenantId, PHONE_BANNER_ROLES, 'phoneCall:updated', {
-            id: live.id, stage: live.stage, answered_by_name: device?.user_name ?? null,
+            id: live.id, stage: live.stage, answered_by_name: answeredByName,
         });
     }
 }
@@ -2763,55 +2800,144 @@ async function handleTwilioVoiceClientCall(req: express.Request, res: express.Re
         return;
     }
     const who = parseDeviceIdentity(req.body?.From || req.body?.Caller);
-    const refuse = (text: string): void => {
-        res.type('text/xml').send(twimlResponse(`<Say language="it-IT">${text}</Say><Hangup/>`));
-    };
-    if (!who) return refuse('Dispositivo non riconosciuto.');
+    if (!who) return refuseOutbound(res, 'Dispositivo non riconosciuto.');
     await runWithTenantContext(who.tenantId, async () => {
         const device = await findPhoneDevice(who.tenantId, who.deviceId);
-        if (!device) return refuse('Dispositivo non riconosciuto.');
-        const target = e164OrEmpty(normalizeItalianPhone(String(req.body?.To || '')));
-        if (!target || !isCallableNumber(target)) return refuse('Numero non chiamabile dal CRM.');
-        // Il numero del locale è quello su cui arrivano le chiamate di Sofia.
-        const line = await queryWithRetry(
-            `SELECT to_number FROM phone_calls
-             WHERE tenant_id = $1 AND direction = 'inbound' AND to_number IS NOT NULL
-             ORDER BY started_at DESC LIMIT 1`,
-            [who.tenantId]
-        );
-        const callerId = e164OrEmpty(line.rows[0]?.to_number);
-        if (!callerId) return refuse('Il numero del locale non è ancora collegato.');
-        const customer = await findCustomerByPhone(who.tenantId, target);
-        await queryWithRetry(
-            `INSERT INTO phone_calls (tenant_id, call_sid, direction, from_number, to_number, customer_id, routing, status, answered_at, answered_by)
-             VALUES ($1, $2, 'outbound', $3, $4, $5, 'richiamata', 'answered', NOW(), $6)
-             ON CONFLICT (call_sid) DO NOTHING`,
-            [who.tenantId, String(req.body?.CallSid || ''), callerId, target,
-             customer.exists ? customer.customer_id : null,
-             device.user_id ? `utente:${device.user_id}` : `dispositivo:${device.id}`]
-        );
-        res.type('text/xml').send(outboundTwiml({ callerId, number: target }));
+        if (!device) return refuseOutbound(res, 'Dispositivo non riconosciuto.');
+        await dialOutFromLocale(who.tenantId, req, res, String(req.body?.To || ''),
+            device.user_id ? `utente:${device.user_id}` : `dispositivo:${device.id}`);
     });
 }
 
-// Fine della chiamata in uscita (status callback della TwiML App).
+// Chiamate dal cordless (Fase 4): il dominio SIP di Sympotia chiama qui. Il
+// tenant viene dall'utente SIP (t<tenant>c<linea>), autenticato da Twilio
+// con la Credential List; il numero chiamato è la parte utente del To.
+async function handleTwilioVoiceSipCall(req: express.Request, res: express.Response): Promise<void> {
+    if (!validateTwilioSignature(req)) {
+        res.status(403).send();
+        return;
+    }
+    const who = parseSipUser(req.body?.From || req.body?.Caller);
+    if (!who) return refuseOutbound(res, 'Telefono non riconosciuto.');
+    await runWithTenantContext(who.tenantId, async () => {
+        const line = await findSipLine(who.tenantId, who.lineId);
+        if (!line) return refuseOutbound(res, 'Telefono non riconosciuto.');
+        await dialOutFromLocale(who.tenantId, req, res, sipTargetNumber(req.body?.To || req.body?.Called), `cordless:${line.id}`);
+    });
+}
+
+function refuseOutbound(res: express.Response, text: string): void {
+    res.type('text/xml').send(twimlResponse(`<Say language="it-IT">${xmlEscape(text)}</Say><Hangup/>`));
+}
+
+/** In uscita col numero del locale, dal CRM o dal cordless: solo fissi e
+ *  cellulari italiani (isCallableNumber), con la riga nel registro. */
+async function dialOutFromLocale(tenantId: number, req: express.Request, res: express.Response, rawTarget: string, answeredBy: string): Promise<void> {
+    const target = e164OrEmpty(normalizeItalianPhone(rawTarget));
+    if (!target || !isCallableNumber(target)) return refuseOutbound(res, 'Numero non chiamabile da qui.');
+    // Il numero del locale è quello su cui arrivano le chiamate di Sofia.
+    const line = await queryWithRetry(
+        `SELECT to_number FROM phone_calls
+         WHERE tenant_id = $1 AND direction = 'inbound' AND to_number IS NOT NULL
+         ORDER BY started_at DESC LIMIT 1`,
+        [tenantId]
+    );
+    const callerId = e164OrEmpty(line.rows[0]?.to_number);
+    if (!callerId) return refuseOutbound(res, 'Il numero del locale non è ancora collegato.');
+    const customer = await findCustomerByPhone(tenantId, target);
+    await queryWithRetry(
+        `INSERT INTO phone_calls (tenant_id, call_sid, direction, from_number, to_number, customer_id, routing, status, answered_at, answered_by)
+         VALUES ($1, $2, 'outbound', $3, $4, $5, 'richiamata', 'answered', NOW(), $6)
+         ON CONFLICT (call_sid) DO NOTHING`,
+        [tenantId, String(req.body?.CallSid || ''), callerId, target, customer.exists ? customer.customer_id : null, answeredBy]
+    );
+    res.type('text/xml').send(outboundTwiml({ callerId, number: target }));
+}
+
+// Fine della chiamata in uscita: status callback della TwiML App (browser)
+// e del dominio SIP (cordless).
 async function handleTwilioVoiceClientStatus(req: express.Request, res: express.Response): Promise<void> {
     if (!validateTwilioSignature(req)) {
         res.status(403).send();
         return;
     }
     res.status(204).send();
-    const who = parseDeviceIdentity(req.body?.From || req.body?.Caller);
-    if (!who) return;
+    const from = req.body?.From || req.body?.Caller;
+    const tenantId = parseDeviceIdentity(from)?.tenantId ?? parseSipUser(from)?.tenantId;
+    if (!tenantId) return;
     const duration = Number(req.body?.CallDuration);
-    await runWithTenantContext(who.tenantId, () => queryWithRetry(
+    await runWithTenantContext(tenantId, () => queryWithRetry(
         `UPDATE phone_calls SET ended_at = NOW(), duration_seconds = $3 WHERE call_sid = $1 AND tenant_id = $2`,
-        [String(req.body?.CallSid || ''), who.tenantId, Number.isFinite(duration) ? Math.trunc(duration) : null]
+        [String(req.body?.CallSid || ''), tenantId, Number.isFinite(duration) ? Math.trunc(duration) : null]
     ));
 }
 
 app.post('/webhook/twilio/voice/client-call', twilioUrlEncoded, (req, res) => { void handleTwilioVoiceClientCall(req, res); });
 app.post('/webhook/twilio/voice/client-status', twilioUrlEncoded, (req, res) => { void handleTwilioVoiceClientStatus(req, res); });
+app.post('/webhook/twilio/voice/sip-call', twilioUrlEncoded, (req, res) => { void handleTwilioVoiceSipCall(req, res); });
+
+// Cordless e telefoni SIP (Impostazioni › «Chi risponde al telefono»). La
+// password nasce qui, va a Twilio e si mostra una volta sola.
+app.get('/phone/sip-lines', authenticate, requireFeature('voice'), authorize(...PHONE_BANNER_ROLES), async (req, res) => {
+    const config = sipConfig();
+    const result = await queryWithRetry(
+        `SELECT id, label, username, created_at FROM phone_sip_lines WHERE tenant_id = $1 AND credential_sid IS NOT NULL ORDER BY id`,
+        [req.tenantId!]
+    );
+    res.json({
+        configured: config != null,
+        domain: config?.domain ?? null,
+        proxy: config?.proxy ?? null,
+        lines: result.rows.map(r => ({ id: r.id, label: r.label, username: r.username, created_at: new Date(r.created_at).toISOString() })),
+    });
+});
+
+const PHONE_SIP_LINES_MAX = 5;
+
+app.post('/phone/sip-lines', authenticate, requireFeature('voice'), requirePermission('settings:full'), async (req, res) => {
+    const config = sipConfig();
+    if (!config) return res.status(503).json({ error: 'sip_not_configured', message: 'Il dominio SIP non è ancora attivo sul server' });
+    const label = String(req.body?.label || '').trim().slice(0, 80);
+    if (!label) return res.status(400).json({ error: 'invalid_value', message: 'Dai un nome al cordless' });
+    const count = await queryWithRetry(`SELECT COUNT(*)::int AS n FROM phone_sip_lines WHERE tenant_id = $1`, [req.tenantId!]);
+    if (count.rows[0].n >= PHONE_SIP_LINES_MAX) return res.status(400).json({ error: 'invalid_value', message: `Al massimo ${PHONE_SIP_LINES_MAX} cordless` });
+    const inserted = await queryWithRetry(
+        `INSERT INTO phone_sip_lines (tenant_id, label) VALUES ($1, $2) RETURNING id`,
+        [req.tenantId!, label]
+    );
+    const id = inserted.rows[0].id as number;
+    const username = sipUsername(req.tenantId!, id);
+    const password = randomSipPassword();
+    try {
+        const credentialSid = await createSipCredential(config, username, password);
+        await queryWithRetry(
+            `UPDATE phone_sip_lines SET username = $3, credential_sid = $4 WHERE id = $1 AND tenant_id = $2`,
+            [id, req.tenantId!, username, credentialSid]
+        );
+    } catch (err: any) {
+        console.error('[Telefono] credenziale SIP non creata:', err?.message || err);
+        await queryWithRetry(`DELETE FROM phone_sip_lines WHERE id = $1 AND tenant_id = $2`, [id, req.tenantId!]);
+        return res.status(502).json({ error: 'twilio_error', message: 'Twilio non ha creato la credenziale, riprova' });
+    }
+    res.status(201).json({ id, label, username, password, domain: config.domain, proxy: config.proxy });
+});
+
+app.delete('/phone/sip-lines/:id', authenticate, requireFeature('voice'), requirePermission('settings:full'), async (req, res) => {
+    const id = Number(req.params.id);
+    const found = await queryWithRetry(`SELECT credential_sid FROM phone_sip_lines WHERE id = $1 AND tenant_id = $2`, [id, req.tenantId!]);
+    if (!found.rows[0]) return res.status(404).json({ error: 'not_found' });
+    const config = sipConfig();
+    if (found.rows[0].credential_sid && config) {
+        try {
+            await deleteSipCredential(config, found.rows[0].credential_sid);
+        } catch (err: any) {
+            console.error('[Telefono] credenziale SIP non cancellata:', err?.message || err);
+            return res.status(502).json({ error: 'twilio_error', message: 'Twilio non ha cancellato la credenziale, riprova' });
+        }
+    }
+    await queryWithRetry(`DELETE FROM phone_sip_lines WHERE id = $1 AND tenant_id = $2`, [id, req.tenantId!]);
+    res.status(204).send();
+});
 
 // Dispositivi che squillano («Questo dispositivo squilla» nelle Impostazioni).
 const phoneDevicesAuthorize = authorize(...PHONE_BANNER_ROLES);
@@ -3080,12 +3206,13 @@ app.get('/phone/calls', authenticate, requireFeature('voice'), authorize(...PHON
             `SELECT pc.id, pc.call_sid, pc.direction, pc.from_number, pc.to_number, pc.routing, pc.status, pc.missed_reason,
                     pc.answered_by, pc.started_at, pc.answered_at, pc.duration_seconds, pc.note, pc.voice_call_id,
                     c.id AS customer_id, c.name AS customer_name, c.phone AS customer_phone,
-                    u.full_name AS answered_by_name,
+                    u.full_name AS answered_by_name, sl.label AS answered_by_line,
                     vc.follow_up_status,
                     r.id AS reservation_id, r.reservation_time, r.guests
              FROM phone_calls pc
              LEFT JOIN customers c ON c.id = pc.customer_id AND c.tenant_id = pc.tenant_id
              LEFT JOIN users u ON u.id = substring(pc.answered_by from '^utente:(\\d+)$')::int
+             LEFT JOIN phone_sip_lines sl ON sl.id = substring(pc.answered_by from '^cordless:(\\d+)$')::int AND sl.tenant_id = pc.tenant_id
              LEFT JOIN voice_calls vc ON vc.id = pc.voice_call_id AND vc.tenant_id = pc.tenant_id
              LEFT JOIN reservations r ON r.id = COALESCE(pc.reservation_id, vc.reservation_id) AND r.tenant_id = pc.tenant_id
              WHERE ${where.join(' AND ')}
@@ -3108,6 +3235,7 @@ app.get('/phone/calls', authenticate, requireFeature('voice'), authorize(...PHON
                     routing: r.routing,
                     answered_by: by.startsWith('utente:') ? { kind: 'user', name: r.answered_by_name ?? null }
                         : by.startsWith('cellulare:') ? { kind: 'mobile', number: by.slice('cellulare:'.length) }
+                        : by.startsWith('cordless:') ? { kind: 'cordless', name: r.answered_by_line ?? null }
                         : null,
                     started_at: new Date(r.started_at).toISOString(),
                     answered_at: r.answered_at ? new Date(r.answered_at).toISOString() : null,

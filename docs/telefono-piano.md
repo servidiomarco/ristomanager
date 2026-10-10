@@ -172,6 +172,21 @@ Il banner ha la fase (`stage`: ringing / sofia / staff, evento `phoneCall:update
 - **Smartphone, a scelta per chi deve squillare sempre:** `<Number>` verso il cellulare con un annuncio («Chiamata da Mario Rossi, premi 1»). Costa al minuto verso i cellulari.
 - **Smartphone, più avanti:** un'app nativa (Capacitor più Twilio Voice SDK, CallKit e ConnectionService) per lo squillo a schermo bloccato. È un progetto a sé.
 
+**Fatto il 10/10 (software, una PR):**
+- **Dominio SIP** `sympotia-<account>.sip.twilio.com` con registrazione SIP, preparato da `scripts/telefono-sip.mjs --apply` (lo lancia l'utente): Credential List «sympotia-cordless» collegata per registrarsi e per chiamare, variabili `TWILIO_SIP_DOMAIN` e `TWILIO_SIP_CREDENTIAL_LIST_SID` su Railway.
+- **Linee cordless** (`phone_sip_lines`, RLS): Impostazioni › AI › «Chi risponde al telefono» › Cordless. Il server crea la credenziale `t<tenant>c<id>` con una password di 20 caratteri, la mostra una volta sola e non la conserva; togliere la linea cancella la credenziale su Twilio. Al massimo 5.
+- **Squillo:** `<Sip>` nello stesso `<Dial>` di CRM e cellulari, con `statusCallback` «answered» su `client-answered` (`answered_by = cordless:<id>`). Il `callerId` del `<Dial>` resta il numero del locale (serve ai cellulari): nome e numero del cliente vanno al display in `Remote-Party-ID`.
+- **In uscita:** il dominio chiama `/webhook/twilio/voice/sip-call`; stesso percorso del «Chiama» dal CRM (`dialOutFromLocale`), riga `outbound` nel registro, durata da `client-status`.
+- **Numeri chiamabili** (CRM e cordless): solo fissi `+390…` e cellulari `+393…`. Restano fuori estero, numeri a pagamento e numeri brevi, compresi 112, 113 e 118: per le emergenze resta il fisso.
+- **Smartphone:** il CRM aperto nel telefono (anche come app installata) squilla con «Questo dispositivo squilla», come sul PC. Per lo squillo con l'app chiusa restano il cellulare con «premi 1» o, più avanti, l'app nativa.
+
+**Da provare (prima di comprare la base):** un'app SIP sul telefono o sul Mac (per esempio Linphone o Zoiper) con i dati della linea mostrati nel CRM:
+1. si registra (dietro il doppio NAT USG → EdgeRouter → NeXXt, TLS sulla 5061);
+2. con «Prima il locale» squilla insieme al CRM, e mostra il nome se l'app legge `Remote-Party-ID`;
+3. chiama un cellulare italiano e chi risponde vede il numero del locale.
+
+**Configurazione della base (Yealink W70B, simile su Gigaset N670):** account SIP con Server = dominio, porta 5061, trasporto TLS, Outbound Proxy = `sip.frankfurt.twilio.com`, utente e password del CRM, scadenza della registrazione 600 s; in «Caller ID Source» scegliere RPID (o PAI/RPID) per avere il nome del cliente.
+
 ### Fase 5: lancio del numero prenotazioni (quando 3 e 4 squillano davvero in sala)
 - **«Telefono pubblico»** (`legal_config.public_phone`) impostato sul 010032. Conferme, promemoria ed email usano già `identity.phone` («Per modifiche o imprevisti chiamaci al …», server.ts circa 26600 e 27120–27400), quindi ogni prenotazione insegna il numero nuovo. Da verificare che il fallback `IDENTITY_FALLBACK.phone` non lo sovrascriva.
 - **Prompt di Sofia** (`docs/elevenlabs-agent-prompt.md` circa 206 e 266): i rimandi al locale citano il fisso. Si aggiornano col solito script, dry-run prima.
