@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
-import { LayoutDashboard, Grid, Settings, ChevronRight, ChevronDown, ChevronUp, ChefHat, PanelLeft, Calendar, CalendarDays, Bell, X, AlertTriangle, LogOut, Users, UserCheck, FileText, UsersRound, Sun, Moon, Sunset, MoreHorizontal, Search, UtensilsCrossed, Plus, BookUser, Boxes, Clock, ShoppingCart, ListChecks, ShieldCheck, Phone, ConciergeBell, Zap, PartyPopper, DoorClosed, StickyNote, CreditCard, MessageCircle, Mail, Kanban, ClipboardList, CookingPot, BellRing, MessagesSquare, Gauge, Building2, Milestone, Ban, Sparkles, Landmark, Percent, Calculator, BarChart3, Star, ShoppingBag, LifeBuoy, PlugZap, Radio, Thermometer, SlidersHorizontal, Tag, Scale, CalendarCheck } from 'lucide-react';
+import { LayoutDashboard, Grid, Settings, ChevronRight, ChevronDown, ChevronUp, ChefHat, PanelLeft, Calendar, CalendarDays, Bell, X, AlertTriangle, LogOut, Users, UserCheck, FileText, UsersRound, Sun, Moon, Sunset, MoreHorizontal, Search, UtensilsCrossed, Plus, BookUser, Boxes, Clock, ShoppingCart, ListChecks, ShieldCheck, Phone, ConciergeBell, Zap, PartyPopper, DoorClosed, StickyNote, CreditCard, MessageCircle, Mail, Kanban, ClipboardList, CookingPot, BellRing, MessagesSquare, Gauge, Building2, Milestone, Ban, Sparkles, Landmark, Percent, Calculator, BarChart3, Star, ShoppingBag, LifeBuoy, PlugZap, Radio, Thermometer, SlidersHorizontal, Tag, Scale, CalendarCheck, CalendarClock } from 'lucide-react';
 import { ViewState, Room, Table, Dish, RestaurantMenu, Reservation, TableStatus, TableShape, BanquetMenu, PaymentStatus, Shift, UserRole, ReservationStatus } from './types';
 import { Dashboard } from './components/Dashboard';
 import { FloorPlan } from './components/FloorPlan';
@@ -34,7 +34,7 @@ import SupportPanel from './components/SupportPanel';
 import { IncidentBanner } from './components/IncidentBanner';
 import { useActiveIncidents } from './hooks/useActiveIncidents';
 import { setErrorReporterView } from './services/clientErrorReporter';
-import { LivePill, SegmentedControl, StatusPill, useMediaQuery, dsSelect } from './components/ds';
+import { LivePill, SegmentedControl, StatusPill, SearchField, useMediaQuery, dsSelect } from './components/ds';
 import { NotificationsPanel } from './components/NotificationsPanel';
 import EmailPage from './components/EmailPage';
 import NotifichePage from './components/NotifichePage';
@@ -55,6 +55,8 @@ import { FeatureTogglesManager } from './components/FeatureTogglesManager';
 import { VoiceUsageCard } from './components/VoiceUsageCard';
 import { ScheduledClosuresManager } from './components/ScheduledClosuresManager';
 import { RemindersManager } from './components/RemindersManager';
+import { ScheduledTasksManager } from './components/ScheduledTasksManager';
+import { useSettingsSearch } from './components/settingsSearch';
 import { ReservationNotesManager } from './components/ReservationNotesManager';
 import { ReservationAllergensManager } from './components/ReservationAllergensManager';
 import { AutoDepositManager } from './components/AutoDepositManager';
@@ -363,6 +365,7 @@ const SETTINGS_GROUPS: {
 }[] = [
   { id: 'imp-profilo', labelKey: 'settings.tabProfile', label: 'Profilo', Icon: UserCheck },
   { id: 'imp-ristorante', labelKey: 'settings.tabRestaurant', label: 'Ristorante', Icon: Clock },
+  { id: 'imp-attivita', labelKey: 'settings.tabScheduled', label: 'Attività programmate', Icon: CalendarClock },
   { id: 'imp-prenotazioni', labelKey: 'nav.items.reservations', label: 'Prenotazioni', Icon: Calendar },
   { id: 'imp-asporto', labelKey: 'nav.items.takeaway', label: 'Asporto', Icon: ShoppingBag, guard: 'takeaway' },
   { id: 'imp-pagamenti', labelKey: 'nav.items.payments', label: 'Pagamenti', Icon: CreditCard },
@@ -386,10 +389,12 @@ const SETTINGS_GROUPS: {
    (§5.2). Peso e colore portano la gerarchia. */
 const SettingsSection: React.FC<{ id?: string; label: string; children: React.ReactNode }> = ({ id, label, children }) => (
   // scroll-mt: quando i chip-àncora saltano qui, l'intestazione non finisce
-  // incollata al bordo superiore della zona che scorre.
-  <section id={id} className="mb-6 scroll-mt-4">
+  // incollata al bordo superiore della zona che scorre. I data-imp-* sono i
+  // segni che legge la ricerca (components/settingsSearch.ts): le card da
+  // filtrare sono le figlie di [data-imp-lista], o del contenuto se manca.
+  <section id={id} className="mb-6 scroll-mt-20" data-imp-sezione="" data-imp-etichetta={label}>
     <h3 className="mb-2 px-1 text-[13px] font-semibold text-[var(--ds-text-muted)]">{label}</h3>
-    {children}
+    <div data-imp-contenuto="">{children}</div>
   </section>
 );
 
@@ -469,6 +474,12 @@ const App: React.FC = () => {
   const { t, i18n } = useTranslation('common', { useSuspense: false });
 
   const [view, setView] = useState<ViewState>(ViewState.DASHBOARD);
+  // Ricerca in Impostazioni: filtra le card della pagina mentre si scrive.
+  // Si svuota uscendo, così al ritorno la pagina è intera.
+  const [settingsQuery, setSettingsQuery] = useState('');
+  const settingsRootRef = useRef<HTMLDivElement>(null);
+  const settingsMatches = useSettingsSearch(settingsRootRef, view === ViewState.SETTINGS ? settingsQuery : '', view === ViewState.SETTINGS);
+  useEffect(() => { if (view !== ViewState.SETTINGS) setSettingsQuery(''); }, [view]);
   // L'ultima vista di lavoro prima dell'Aiuto: la richiesta la porta nel
   // contesto («scrivo da Cassa»), che è il primo indizio per chi risponde.
   const lastWorkViewRef = useRef<string | null>(null);
@@ -3380,9 +3391,23 @@ const App: React.FC = () => {
           <div className="min-h-0 flex-1 overflow-y-auto">
           <div className="mx-auto max-w-4xl p-4 sm:p-6 lg:p-8">
 
+            {/* Ricerca: resta in cima mentre la pagina scorre, e filtra le card
+                sul testo che hanno già a schermo (components/settingsSearch.ts). */}
+            <div className="sticky top-0 z-10 -mx-4 mb-3 bg-[var(--ds-canvas)] px-4 pb-3 pt-1 sm:mx-0 sm:px-0">
+              <SearchField
+                value={settingsQuery}
+                onChange={setSettingsQuery}
+                onKeyDown={e => { if (e.key === 'Escape') setSettingsQuery(''); }}
+                placeholder={t('settings.searchPlaceholder', 'Cerca nelle impostazioni')}
+                ariaLabel={t('settings.searchPlaceholder', 'Cerca nelle impostazioni')}
+              />
+            </div>
+
             {/* Indice della pagina: chip-àncora che saltano al blocco. Nessuno
                 stato — la pagina è unica e i blocchi sono sempre tutti
-                montati, i chip fanno solo scorrere. */}
+                montati, i chip fanno solo scorrere. Mentre si cerca spariscono:
+                porterebbero a blocchi nascosti. */}
+            {settingsMatches === null && (
             <div className="-mx-4 mb-4 flex gap-2 overflow-x-auto px-4 pb-1 sm:mx-0 sm:flex-wrap sm:overflow-visible sm:px-0">
               {visibleSettingsGroups.map(g => (
                 <button
@@ -3396,11 +3421,20 @@ const App: React.FC = () => {
                 </button>
               ))}
             </div>
+            )}
+
+            {settingsMatches === 0 && (
+              <p className="px-1 py-12 text-center text-[14px] text-[var(--ds-text-muted)]">
+                {t('settings.searchEmpty', 'Nessuna impostazione per «{{q}}»', { q: settingsQuery.trim() })}
+              </p>
+            )}
+
+            <div ref={settingsRootRef}>
 
             {/* Preferenze personali: valgono per chi è collegato (e per questo
                 dispositivo, nel caso delle push), non per il ristorante. */}
             <SettingsSection id="imp-profilo" label={t('settings.tabProfile')}>
-              <div className="space-y-3">
+              <div className="space-y-3" data-imp-lista="">
               <div className="rounded-[var(--ds-radius)] bg-[var(--ds-surface)] p-4 shadow-[var(--ds-shadow-card)]">
                 <label htmlFor="preferred-landing" className="mb-1 block text-[15px] font-semibold text-[var(--ds-text-primary)]">
                   {t('settings.landingPage')}
@@ -3531,7 +3565,7 @@ const App: React.FC = () => {
             {/* Il ristorante in quanto luogo: quando è aperto, cosa è chiuso,
                 le routine di servizio, sala e cucina, l'identità legale. */}
             <SettingsSection id="imp-ristorante" label={t('settings.tabRestaurant')}>
-              <div className="space-y-3">
+              <div className="space-y-3" data-imp-lista="">
                 <SettingsDisclosure
                   icon={Clock}
                   title={t('settings.openingHours')}
@@ -3546,9 +3580,6 @@ const App: React.FC = () => {
                 >
                   <ScheduledClosuresManager showToast={addToast} />
                 </SettingsDisclosure>
-                {/* Promemoria automatici (una tantum, giornalieri, settimanali,
-                    mensili), incluso il "Promemoria pane". */}
-                <RemindersManager showToast={addToast} />
                 <CardErrorBoundary label={t('settings.floorAndKitchen')}>
                   <SalaCucinaSettingsManager showToast={addToast} />
                 </CardErrorBoundary>
@@ -3557,11 +3588,24 @@ const App: React.FC = () => {
               </div>
             </SettingsSection>
 
+            {/* Quello che il ristorante si fa ricordare da solo: le attività
+                che compaiono in Attività per una squadra (ex promemoria cucina
+                dei banchetti e pane, ora modificabili) e i promemoria, che
+                mandano solo una notifica. */}
+            <SettingsSection id="imp-attivita" label={t('settings.tabScheduled', 'Attività programmate')}>
+              <div className="space-y-3" data-imp-lista="">
+                <CardErrorBoundary label={t('settings.tabScheduled', 'Attività programmate')}>
+                  <ScheduledTasksManager showToast={addToast} />
+                </CardErrorBoundary>
+                <RemindersManager showToast={addToast} />
+              </div>
+            </SettingsSection>
+
             {/* Tutto ciò che governa come nascono e si comportano le
                 prenotazioni: canali di ingresso, risposte all'ospite, opzioni
                 del modal, caparra, blacklist, logica tavoli. */}
             <SettingsSection id="imp-prenotazioni" label={t('nav.items.reservations')}>
-              <div className="space-y-3">
+              <div className="space-y-3" data-imp-lista="">
                 {/* Solo il canale web: la scheda di Sofia sta nella sezione AI. */}
                 <FeatureTogglesManager showToast={addToast} only="web" />
                 <SettingsDisclosure
@@ -3641,7 +3685,7 @@ const App: React.FC = () => {
 
             {/* Gateway e regole dei pagamenti. */}
             <SettingsSection id="imp-pagamenti" label={t('nav.items.payments')}>
-              <div className="space-y-3">
+              <div className="space-y-3" data-imp-lista="">
                 <div className="rounded-[var(--ds-radius)] bg-[var(--ds-surface)] p-3 shadow-[var(--ds-shadow-card)]">
                   <div className="flex min-h-[40px] items-center justify-between gap-3">
                     <div className="flex min-w-0 items-center gap-3">
@@ -3698,7 +3742,7 @@ const App: React.FC = () => {
                 chiusura (stesso gate del chip in SETTINGS_GROUPS). */}
             {hasFeature('pay_at_table') && (
               <SettingsSection id="imp-fiscalita" label={t('nav.items.fiscal')}>
-                <div className="space-y-3">
+                <div className="space-y-3" data-imp-lista="">
                   <CardErrorBoundary label={t('nav.items.fiscal')}>
                     <FiscalSettingsManager showToast={addToast} />
                   </CardErrorBoundary>
@@ -3722,7 +3766,7 @@ const App: React.FC = () => {
                 sono settings:full). */}
             {hasFeature('passepartout') && hasPermission('settings:full') && (
               <SettingsSection id="imp-passepartout" label={t('settings.tabPassepartout', 'Passepartout')}>
-                <div className="space-y-3">
+                <div className="space-y-3" data-imp-lista="">
                   <CardErrorBoundary label="Passepartout">
                     <VerificaCassa showToast={addToast} />
                   </CardErrorBoundary>
@@ -3757,7 +3801,7 @@ const App: React.FC = () => {
                 l'HACCP senza le Impostazioni; le route vogliono haccp:manage. */}
             {hasPermission('haccp:manage') && (
               <SettingsSection id="imp-haccp" label={t('settings.tabHaccp', 'HACCP')}>
-                <div className="space-y-3">
+                <div className="space-y-3" data-imp-lista="">
                   <SettingsDisclosure
                     icon={Radio}
                     title={t('settings.haccpSensors', 'Sensori di temperatura')}
@@ -3802,7 +3846,7 @@ const App: React.FC = () => {
                 uscita e in entrata, allegati. Le risposte AI ai messaggi
                 stanno nella sezione AI. */}
             <SettingsSection id="imp-comunicazioni" label={t('nav.groups.communications')}>
-              <div className="space-y-3">
+              <div className="space-y-3" data-imp-lista="">
                 <CardErrorBoundary label={t('settings.smtp')}>
                   <SmtpIntegrationCard showToast={addToast} />
                 </CardErrorBoundary>
@@ -3833,7 +3877,7 @@ const App: React.FC = () => {
                 telefono (con le sue regolazioni), le risposte AI ai messaggi
                 WhatsApp e il prompt della logica tavoli. */}
             <SettingsSection id="imp-ai" label="AI">
-              <div className="space-y-3">
+              <div className="space-y-3" data-imp-lista="">
                 <FeatureTogglesManager showToast={addToast} only="voice" />
                 {/* Minuti del mese contro quelli inclusi nell'add-on e tetto
                     degli extra: solo per chi ha Sofia. */}
@@ -3857,7 +3901,7 @@ const App: React.FC = () => {
                 almeno una card. */}
             {(canManageUsers() || canViewLogs()) && (
               <SettingsSection id="imp-amministrazione" label={t('settings.tabAdmin')}>
-                <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+                <div className="grid grid-cols-1 gap-3 md:grid-cols-2" data-imp-lista="">
                   {canManageUsers() && (
                     <>
                       <SettingsNavCard
@@ -3885,6 +3929,7 @@ const App: React.FC = () => {
                 </div>
               </SettingsSection>
             )}
+            </div>{/* /settingsRootRef */}
           </div>
           </div>
           </div>

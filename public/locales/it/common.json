@@ -150,7 +150,10 @@
     "haccpLabelsHint": "Prodotti preimpostati con la loro durata",
     "floorAndKitchen": "Sala & Cucina",
     "autoDepositHint": "Per le prenotazioni web sopra una certa soglia di coperti invia un link Revolut per la caparra (€10/persona) via SMS.",
-    "voiceUsage": "Minuti di Sofia"
+    "voiceUsage": "Minuti di Sofia",
+    "tabScheduled": "Attività programmate",
+    "searchPlaceholder": "Cerca nelle impostazioni",
+    "searchEmpty": "Nessuna impostazione per «{{q}}»"
   },
   "aria": {
     "openMenu": "Apri menu",

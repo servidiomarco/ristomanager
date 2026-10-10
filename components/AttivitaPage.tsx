@@ -11,7 +11,7 @@ import { BanquetCompositionModal } from './BanquetCompositionModal';
 import {
   Plus, Check, Trash2, Clock, Flag, AlertTriangle, Loader2, ListTodo, ListChecks,
   ListFilter, RotateCcw, UserCircle, UsersRound, Edit2, Utensils, Sparkles, Package,
-  Wrench, CalendarDays, PartyPopper, Users, Tag, ChevronDown, Bell, Link2,
+  Wrench, CalendarDays, PartyPopper, Users, Tag, ChevronDown, Bell, Link2, CalendarClock,
 } from 'lucide-react';
 import { SkeletonTaskList } from './SkeletonCards';
 import {
@@ -379,7 +379,14 @@ const TodoRow: React.FC<{
                 {todo.banquetReminderHours}h prima
               </StatusPill>
             )}
-            {todo.autoKind && (
+            {/* Nata da un'attività programmata (Impostazioni › Attività
+                programmate): si cambia o si spegne da lì, non da qui. */}
+            {todo.scheduledTaskId != null ? (
+              <StatusPill title={t('scheduledHint', 'Nata da un\'attività programmata: si cambia in Impostazioni')}>
+                <CalendarClock className="h-3 w-3 flex-shrink-0" aria-hidden />
+                {t('scheduled', 'Programmata')}
+              </StatusPill>
+            ) : todo.autoKind && (
               <StatusPill title={`Creata automaticamente (${todo.autoKind})`}>
                 <Sparkles className="h-3 w-3 flex-shrink-0" aria-hidden />
                 auto

@@ -160,6 +160,21 @@ export async function provisionTenant(input: ProvisionTenantInput): Promise<Prov
             [tenantId]
         );
 
+        // Attività programmate dei banchetti: le stesse tre della migration
+        // attivita-programmate («Ordinare merce» 3, 2 e 1 giorno prima, alla
+        // Cucina). Prima erano scritte nel codice e valevano per tutti; un
+        // ristorante nuovo le trova uguali e le cambia da Impostazioni.
+        await client.query(
+            `INSERT INTO scheduled_tasks
+                (tenant_id, title, description, kind, days_before, schedule_time, assigned_team, priority, category)
+             SELECT $1,
+                    'Ordinare merce — banchetti del {data} (' || f.ore || 'h prima)',
+                    'Ricorda di ordinare la merce necessaria per i banchetti programmati il {data}.',
+                    'BANQUET', f.giorni, '09:00', 'KITCHEN', f.priorita, 'INVENTORY'
+               FROM (VALUES (3, 72, 'LOW'), (2, 48, 'MEDIUM'), (1, 24, 'HIGH')) AS f (giorni, ore, priorita)`,
+            [tenantId]
+        );
+
         // Entitlement: tutti spenti se non richiesti esplicitamente — gli
         // add-on si vendono, non si regalano. Le righe nascono comunque tutte
         // e tre, così il pannello le vede e i toggle sono UPDATE, non INSERT.

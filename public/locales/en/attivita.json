@@ -82,5 +82,7 @@
   "save": "Save",
   "add": "Add",
   "addDetails": "Add details…",
-  "todos": "Tasks"
+  "todos": "Tasks",
+  "scheduled": "Scheduled",
+  "scheduledHint": "Created by a scheduled task: change it in Settings"
 }

@@ -257,32 +257,38 @@ describe('notifiche · lettura condivisa', () => {
         }
     });
 
-    it('banchetti: eliminato il banchetto, i suoi promemoria cucina si spengono', async () => {
+    it('banchetti: eliminato il banchetto, le sue attività programmate si spengono', async () => {
+        // Le attività dei banchetti nascono al loro giorno (services/
+        // scheduledTasks.ts): un'attività del giorno stesso, alle 00:00, e un
+        // banchetto di oggi la fanno nascere subito.
+        const oggi = new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Rome' }).format(new Date());
+        const task = await api().post('/scheduled-tasks').set(bearer(owner)).send({
+            title: 'test-condivisa merce {banchetti}', kind: 'BANQUET', days_before: 0,
+            schedule_time: '00:00', assigned_team: 'KITCHEN', priority: 'HIGH', category: 'INVENTORY',
+        });
+        expect(task.status).toBe(201);
         const created = await api().post('/banquet-menus').set(bearer(owner)).send({
             name: 'test-condivisa banchetto', description: '', price_per_person: 40,
-            courses: [], event_date: '2031-03-20',
+            courses: [], event_date: oggi,
         });
         expect(created.status).toBe(201);
         const banquetId = Number(created.body.id);
         const tags: string[] = [];
         try {
-            // I promemoria nascono in background: si aspettano le righe.
-            let reminders: any[] = [];
-            for (let i = 0; i < 30 && reminders.length === 0; i++) {
-                reminders = (await db.query(
-                    `SELECT to_char(due_date, 'YYYY-MM-DD') AS due, banquet_reminder_hours AS hours
-                       FROM todos WHERE tenant_id = 1 AND $1 = ANY(linked_banquet_ids)`,
-                    [banquetId]
+            // Nascono in background: si aspettano le righe.
+            let todos: any[] = [];
+            for (let i = 0; i < 30 && todos.length === 0; i++) {
+                todos = (await db.query(
+                    `SELECT id FROM todos WHERE tenant_id = 1 AND scheduled_task_id = $1 AND $2 = ANY(linked_banquet_ids)`,
+                    [task.body.id, banquetId]
                 )).rows;
-                if (reminders.length === 0) await new Promise(r => setTimeout(r, 100));
+                if (todos.length === 0) await new Promise(r => setTimeout(r, 100));
             }
-            expect(reminders.length).toBeGreaterThan(0);
-            const bells: number[] = [];
-            for (const r of reminders) {
-                const tag = `kitchen-reminder-${r.due}-${r.hours}`;
-                tags.push(tag);
-                bells.push(await insert(managerId, 'system', tag));
-            }
+            expect(todos.length).toBe(1);
+            // La campanella dell'attività programmata porta il tag del todo.
+            const tag = `todo-${todos[0].id}`;
+            tags.push(tag);
+            const bells = [await insert(ownerId, 'system', tag), await insert(managerId, 'system', tag)];
 
             const del = await api().delete(`/banquet-menus/${banquetId}`).set(bearer(owner));
             expect(del.status).toBe(204);
@@ -295,10 +301,12 @@ describe('notifiche · lettura condivisa', () => {
                 if (open > 0) await new Promise(r => setTimeout(r, 100));
             }
             expect(open).toBe(0);
+            expect((await db.query(`SELECT 1 FROM todos WHERE id = $1::uuid`, [todos[0].id])).rows).toHaveLength(0);
         } finally {
             await db.query(`DELETE FROM notifications WHERE tag = ANY($1::text[])`, [tags]);
             await db.query(`DELETE FROM todos WHERE tenant_id = 1 AND $1 = ANY(linked_banquet_ids)`, [banquetId]);
             await api().delete(`/banquet-menus/${banquetId}`).set(bearer(owner));
+            await api().delete(`/scheduled-tasks/${task.body.id}`).set(bearer(owner));
         }
     });
 
