@@ -330,5 +330,31 @@
   "incident": {
     "label": "Sympotia",
     "close": "Close notice"
+  },
+  "phone": {
+    "sofiaTalking": "Sofia is talking to",
+    "hiddenNumber": "Hidden number",
+    "notInBook": "Not in contacts",
+    "firstVisit": "Never visited",
+    "vip": "VIP",
+    "blacklisted": "Blacklisted",
+    "noShows_one": "{{count}} no-show",
+    "noShows_other": "{{count}} no-shows",
+    "visits_one": "1 visit",
+    "visits_other": "{{count}} visits",
+    "lastVisit": "last {{date}}",
+    "allergies": "Allergies: {{text}}",
+    "booking_one": "{{day}} at {{time}} · 1 guest",
+    "booking_other": "{{day}} at {{time}} · {{count}} guests",
+    "openCalls": "Open Calls",
+    "mute": "Mute on this device",
+    "unmute": "Turn sound back on",
+    "close": "Close",
+    "outcome": {
+      "booked": "Booked a table",
+      "callback": "Wants a call back",
+      "follow_up": "To follow up",
+      "ended": "Call ended"
+    }
   }
 }

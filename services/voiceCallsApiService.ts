@@ -101,6 +101,55 @@ export interface OutboundMessage {
   error_message: string | null;
 }
 
+// Chi chiama mentre Sofia parla: specchio dei tipi di services/liveCalls.ts
+// (lato server, non importabile qui perché tira dentro il DB).
+export interface CallerCard {
+  /** E.164 del chiamante; '' per un numero nascosto. */
+  phone: string;
+  customer: {
+    id: number;
+    name: string;
+    /** Telefono com'è in rubrica: con questo si apre la scheda Clienti. */
+    phone: string | null;
+    is_vip: boolean;
+    is_blacklisted: boolean;
+    dietary_notes: string | null;
+    preferences_notes: string | null;
+  } | null;
+  visits: number;
+  last_visit: string | null;
+  no_shows: number;
+  upcoming: {
+    id: number;
+    reservation_time: string;
+    date: string;
+    time: string;
+    guests: number;
+    children: number | null;
+    reservation_status: string;
+  }[];
+}
+
+export interface LiveCall {
+  id: string;
+  channel: 'sofia';
+  call_sid: string | null;
+  phone: string;
+  started_at: string;
+  card: CallerCard;
+}
+
+export type LiveCallOutcome = 'booked' | 'callback' | 'follow_up' | 'ended';
+
+export interface LiveCallEnded {
+  id: string | null;
+  call_sid: string | null;
+  phone: string | null;
+  outcome: LiveCallOutcome;
+  voice_call_id: number | null;
+  reservation: { id: number; reservation_time: string; guests: number } | null;
+}
+
 // Cache a livello modulo, stesso schema di inboxCache (messagesApiService):
 // ConversazioniPage viene smontata a ogni cambio vista, quindi senza cache
 // ogni rientro rifaceva lista e dettaglio da zero — spinner e mezzo secondo
@@ -225,6 +274,12 @@ class VoiceCallsApiService {
   async sync(): Promise<VoiceCallsSyncResult> {
     return apiRequest<VoiceCallsSyncResult>(`${API_URL}/voice-calls/sync`, {
       method: 'POST',
+      headers: getHeaders(),
+    });
+  }
+
+  async live(): Promise<{ calls: LiveCall[] }> {
+    return apiRequest<{ calls: LiveCall[] }>(`${API_URL}/phone/live`, {
       headers: getHeaders(),
     });
   }

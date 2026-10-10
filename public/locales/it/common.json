@@ -330,5 +330,31 @@
   "incident": {
     "label": "Sympotia",
     "close": "Chiudi avviso"
+  },
+  "phone": {
+    "sofiaTalking": "Sofia sta parlando con",
+    "hiddenNumber": "Numero nascosto",
+    "notInBook": "Non in rubrica",
+    "firstVisit": "Mai venuto",
+    "vip": "VIP",
+    "blacklisted": "In blacklist",
+    "noShows_one": "{{count}} no-show",
+    "noShows_other": "{{count}} no-show",
+    "visits_one": "1 visita",
+    "visits_other": "{{count}} visite",
+    "lastVisit": "ultima {{date}}",
+    "allergies": "Allergie: {{text}}",
+    "booking_one": "{{day}} alle {{time}} · 1 persona",
+    "booking_other": "{{day}} alle {{time}} · {{count}} persone",
+    "openCalls": "Apri Chiamate",
+    "mute": "Silenzia su questo dispositivo",
+    "unmute": "Riattiva il suono",
+    "close": "Chiudi",
+    "outcome": {
+      "booked": "Ha prenotato",
+      "callback": "Vuole essere richiamato",
+      "follow_up": "Da ricontattare",
+      "ended": "Chiamata finita"
+    }
   }
 }
