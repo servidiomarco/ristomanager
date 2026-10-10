@@ -86,6 +86,16 @@ voice_fallback_url di entrambi = URL ElevenLabs di oggi: se Sympotia non rispond
 - Eventi nuovi in `DOMAIN_EVENTS` (`services/eventRegistry.ts`) come `transient`.
 
 ### Fase 2: Sympotia davanti ai numeri, comportamento invariato (M)
+
+**Fatto il 10/10 (codice; la linea si collega con `scripts/telefono-linea.mjs`, lanciato dall'utente):**
+- **Tabella `phone_calls`** con RLS. `phone_lines` e le regole per fascia oraria slittano alla Fase 3, quando ci saranno dispositivi da far squillare: in Fase 2 la regola è una sola, `solo_sofia`.
+- **Webhook firmati:** `/webhook/t/:token/voice/inbound` registra la chiamata, apre il banner e aggancia Sofia con register-call (`services/phoneRouting.ts`). `/voice/status` chiude la riga.
+- **Refactor:** `buildSofiaInitData` è estratto dal webhook di init ed è usato da entrambi.
+- **Chiamate perse:** se Sofia non è raggiungibile, o è agganciata ma senza post-call dopo 3 minuti («Sofia muta», il caso di agosto), il chiamante sente un messaggio di cortesia. Poi parte `recordMissedPhoneCall`: riga provvisoria in `voice_calls` (`twilio:<CallSid>`, Da ricontattare), push «Chiamata persa» e banner chiuso. Un post-call in ritardo riaggancia la conversazione e chiude la riga provvisoria.
+- **Al posto del passaggio automatico a «Solo locale»:** non c'è ancora un locale da far squillare, quindi c'è il messaggio di cortesia con la chiamata da ricontattare. Il guardiano della quota ElevenLabs (`startElevenLabsQuotaWatchdog`) oggi non funziona: `/user/subscription` risponde 401 perché la chiave non ha `user_read`.
+- **Registro:** la pagina arriva in Fase 3. Le chiamate perse si vedono già in Chiamate.
+
+**Piano originale:**
 - **Migrazioni con RLS** come `voice_calls`:
   - `phone_lines`: tenant, e164, sid Twilio, ruolo `prenotazioni` | `ponte` | (più avanti) `fisso`, agente ElevenLabs, regole JSON, timeout di squillo;
   - `phone_calls`: call_sid, linea, chiamante, customer_id, direzione, stato (squilla / risposta / persa / Sofia / segreteria), chi ha risposto, orari, durata, `voice_call_id`, nota.

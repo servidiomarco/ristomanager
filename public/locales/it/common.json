@@ -354,7 +354,8 @@
       "booked": "Ha prenotato",
       "callback": "Vuole essere richiamato",
       "follow_up": "Da ricontattare",
-      "ended": "Chiamata finita"
+      "ended": "Chiamata finita",
+      "missed": "Chiamata persa"
     }
   }
 }

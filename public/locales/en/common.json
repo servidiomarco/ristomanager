@@ -354,7 +354,8 @@
       "booked": "Booked a table",
       "callback": "Wants a call back",
       "follow_up": "To follow up",
-      "ended": "Call ended"
+      "ended": "Call ended",
+      "missed": "Missed call"
     }
   }
 }

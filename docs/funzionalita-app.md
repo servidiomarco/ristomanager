@@ -186,6 +186,11 @@ Agente conversazionale AI (ElevenLabs) che **risponde al telefono del ristorante
 - A chiamata finita la card mostra l'esito (ha prenotato, vuole essere richiamato, da ricontattare) per qualche secondo, poi sparisce; da lì si apre Chiamate.
 - Suona un breve avviso, che si silenzia su ogni dispositivo dalla campanella della card. La vedono titolare, direzione, manager e reception, su ogni schermo dell'app (anche dove la barra in alto è nascosta).
 
+**Sympotia davanti al numero di Sofia** (si attiva quando il numero di Sofia viene collegato a Sympotia)
+- Ogni chiamata al numero di Sofia passa prima da Sympotia, che la registra e apre la card «chi chiama», poi la passa a Sofia. Per chi chiama non cambia niente.
+- Se Sofia non è raggiungibile, il cliente sente un messaggio di cortesia («la richiameremo al più presto») invece del silenzio. La chiamata compare in Chiamate › Da ricontattare con la nota del perché, e titolare, direzione e manager ricevono la push «Chiamata persa».
+- Lo stesso vale se Sofia aggancia la chiamata ma non parla con il cliente (per esempio crediti voce finiti): dopo qualche minuto la chiamata diventa «persa» e da richiamare.
+
 **Sezione Chiamate nel CRM**
 - Elenco chiamate con schede Tutte / Da ricontattare / Ricontattati / Con prenotazione.
 - Per ogni chiamata: **riassunto AI, trascrizione completa, registrazione audio** riascoltabile, durata, esito.
@@ -863,6 +868,7 @@ Pagina unica a blocchi, con chip-àncora per saltare alla sezione e una **ricerc
 
 | Data | Sezione | Modifica |
 |---|---|---|
+| 2026-10-10 | Agente vocale "Sofia" (Piattaforma) | Sympotia può stare davanti al numero di Sofia: registro di ogni chiamata, Sofia agganciata con register-call, messaggio di cortesia e «Chiamata persa» in Chiamate quando Sofia non risponde o resta muta. Spento finché il numero non viene collegato con `scripts/telefono-linea.mjs`. |
 | 2026-10-10 | Agente vocale "Sofia" | **Chi chiama, mentre Sofia parla**: appena Sofia risponde, in alto a destra compare il cliente al telefono con VIP, allergie, no-show, visite e prossime prenotazioni; un tocco apre la scheda o la prenotazione. A chiamata finita la card mostra l'esito, poi sparisce. L'avviso sonoro si silenzia dalla campanella della card. |
 | 2026-10-10 | Attività, Impostazioni, Menu & Banchetti | Nuova sezione **Attività programmate** in Impostazioni: si creano, cambiano ed eliminano le attività che compaiono da sole in Attività — prima di ogni banchetto, ricorrenti o una volta — scegliendo giorno, ora, squadra e priorità, con {data}, {coperti}, {banchetti} e {quantità} nel testo. «Ordinare merce» dei banchetti e il pane ora sono qui e si possono cambiare. Le attività dei banchetti compaiono il giorno stabilito invece che mesi prima; per un banchetto inserito in ritardo compare solo l'ultima finestra, e quelle già spuntate non ricompaiono più dopo un aggiornamento o una modifica del banchetto. Le attività si possono assegnare anche a Reception, General Manager e Cassa. |
 | 2026-10-10 | Impostazioni | **Ricerca nelle impostazioni**: in cima alla pagina, scrivendo restano solo le card che contengono le parole cercate, anche dentro le card chiuse, con la parola evidenziata. |

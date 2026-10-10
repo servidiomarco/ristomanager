@@ -119,6 +119,13 @@ export default async function globalSetup(): Promise<() => Promise<void>> {
             // smetta di scrivere (20 s); nei test basta un attimo.
             SHIFT_CHANGE_NOTIFY_DELAY_MS: '300',
             JWT_REFRESH_SECRET: 'test-jwt-refresh-secret',
+            // Telefono (Fase 2): i webhook voce verificano la firma Twilio, e
+            // register-call va a uno stub locale che il test della voce
+            // accende da sé (porta del server + 11). Il controllo «Sofia
+            // muta» aspetta mezzo secondo invece di tre minuti.
+            TWILIO_AUTH_TOKEN: 'test-twilio-auth-token',
+            SOFIA_REGISTER_CALL_URL: `http://127.0.0.1:${port + 11}/register-call`,
+            SOFIA_SILENT_CHECK_MS: '500',
             DEFAULT_OWNER_PASSWORD: OWNER_PASSWORD,
             // Gate degli endpoint /admin/tenants (Fase D1): senza questo i
             // test di provisioning riceverebbero solo 503.

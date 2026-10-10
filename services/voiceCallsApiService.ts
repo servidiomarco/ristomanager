@@ -139,7 +139,7 @@ export interface LiveCall {
   card: CallerCard;
 }
 
-export type LiveCallOutcome = 'booked' | 'callback' | 'follow_up' | 'ended';
+export type LiveCallOutcome = 'booked' | 'callback' | 'follow_up' | 'missed' | 'ended';
 
 export interface LiveCallEnded {
   id: string | null;
