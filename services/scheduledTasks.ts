@@ -278,6 +278,36 @@ export function isTimedTaskDue(task: Pick<ScheduledTask, 'kind' | 'frequency' | 
     return false;
 }
 
+/** Le finestre della stessa attività: «Ordinare merce» 72, 48 e 24 ore
+ *  prima sono tre righe con squadra, categoria e descrizione uguali. Senza
+ *  descrizione una riga fa famiglia a sé: meglio un promemoria in più che
+ *  saltare un'attività diversa. */
+export const banquetTaskFamily = (t: Pick<ScheduledTask, 'id' | 'assigned_team' | 'category' | 'description'>): string => {
+    const d = (t.description || '').trim();
+    return d ? `${t.assigned_team}|${t.category}|${d}` : `#${t.id}`;
+};
+
+/** Banchetto arrivato in ritardo: una finestra già passata (giorno
+ *  stabilito prima di oggi) non compare se un'altra finestra della stessa
+ *  attività, più vicina all'evento, è già scoccata o scocca oggi — compare
+ *  solo l'ultima. Prima un banchetto inserito il giorno prima faceva
+ *  nascere 72h e 48h già scadute insieme alla 24h. */
+export function isSupersededWindow(
+    task: Pick<ScheduledTask, 'id' | 'assigned_team' | 'category' | 'description' | 'days_before' | 'banquet_scope'>,
+    banquet: { event_date: string; status: string },
+    family: Pick<ScheduledTask, 'id' | 'assigned_team' | 'category' | 'description' | 'days_before' | 'banquet_scope'>[],
+    today: string,
+): boolean {
+    const days = task.days_before ?? 0;
+    if (addDaysIso(banquet.event_date, -days) >= today) return false;
+    const key = banquetTaskFamily(task);
+    return family.some(o => o.id !== task.id
+        && banquetTaskFamily(o) === key
+        && eligible(o, banquet)
+        && (o.days_before ?? 0) < days
+        && addDaysIso(banquet.event_date, -(o.days_before ?? 0)) <= today);
+}
+
 // ── Database ───────────────────────────────────────────────────────────────
 
 export interface ScheduledTaskPush {
@@ -430,6 +460,8 @@ async function releaseBanquetTask(deps: ScheduledTaskDeps, task: ScheduledTask, 
     const toEvent = addDaysIso(rt, days);
     let released = false;
     if (fromEvent <= toEvent) {
+        // Le altre finestre attive del ristorante, per saltare quelle superate.
+        const family = await loadBanquetTasks(task.tenant_id);
         const r = await queryWithRetry(
             `SELECT id, name, guests, TO_CHAR(event_date, 'YYYY-MM-DD') AS event_date, status
                FROM banquet_menus
@@ -439,7 +471,7 @@ async function releaseBanquetTask(deps: ScheduledTaskDeps, task: ScheduledTask, 
         );
         const byDate = new Map<string, number[]>();
         for (const b of r.rows as BanquetRow[]) {
-            if (!eligible(task, b)) continue;
+            if (!eligible(task, b) || isSupersededWindow(task, b, family, now.date)) continue;
             byDate.set(b.event_date, [...(byDate.get(b.event_date) || []), Number(b.id)]);
         }
         for (const [eventDate, ids] of byDate) {
@@ -516,7 +548,7 @@ export async function syncBanquetScheduledTasks(deps: ScheduledTaskDeps, tenantI
     const now = localNow(new Date(), await tenantTimezone(tenantId));
     if (banquet.event_date < now.date) return;
     for (const task of tasks) {
-        if (!eligible(task, banquet)) continue;
+        if (!eligible(task, banquet) || isSupersededWindow(task, banquet, tasks, now.date)) continue;
         const due = addDaysIso(banquet.event_date, -(task.days_before ?? 0));
         if (due > releasedThroughNow(now, task.schedule_time)) continue;
         if (await ensureBanquetOccurrence(deps, tenantId, task, banquet.event_date, [banquetId])) {

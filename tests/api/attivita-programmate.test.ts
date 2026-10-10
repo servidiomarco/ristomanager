@@ -12,6 +12,7 @@ import {
     releasedThroughNow,
     localNow,
     addDaysIso,
+    isSupersededWindow,
     scheduledTasksTick,
     type ScheduledTaskDeps,
     type ScheduledTaskPush,
@@ -79,6 +80,30 @@ describe('attività programmate — regole', () => {
         expect(localNow(new Date('2026-10-10T22:30:00Z'), ROME)).toEqual({ date: '2026-10-11', time: '00:30', dow: 0 });
         expect(releasedThroughNow({ date: '2026-10-11', time: '08:59', dow: 0 }, '09:00')).toBe('2026-10-10');
         expect(releasedThroughNow({ date: '2026-10-11', time: '09:00', dow: 0 }, '09:00')).toBe('2026-10-11');
+    });
+
+    it('banchetto in ritardo: delle finestre già passate resta solo l\'ultima', () => {
+        const merce = (id: number, days_before: number, description: string | null = 'Ordinare la merce') => ({
+            id, days_before, description, assigned_team: 'KITCHEN', category: 'INVENTORY', banquet_scope: 'ALL' as const,
+        });
+        const finestre = [merce(1, 3), merce(2, 2), merce(3, 1)];
+        const oggi = '2026-10-10';
+        const domani = { event_date: '2026-10-11', status: 'QUOTE' };
+        expect(finestre.map(f => isSupersededWindow(f, domani, finestre, oggi))).toEqual([true, true, false]);
+        // Fra due giorni: la 72h è passata, la 48h scocca oggi, la 24h domani.
+        const dopodomani = { event_date: '2026-10-12', status: 'QUOTE' };
+        expect(finestre.map(f => isSupersededWindow(f, dopodomani, finestre, oggi))).toEqual([true, false, false]);
+        // Il giorno stesso sono tutte passate: resta la 24h.
+        const oggiStesso = { event_date: '2026-10-10', status: 'QUOTE' };
+        expect(finestre.map(f => isSupersededWindow(f, oggiStesso, finestre, oggi))).toEqual([true, true, false]);
+        // Un'attività diversa (altra descrizione, o nessuna) non si salta mai.
+        const altra = [merce(1, 3, 'Confermare il menù'), merce(2, 2), merce(3, 1)];
+        expect(isSupersededWindow(altra[0], domani, altra, oggi)).toBe(false);
+        const senza = [merce(1, 3, null), merce(3, 1, null)];
+        expect(isSupersededWindow(senza[0], domani, senza, oggi)).toBe(false);
+        // La finestra più vicina che vale solo per i confermati non copre un preventivo.
+        const soloConfermati = [merce(1, 3), { ...merce(3, 1), banquet_scope: 'CONFIRMED' as const }];
+        expect(isSupersededWindow(soloConfermati[0], domani, soloConfermati, oggi)).toBe(false);
     });
 
     it('decide quando nasce una ricorrente o una tantum', () => {
@@ -238,6 +263,41 @@ describe('attività programmate — rotte e banchetti', () => {
         expect((await updateBanquet(b2, { event_date: addDaysIso(today, 2) })).status).toBe(200);
         await settle();
         expect(await todosOf(task.id)).toHaveLength(1);
+    });
+
+    it('banchetto inserito in ritardo: compare solo l\'ultima finestra', async () => {
+        const finestra = (days_before: number, ore: number) => createTask({
+            ...banquetTask, title: `${PREFIX} merce (${ore}h prima)`, description: `${PREFIX} ordinare la merce del {data}`,
+            days_before, priority: days_before === 1 ? 'HIGH' : 'LOW',
+        });
+        const tre = await finestra(3, 72);
+        const due = await finestra(2, 48);
+        const una = await finestra(1, 24);
+        try {
+            // Domani: 72h e 48h sono già passate, la 24h scocca oggi.
+            const b = await createBanquet(`${PREFIX} Tardivo`, tomorrow);
+            const rows = await waitFor(() => todosOf(una.id), r => r.length > 0);
+            expect(rows).toHaveLength(1);
+            expect(rows[0].linked_banquet_ids).toEqual([Number(b.id)]);
+            await settle();
+            expect(await todosOf(tre.id)).toHaveLength(0);
+            expect(await todosOf(due.id)).toHaveLength(0);
+
+            // Oggi stesso: tutte passate, resta la 24h. E cambiare la 72h non
+            // la fa rinascere per questo banchetto.
+            const oggi = await createBanquet(`${PREFIX} Oggi`, today);
+            await waitFor(() => todosOf(una.id), r => r.length > 1);
+            const put = await api().put(`/scheduled-tasks/${tre.id}`).set(bearer(owner))
+                .send({ ...banquetTask, title: `${PREFIX} merce (72h, cambiata)`, description: `${PREFIX} ordinare la merce del {data}`, days_before: 3, priority: 'LOW' });
+            expect(put.status).toBe(200);
+            await settle();
+            expect(await todosOf(tre.id)).toHaveLength(0);
+            expect(await todosOf(due.id)).toHaveLength(0);
+            expect((await todosOf(una.id)).map(r => r.linked_banquet_ids[0]).sort()).toEqual([Number(b.id), Number(oggi.id)].sort());
+        } finally {
+            // Restano accese per i test dopo, e farebbero nascere le loro attività.
+            for (const t of [tre, due, una]) await api().delete(`/scheduled-tasks/${t.id}`).set(bearer(owner));
+        }
     });
 
     it('«solo confermati» segue lo stato del banchetto, e vale per tutte le squadre', async () => {
