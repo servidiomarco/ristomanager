@@ -181,6 +181,11 @@ Agente conversazionale AI (ElevenLabs) che **risponde al telefono del ristorante
 - Il ristoratore sceglie il **tetto di spesa per i minuti extra** del mese (default 50 €, 0 = nessun extra).
 - **Avvisi** push al titolare e alla direzione (ed email al titolare), una volta per soglia al mese. Sui minuti inclusi il ristoratore sceglie a quali soglie riceverli fra 50%, 80%, 90% e 100% (default 80, 90 e 100; nessuna = niente avvisi sui minuti); se una chiamata ne supera più d'una arriva solo l'avviso della più alta. Gli avvisi all'80% e al 100% del tetto degli extra arrivano sempre. Resta da leggere solo l'avviso più recente: il 100% spegne l'80%, il tetto spegne i minuti inclusi, il mese nuovo spegne quello prima; cambiando il tetto si spengono gli avvisi sul tetto vecchio.
 
+**Chi chiama, mentre Sofia parla**
+- Appena Sofia risponde, in alto a destra nel CRM compare **chi sta chiamando**: nome o numero, VIP, blacklist, no-show, visite con l'ultima data, allergie e le prossime prenotazioni. Un tocco sul nome apre la scheda cliente, uno sulla prenotazione la apre in Prenotazioni.
+- A chiamata finita la card mostra l'esito (ha prenotato, vuole essere richiamato, da ricontattare) per qualche secondo, poi sparisce; da lì si apre Chiamate.
+- Suona un breve avviso, che si silenzia su ogni dispositivo dalla campanella della card. La vedono titolare, direzione, manager e reception, su ogni schermo dell'app (anche dove la barra in alto è nascosta).
+
 **Sezione Chiamate nel CRM**
 - Elenco chiamate con schede Tutte / Da ricontattare / Ricontattati / Con prenotazione.
 - Per ogni chiamata: **riassunto AI, trascrizione completa, registrazione audio** riascoltabile, durata, esito.
@@ -858,6 +863,7 @@ Pagina unica a blocchi, con chip-àncora per saltare alla sezione e una **ricerc
 
 | Data | Sezione | Modifica |
 |---|---|---|
+| 2026-10-10 | Agente vocale "Sofia" | **Chi chiama, mentre Sofia parla**: appena Sofia risponde, in alto a destra compare il cliente al telefono con VIP, allergie, no-show, visite e prossime prenotazioni; un tocco apre la scheda o la prenotazione. A chiamata finita la card mostra l'esito, poi sparisce. L'avviso sonoro si silenzia dalla campanella della card. |
 | 2026-10-10 | Attività, Impostazioni, Menu & Banchetti | Nuova sezione **Attività programmate** in Impostazioni: si creano, cambiano ed eliminano le attività che compaiono da sole in Attività — prima di ogni banchetto, ricorrenti o una volta — scegliendo giorno, ora, squadra e priorità, con {data}, {coperti}, {banchetti} e {quantità} nel testo. «Ordinare merce» dei banchetti e il pane ora sono qui e si possono cambiare. Le attività dei banchetti compaiono il giorno stabilito invece che mesi prima; per un banchetto inserito in ritardo compare solo l'ultima finestra, e quelle già spuntate non ricompaiono più dopo un aggiornamento o una modifica del banchetto. Le attività si possono assegnare anche a Reception, General Manager e Cassa. |
 | 2026-10-10 | Impostazioni | **Ricerca nelle impostazioni**: in cima alla pagina, scrivendo restano solo le card che contengono le parole cercate, anche dentro le card chiuse, con la parola evidenziata. |
 | 2026-10-10 | Inventario | Fatture fornitori: in fondo alla fattura ora si legge perché «Carica in magazzino» è spento (le righe ancora da abbinare) e, accanto, c'è **«Ignora le N da abbinare»** per chiudere in un colpo detersivi e acquisti che non vanno in magazzino. |

@@ -92,6 +92,7 @@ import { PLATFORM_NAME } from './platform';
 import { DateNavigator } from './components/DateNavigator';
 import { CommandPalette } from './components/CommandPalette';
 import { AppVersionBanner } from './components/AppVersionBanner';
+import { CallBanner } from './components/phone/CallBanner';
 import { BookingChannelsBar } from './components/BookingChannelsBar';
 import { useSocket } from './hooks/useSocket';
 import { useLinkRoutes } from './hooks/useLinkRoutes';
@@ -2355,6 +2356,22 @@ const App: React.FC = () => {
           porta il claim impersonated_by; il bottone ripristina la sessione
           del platform admin e ricarica. */}
       <ImpersonationBanner />
+      {/* Chi chiama mentre Sofia è al telefono: fisso sopra ogni vista,
+          anche dove la testata è nascosta. */}
+      <CallBanner
+        enabled={isAuthenticated && canSeeVoiceCalls && !isPanelSession}
+        onOpenCustomer={(phone) => {
+          setAutoEditCustomerByPhone(phone);
+          setView(ViewState.CLIENTI);
+        }}
+        onOpenReservation={(r) => {
+          const [y, m, d] = datePart(r.reservation_time).split('-').map(Number);
+          if (y && m && d) setGlobalDate(new Date(y, m - 1, d));
+          setPendingReservationId(r.id);
+          setView(ViewState.RESERVATIONS);
+        }}
+        onOpenCalls={() => setView(ViewState.CONVERSAZIONI)}
+      />
       {/* Skip link for keyboard users */}
       <a href="#main" className="skip-link">{t('aria.skipToContent')}</a>
 

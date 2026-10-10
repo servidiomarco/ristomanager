@@ -155,6 +155,10 @@ export const DOMAIN_EVENTS: Record<string, DomainEventSpec> = {
     // Chiamate di Sofia cambiate (nuova, richiamata, ricontattata,
     // collegata): il client rilegge lista e contatore, il payload è vuoto.
     'voiceCall:changed': spec('cloud'),
+    // Chi chiama mentre Sofia parla (banner nel CRM): segnale realtime puro,
+    // la chiamata finita resta in voiceCall:changed.
+    'phoneCall:started': spec('transient'),
+    'phoneCall:ended': spec('transient'),
 
     // --- Gestione (staff, turni, spesa, todo, fornitori): tolleranza alta
     //     alla latenza, conflitti rari — master in cloud.

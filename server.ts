@@ -205,6 +205,7 @@ import {
     formatItalianDateReadback,
     spellItalianPhoneDigits,
 } from './services/elevenlabsService.js';
+import { buildCallerCard, addLiveCall, removeLiveCall, listLiveCalls, type LiveCall } from './services/liveCalls.js';
 import {
     ROOM_OCCUPANCY_CAPS_KEY,
     RoomOccupancyCap,
@@ -1501,6 +1502,80 @@ function renderVoiceFirstMessage(template: string, firstName: string): string {
         .trim();
 }
 
+// --- Chi chiama (docs/telefono-piano.md, Fase 1) ---------------------------
+// Mentre Sofia parla, il CRM mostra il chiamante con la sua scheda: prima lo
+// staff lo scopriva solo a chiamata finita, in Chiamate. Solo ai ruoli che
+// gestiscono prenotazioni e telefono: non serve in cucina né sul palmare.
+const PHONE_BANNER_ROLES: UserRole[] = [UserRole.OWNER, UserRole.GENERAL_MANAGER, UserRole.MANAGER, UserRole.RECEPTION];
+
+// ElevenLabs manda caller_id in cima al body; le altre forme per sicurezza.
+function sofiaCallerIdRaw(body: any): string {
+    return String(
+        body?.caller_id
+        ?? body?.parameters?.caller_id
+        ?? body?.dynamic_variables?.system__caller_id
+        ?? ''
+    ).trim();
+}
+
+async function announceSofiaCallStarted(tenantId: number, body: any): Promise<void> {
+    try {
+        if (!(await isFeatureEnabledForTenant(tenantId, 'voice'))) return;
+        const callSid = String(body?.call_sid ?? body?.dynamic_variables?.system__call_sid ?? '').trim() || null;
+        const raw = sofiaCallerIdRaw(body);
+        // Senza sid né numero il post-call non avrebbe modo di chiuderla.
+        if (!callSid && !raw) return;
+        const phone = raw ? normalizeItalianPhone(raw) : '';
+        const call: LiveCall = {
+            id: callSid || `sofia:${phone}:${Date.now()}`,
+            channel: 'sofia',
+            call_sid: callSid,
+            phone,
+            started_at: new Date().toISOString(),
+            card: await buildCallerCard(tenantId, phone),
+        };
+        addLiveCall(tenantId, call);
+        socketService?.broadcastToRolesRoom(tenantId, PHONE_BANNER_ROLES, 'phoneCall:started', call);
+    } catch (err: any) {
+        console.warn('[Telefono] annuncio chiamata di Sofia fallito (non bloccante):', err?.message || err);
+    }
+}
+
+async function announceSofiaCallEnded(tenantId: number, conversationId: string, callSid: string | null, phone: string | null): Promise<void> {
+    try {
+        const id = removeLiveCall(tenantId, { callSid, phone });
+        // L'esito dalla riga appena registrata, con la stessa priorità della
+        // pagina Chiamate: prenotazione creata, richiamata chiesta, poi
+        // «da ricontattare» come la push del post-call.
+        const result = await queryWithRetry(
+            `SELECT vc.id, vc.reservation_id, vc.callback_requested, vc.follow_up_status,
+                    r.reservation_time, r.guests
+             FROM voice_calls vc
+             LEFT JOIN reservations r ON r.id = vc.reservation_id AND r.tenant_id = vc.tenant_id
+             WHERE vc.conversation_id = $1 AND vc.tenant_id = $2`,
+            [conversationId, tenantId]
+        );
+        const row = result.rows[0];
+        const outcome = !row ? 'ended'
+            : row.reservation_id ? 'booked'
+            : row.callback_requested ? 'callback'
+            : (row.follow_up_status == null || row.follow_up_status === 'PENDING') ? 'follow_up'
+            : 'ended';
+        socketService?.broadcastToRolesRoom(tenantId, PHONE_BANNER_ROLES, 'phoneCall:ended', {
+            id: id ?? callSid,
+            call_sid: callSid,
+            phone,
+            outcome,
+            voice_call_id: row?.id ?? null,
+            reservation: row?.reservation_id
+                ? { id: row.reservation_id, reservation_time: new Date(row.reservation_time).toISOString(), guests: row.guests }
+                : null,
+        });
+    } catch (err: any) {
+        console.warn('[Telefono] chiusura chiamata di Sofia fallita (non bloccante):', err?.message || err);
+    }
+}
+
 // Conversation Initiation Webhook — called by ElevenLabs BEFORE the first
 // message is spoken. We look up the caller in the rubrica and inject
 // dynamic variables + a personalised `first_message` override so returning
@@ -1520,6 +1595,10 @@ function renderVoiceFirstMessage(template: string, firstName: string): string {
 // sospensione, saluto custom, entitlement e rubrica sono del tenant risolto.
 async function handleElevenLabsInitConversation(tenantId: number, req: express.Request, res: express.Response): Promise<void> {
     if (!authorizeElevenLabs(req, res)) return;
+
+    // Il chiamante compare nel CRM mentre Sofia saluta: parte in parallelo e
+    // non ritarda mai la risposta, che ElevenLabs aspetta per pochi secondi.
+    void announceSofiaCallStarted(tenantId, req.body);
 
     // "Prenotazioni sospese" mode: Sofia is still on the phone but she
     // announces the pause instead of running the booking flow. Suspension
@@ -1603,15 +1682,7 @@ async function handleElevenLabsInitConversation(tenantId: number, req: express.R
         return;
     }
 
-    // ElevenLabs sends caller_id at the top level for SIP calls; guard
-    // against alternate shapes just in case.
-    const body = req.body || {};
-    const callerIdRaw = String(
-        body.caller_id
-        ?? body.parameters?.caller_id
-        ?? body.dynamic_variables?.system__caller_id
-        ?? ''
-    ).trim();
+    const callerIdRaw = sofiaCallerIdRaw(req.body);
 
     if (!callerIdRaw) {
         console.log('[ElevenLabs] init-conversation anonymous caller');
@@ -2067,6 +2138,11 @@ async function handleElevenLabsPostCall(tenantId: number, req: express.Request, 
         body.phone ||
         data.caller_id ||
         body.caller_id;
+    // Il sid Twilio chiude il banner «chi chiama» aperto dall'init.
+    const callSid: string | null =
+        data.metadata?.phone_call?.call_sid ||
+        body.metadata?.phone_call?.call_sid ||
+        null;
 
     // Acknowledge fast — ElevenLabs retries on timeout. Side-effects below are fire-and-forget.
     res.status(200).json({ ok: true });
@@ -2238,6 +2314,9 @@ async function handleElevenLabsPostCall(tenantId: number, req: express.Request, 
     } catch (err: any) {
         console.warn('[ElevenLabs] post-call follow-up push failed:', err?.message || err);
     }
+
+    // Per ultimo: il banner chiude con l'esito della riga ormai completa.
+    await announceSofiaCallEnded(tenantId, conversationId, callSid, phoneRaw ? normalizeItalianPhone(phoneRaw) : null);
 }
 
 // Alias tenant 1 finché i provider non sono riconfigurati sui path con token.
@@ -29312,6 +29391,12 @@ app.get('/voice-calls', authenticate, requireFeature('voice'), voiceCallsAuthori
         console.error('GET /voice-calls error:', err);
         res.status(500).json({ error: 'Internal server error' });
     }
+});
+
+// Chiamate in corso per il banner «chi chiama»: il client le chiede all'avvio
+// e a ogni riconnessione, così un CRM aperto a metà chiamata la vede lo stesso.
+app.get('/phone/live', authenticate, requireFeature('voice'), authorize(...PHONE_BANNER_ROLES), (req, res) => {
+    res.json({ calls: listLiveCalls(req.tenantId!) });
 });
 
 // Count of calls that need a follow-up: no reservation was created and the
