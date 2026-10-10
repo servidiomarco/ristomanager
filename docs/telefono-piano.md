@@ -1,6 +1,6 @@
 # Sympotia come centralino: il telefono dentro il CRM
 
-> Piano approvato il 10/10/2026. **Stato:** Fase 1 («chi chiama» per le chiamate di Sofia) fatta il 10/10 — `services/liveCalls.ts`, `components/phone/CallBanner.tsx`, `GET /phone/live`, eventi `phoneCall:started|ended`. Fase 0 da fare, senza comprare numeri: si prova col client Twilio nel browser (decisione del 10/10). Le fasi 2–7 partono da qui.
+> Piano approvato il 10/10/2026. **Stato:** Fase 1 («chi chiama» per le chiamate di Sofia) fatta il 10/10 — `services/liveCalls.ts`, `components/phone/CallBanner.tsx`, `GET /phone/live`, eventi `phoneCall:started|ended`. Fase 0 fatta il 10/10 col client Twilio nel browser, senza comprare numeri: esiti in fondo alla Fase 0. Le fasi 2–7 partono da qui.
 
 ## Contesto
 
@@ -68,6 +68,15 @@ voice_fallback_url di entrambi = URL ElevenLabs di oggi: se Sympotia non rispond
 - **Prova del cordless SIP sul Twilio SIP Domain:** registrazione dietro il doppio NAT USG → EdgeRouter → NeXXt, e se il display mostra il nome (Twilio limita il campo From).
 - **Costi Twilio:** chiamate in arrivo su numeri italiani 0,01 $/min, client nel browser circa 0,004 $/min; da verificare le chiamate verso i cellulari.
 - **Col Frantoio:** dove è pubblicato oggi il fisso (Google, TripAdvisor, TheFork, sito, menu QR, insegna, biglietti) e chi ha uno smartphone di servizio.
+
+**Esiti della Fase 0 (10/10, una chiamata di prova di 61 s, agente di prova poi cancellato):**
+- `register-call` → Sofia risponde con l'agente in μ-law 8000 in entrambe le direzioni: ha capito la domanda e ha risposto.
+- Le variabili passate in `conversation_initiation_client_data` arrivano: «Ciao Giulia…», e il numero letto da `caller_id_spelled`.
+- Il post-call porta `metadata.phone_call.call_sid` uguale al CallSid Twilio anche con register-call. Non serve una variabile apposta per collegare `voice_calls` a `phone_calls`. `external_number` è il `from_number` passato a register-call.
+- Il `<Client>` squilla nel browser (token HS256 firmato con una API key). Con `timeout="12"` l'esito «no-answer» arriva dopo circa 17 s: il timeout parte quando lo squillo è avviato, quindi N va scelto tenendone conto.
+- Una chiamata in corso con Sofia si reindirizza via REST (`Calls/{sid}` con nuovo TwiML) verso il `<Dial>` della sala. ElevenLabs chiude la conversazione e manda il post-call dopo circa 3 s, mentre la chiamata continua con lo staff.
+- La chiave ElevenLabs di produzione non ha `webhooks_write`. Per le prove serve un webhook creato a mano dal pannello (Sviluppatori › Webhooks) puntato al tunnel, e un agente di prova con `workspace_overrides.webhooks.post_call_webhook_id` verso quello. Altrimenti il post-call va al webhook di produzione e scrive in `voice_calls`.
+- Restano da provare il cordless SIP (serve l'hardware) e una chiamata vera dalla rete telefonica sul 010032, al collaudo a locale chiuso.
 
 ### Fase 1: «chi chiama» per le chiamate di Sofia, senza toccare la linea (S, una PR)
 - In `handleElevenLabsInitConversation` (server.ts, circa 1700 su main), dopo il lookup già presente, si emette `phone:live` con la scheda. Il CRM mostra «Sofia sta parlando con Mario Rossi».
