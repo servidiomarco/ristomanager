@@ -57,8 +57,8 @@ COPY public ./public
 COPY migrations ./migrations
 
 # I manuali che l'assistente «Chiedi a Sympotia» tiene nel prompt (vedi
-# services/supportAssistant.ts): solo questi tre, non tutta la cartella docs.
-COPY docs/funzionalita-app.md docs/Manuale_Utente_CRM.md docs/manuale-operativo-comande-cucina-passe.md ./docs/
+# services/supportAssistant.ts): solo questi quattro, non tutta la cartella docs.
+COPY docs/funzionalita-app.md docs/Manuale_Utente_CRM.md docs/manuale-operativo-comande-cucina-passe.md docs/manuale-food-cost.md ./docs/
 
 # L'installatore del PC della cassa e la cassa finta per provarlo su una
 # VM, serviti da GET /installa/cassa.ps1 e /installa/cassa-finta.ps1.
