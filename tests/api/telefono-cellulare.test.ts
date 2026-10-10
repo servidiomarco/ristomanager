@@ -86,8 +86,8 @@ describe('telefono: prima il cellulare, poi Sofia', () => {
         const res = await signed(`${webhookPath}/voice/whisper?p=CAcell0001`, { CallSid: 'CAleg0001', To: CELLULARE });
         expect(res.status).toBe(200);
         expect(res.text).toContain('<Gather numDigits="1"');
-        expect(res.text).toContain('Ettore Squillo');
-        expect(res.text).toContain('Premi 1 per rispondere');
+        expect(res.text).toContain('chiama Ettore Squillo');
+        expect(res.text).toContain('Premi 1.');
         expect(res.text).toContain(`${webhookPath}/voice/whisper-ok?p=CAcell0001`);
     });
 
@@ -120,6 +120,31 @@ describe('telefono: prima il cellulare, poi Sofia', () => {
         expect((await row('CAcell0002')).status).toBe('sofia');
         await new Promise(res => setTimeout(res, 300));
         expect((await liveCall('CAcell0002'))?.stage).toBe('sofia');
+    });
+
+    it('se chi chiama ha già riattaccato, a fine squillo niente Sofia', async () => {
+        await signed(`${webhookPath}/voice/inbound`, { CallSid: 'CAcell0004', From: CLIENTE, To: NOSTRO_NUMERO });
+        const after = await signed(`${webhookPath}/voice/after-dial`, { CallSid: 'CAcell0004', CallStatus: 'completed', DialCallStatus: 'completed' });
+        expect(after.text).toContain('<Hangup/>');
+        expect(after.text).not.toContain('<Connect>');
+        expect((await row('CAcell0004')).status).not.toBe('sofia');
+    });
+
+    it('chi riattacca mentre squilla il cellulare finisce in Da ricontattare', async () => {
+        await signed(`${webhookPath}/voice/inbound`, { CallSid: 'CAcell0005', From: CLIENTE, To: NOSTRO_NUMERO });
+        expect((await signed(`${webhookPath}/voice/status`, { CallSid: 'CAcell0005', CallStatus: 'completed', CallDuration: '0' })).status).toBe(204);
+        let r = await row('CAcell0005');
+        for (let i = 0; i < 30 && r.voice_call_id == null; i++) {
+            await new Promise(res => setTimeout(res, 100));
+            r = await row('CAcell0005');
+        }
+        expect(r.status).toBe('missed');
+        expect(r.missed_reason).toBe('riattaccata_in_attesa');
+        const vc = (await db.query(`SELECT * FROM voice_calls WHERE conversation_id = $1`, ['twilio:CAcell0005'])).rows[0];
+        expect(vc.follow_up_status).toBe('PENDING');
+        // E a fine squillo non si aggancia Sofia.
+        const after = await signed(`${webhookPath}/voice/after-dial`, { CallSid: 'CAcell0005', CallStatus: 'completed', DialCallStatus: 'no-answer' });
+        expect(after.text).toContain('<Hangup/>');
     });
 
     it('con «Solo Sofia» risponde subito Sofia', async () => {
