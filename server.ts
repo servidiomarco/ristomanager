@@ -2592,9 +2592,11 @@ async function handleTwilioVoiceAfterDial(tenantId: number, req: express.Request
     // Twilio chiede l'action anche quando chi chiama ha già riattaccato
     // (prova del 10/10: status callback e after-dial nello stesso istante).
     // Allora non c'è nessuno da passare a Sofia: register-call aprirebbe una
-    // conversazione su una chiamata finita.
+    // conversazione su una chiamata finita. «no-answer» e «busy» non contano:
+    // sono gli stati di una chiamata mai risposta, non di un cliente andato
+    // via (con answerOnBridge Twilio dava «no-answer» a ogni fine squillo).
     const parentStatus = String(req.body?.CallStatus || '');
-    if (row.ended_at || ['completed', 'canceled', 'busy', 'failed', 'no-answer'].includes(parentStatus)) {
+    if (row.ended_at || ['completed', 'canceled', 'failed'].includes(parentStatus)) {
         res.type('text/xml').send(twimlResponse('<Hangup/>'));
         return;
     }

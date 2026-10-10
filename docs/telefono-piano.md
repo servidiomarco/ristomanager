@@ -139,7 +139,11 @@ Il banner ha la fase (`stage`: ringing / sofia / staff, evento `phoneCall:update
   - Rispondi/Rifiuta, muto, riaggancia e Nuova prenotazione nella card «chi chiama»;
   - interruttore «Questo dispositivo squilla» in Impostazioni › AI;
   - «Chiama»/«Richiama» in Chiamate passano dal CRM se il telefono è acceso.
-- **Messa in linea:** `scripts/telefono-softphone.mjs --apply`, lanciato dall'utente, crea API key e TwiML App e imposta su Railway `TWILIO_API_KEY_SID`, `TWILIO_API_KEY_SECRET` (da stdin) e `TWILIO_TWIML_APP_SID`.
+- **Messa in linea:** `scripts/telefono-softphone.mjs --apply`, lanciato dall'utente, crea API key e TwiML App e imposta su Railway `TWILIO_API_KEY_SID`, `TWILIO_API_KEY_SECRET` (da stdin) e `TWILIO_TWIML_APP_SID`. Fatto il 10/10 alle 18:49.
+- **Prima prova, 10/10 alle 18:52, col solo cellulare:**
+  - con «Rifiuta» la chiamata è passata a Sofia: `DialCallStatus = busy`, `CallStatus = ringing`;
+  - lasciando squillare il CRM per 15 s, la chiamata si è chiusa invece di passare a Sofia. Twilio ha mandato ad `after-dial` `CallStatus = no-answer` (con `answerOnBridge` la chiamata del cliente risulta «no-answer» finché non viene collegata, come dice il changelog TwiML del 2020-12-09) e `after-dial` l'ha letto come cliente andato via. La status callback «no-answer» è arrivata nello stesso istante.
+  - **Correzione:** il `<Dial>` dello squillo non usa più `answerOnBridge`: Twilio risponde subito e fa sentire lo squillo italiano (`ringTone="it"`), come nella prova della Fase 0, in cui dopo il «no-answer» Sofia ha preso la chiamata. `after-dial` considera chiusa la chiamata solo con `completed`, `canceled` o `failed`. Lo squillo resta a carico del chiamante come una chiamata risposta: sono i secondi di attesa.
 - **Restano per dopo:**
   - regole per fascia oraria e interruttore rapido «Sofia risponde adesso»;
   - pagina del registro;

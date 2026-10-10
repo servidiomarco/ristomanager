@@ -71,7 +71,10 @@ describe('telefono: prima il cellulare, poi Sofia', () => {
     it('fa squillare il cellulare con annuncio e ritorno a Sofia', async () => {
         const res = await signed(`${webhookPath}/voice/inbound`, { CallSid: 'CAcell0001', From: CLIENTE, To: NOSTRO_NUMERO });
         expect(res.status).toBe(200);
-        expect(res.text).toContain(`<Dial timeout="15" answerOnBridge="true" callerId="${NOSTRO_NUMERO}"`);
+        expect(res.text).toContain(`<Dial timeout="15" ringTone="it" callerId="${NOSTRO_NUMERO}"`);
+        // Senza answerOnBridge: a fine squillo Twilio chiudeva la chiamata del
+        // cliente «no-answer» invece di passarla a Sofia (10/10 18:52).
+        expect(res.text).not.toContain('answerOnBridge');
         expect(res.text).toContain(`${webhookPath}/voice/after-dial`);
         expect(res.text).toContain(`${webhookPath}/voice/whisper?p=CAcell0001`);
         expect(res.text).toContain(`>${CELLULARE}</Number>`);
@@ -114,12 +117,22 @@ describe('telefono: prima il cellulare, poi Sofia', () => {
         expect(wrong.text).toContain('<Hangup/>');
         expect((await row('CAcell0002')).status).toBe('ringing');
 
-        const after = await signed(`${webhookPath}/voice/after-dial`, { CallSid: 'CAcell0002', DialCallStatus: 'no-answer' });
+        const after = await signed(`${webhookPath}/voice/after-dial`, { CallSid: 'CAcell0002', CallStatus: 'in-progress', DialCallStatus: 'no-answer' });
         expect(after.status).toBe(200);
         expect(after.text).toContain('<Connect>');
         expect((await row('CAcell0002')).status).toBe('sofia');
         await new Promise(res => setTimeout(res, 300));
         expect((await liveCall('CAcell0002'))?.stage).toBe('sofia');
+    });
+
+    it('a fine squillo senza risposta passa a Sofia anche con lo stato «no-answer»', async () => {
+        // Prova del 10/10 18:52: Twilio mandava CallStatus «no-answer» a ogni
+        // fine squillo (la chiamata del cliente non era ancora risposta) e
+        // after-dial lo leggeva come cliente andato via.
+        await signed(`${webhookPath}/voice/inbound`, { CallSid: 'CAcell0006', From: CLIENTE, To: NOSTRO_NUMERO });
+        const after = await signed(`${webhookPath}/voice/after-dial`, { CallSid: 'CAcell0006', CallStatus: 'no-answer', DialCallStatus: 'no-answer' });
+        expect(after.text).toContain('<Connect>');
+        expect((await row('CAcell0006')).status).toBe('sofia');
     });
 
     it('se chi chiama ha già riattaccato, a fine squillo niente Sofia', async () => {
