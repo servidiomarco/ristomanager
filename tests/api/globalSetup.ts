@@ -133,6 +133,12 @@ export default async function globalSetup(): Promise<() => Promise<void>> {
             TWILIO_API_KEY_SID: 'SKtest00000000000000000000000000',
             TWILIO_API_KEY_SECRET: 'test-api-key-secret',
             TWILIO_TWIML_APP_SID: 'APtest00000000000000000000000000',
+            // Cordless (Fase 4): dominio SIP finto, e le API REST di Twilio
+            // (credenziali SIP) su uno stub che il test del cordless accende
+            // da sé alla porta del server + 12.
+            TWILIO_SIP_DOMAIN: 'sympotia-test.sip.twilio.com',
+            TWILIO_SIP_CREDENTIAL_LIST_SID: 'CLtest00000000000000000000000000',
+            TWILIO_REST_URL: `http://127.0.0.1:${port + 12}`,
             DEFAULT_OWNER_PASSWORD: OWNER_PASSWORD,
             // Gate degli endpoint /admin/tenants (Fase D1): senza questo i
             // test di provisioning riceverebbero solo 503.

@@ -1,9 +1,9 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Clock, Loader2, Monitor, PhoneForwarded, Plus, X } from 'lucide-react';
+import { AlertTriangle, Clock, Copy, Loader2, Monitor, PhoneForwarded, Plus, Radio, X } from 'lucide-react';
 import { SegmentedControl, dsButton, dsInput } from '../ds';
 import { useAuth } from '../../contexts/AuthContext';
-import { voiceCallsApiService, type PhoneDevice, type PhoneRouting } from '../../services/voiceCallsApiService';
+import { voiceCallsApiService, type PhoneDevice, type PhoneRouting, type PhoneSipLineCreated, type PhoneSipLinesResponse } from '../../services/voiceCallsApiService';
 import { deviceKey, disableSoftphone, enableSoftphone, isEnabledHere, useSoftphone } from '../../services/softphone';
 import { PHONE_SLOTS_MAX, isHHMM, type PhoneRoutingSlot } from '../../utils/phoneSchedule';
 
@@ -16,6 +16,7 @@ import { PHONE_SLOTS_MAX, isHHMM, type PhoneRoutingSlot } from '../../utils/phon
    durante il servizio della sera); l'interruttore rapido sta in testata. */
 
 const MAX_MOBILES = 3;
+const MAX_CORDLESS = 5;
 // Lunedì per primo, come il calendario italiano.
 const DAYS = [1, 2, 3, 4, 5, 6, 7];
 const NEW_SLOT: PhoneRoutingSlot = { days: [1, 2, 3, 4, 5, 6, 7], start: '19:30', end: '22:30', mode: 'solo_sofia' };
@@ -53,6 +54,11 @@ export const PhoneRoutingCard: React.FC<Props> = ({ showToast }) => {
   const [devices, setDevices] = useState<PhoneDevice[]>([]);
   const [configured, setConfigured] = useState(false);
   const [toggling, setToggling] = useState(false);
+  // Cordless (Fase 4): basi DECT IP registrate sul dominio SIP.
+  const [sip, setSip] = useState<PhoneSipLinesResponse | null>(null);
+  const [cordlessLabel, setCordlessLabel] = useState('');
+  const [addingCordless, setAddingCordless] = useState(false);
+  const [createdCordless, setCreatedCordless] = useState<PhoneSipLineCreated | null>(null);
 
   const showToastRef = useRef(showToast);
   useEffect(() => { showToastRef.current = showToast; });
@@ -68,6 +74,11 @@ export const PhoneRoutingCard: React.FC<Props> = ({ showToast }) => {
     voiceCallsApiService.phoneDevices(deviceKey())
       .then(d => { setDevices(d.devices); setConfigured(d.configured); })
       .catch(() => {});
+  const loadSip = () =>
+    voiceCallsApiService.sipLines()
+      .then(setSip)
+      // Un server senza la rotta (deploy in corso): niente sezione cordless.
+      .catch(() => setSip(null));
 
   useEffect(() => {
     let cancelled = false;
@@ -76,6 +87,7 @@ export const PhoneRoutingCard: React.FC<Props> = ({ showToast }) => {
       // Un server senza la rotta (deploy in corso) non mostra la card.
       .catch(() => { if (!cancelled) setSaved(null); });
     void loadDevices();
+    void loadSip();
     return () => { cancelled = true; };
   }, []);
 
@@ -140,6 +152,37 @@ export const PhoneRoutingCard: React.FC<Props> = ({ showToast }) => {
     } catch (err: any) {
       showToast(err?.message || t('pr.err', 'Salvataggio non riuscito'), 'error');
     }
+  };
+
+  const addCordless = async () => {
+    const label = cordlessLabel.trim();
+    if (!label || addingCordless) return;
+    setAddingCordless(true);
+    try {
+      setCreatedCordless(await voiceCallsApiService.createSipLine(label));
+      setCordlessLabel('');
+      await loadSip();
+    } catch (err: any) {
+      showToast(err?.message || t('pr.err', 'Salvataggio non riuscito'), 'error');
+    } finally {
+      setAddingCordless(false);
+    }
+  };
+
+  const removeCordless = async (id: number) => {
+    try {
+      await voiceCallsApiService.deleteSipLine(id);
+      if (createdCordless?.id === id) setCreatedCordless(null);
+      await loadSip();
+    } catch (err: any) {
+      showToast(err?.message || t('pr.err', 'Salvataggio non riuscito'), 'error');
+    }
+  };
+
+  const copy = (text: string) => {
+    try {
+      void navigator.clipboard.writeText(text).then(() => showToast(t('pr.copied', 'Copiato'), 'success'));
+    } catch { /* senza appunti si copia a mano */ }
   };
 
   const statusText = !hereOn ? t('pr.hereOff', 'Spento: qui non squilla')
@@ -375,6 +418,98 @@ export const PhoneRoutingCard: React.FC<Props> = ({ showToast }) => {
           </ul>
         )}
       </div>
+
+      {/* Cordless: una base DECT IP registrata sul dominio SIP di Sympotia. */}
+      {sip?.configured && (
+        <div className="mt-4 border-t border-[var(--ds-border)] pt-4">
+          <p className="text-[14px] font-medium text-[var(--ds-text-primary)]">{t('pr.cordless', 'Cordless')}</p>
+          <p className="text-[13px] text-[var(--ds-text-muted)]">
+            {t('pr.cordlessHint', 'Una base DECT IP (o un\'app SIP) squilla insieme al CRM, col nome di chi chiama, e chiama i clienti col numero del locale.')}
+          </p>
+
+          {sip.lines.length > 0 && (
+            <ul className="mt-3 space-y-1.5">
+              {sip.lines.map(l => (
+                <li key={l.id} className="flex items-center gap-2 rounded-[var(--ds-radius-sm)] bg-[var(--ds-surface-row)] px-3 py-2 text-[13px]">
+                  <Radio className="h-4 w-4 flex-shrink-0 text-[var(--ds-text-secondary)]" aria-hidden />
+                  <span className="min-w-0 flex-1 truncate text-[var(--ds-text-primary)]">{l.label}</span>
+                  <span className="flex-shrink-0 tabular-nums text-[var(--ds-text-muted)]">{l.username}</span>
+                  {canEdit && (
+                    <button
+                      type="button"
+                      onClick={() => removeCordless(l.id)}
+                      aria-label={t('pr.cordlessRemove', 'Togli questo cordless')}
+                      className="inline-flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-[var(--ds-radius-control)] text-[var(--ds-text-secondary)] hover:text-[var(--ds-text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+                    >
+                      <X className="h-4 w-4" aria-hidden />
+                    </button>
+                  )}
+                </li>
+              ))}
+            </ul>
+          )}
+
+          {/* La password esiste solo qui e adesso: il server non la conserva. */}
+          {createdCordless && (
+            <div className="mt-3 space-y-2 rounded-[var(--ds-radius-sm)] bg-[var(--ds-pending-tint)] p-3 text-[13px] text-[var(--ds-text-primary)]">
+              <p className="font-medium">{t('pr.cordlessConfig', 'Da scrivere nella base del cordless')}</p>
+              <dl className="space-y-1.5">
+                {([
+                  [t('pr.sipServer', 'Server SIP'), createdCordless.domain],
+                  [t('pr.sipProxy', 'Proxy in uscita'), createdCordless.proxy],
+                  [t('pr.sipUser', 'Utente'), createdCordless.username],
+                  [t('pr.sipPassword', 'Password'), createdCordless.password],
+                  [t('pr.sipTransport', 'Trasporto'), 'TLS · 5061'],
+                ] as [string, string][]).map(([k, v]) => (
+                  <div key={k} className="flex items-center gap-2">
+                    <dt className="w-28 flex-shrink-0 text-[var(--ds-text-secondary)]">{k}</dt>
+                    <dd className="min-w-0 flex-1 truncate font-mono text-[13px]">{v}</dd>
+                    <button
+                      type="button"
+                      onClick={() => copy(v)}
+                      aria-label={t('pr.copy', 'Copia')}
+                      title={t('pr.copy', 'Copia')}
+                      className="inline-flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-[var(--ds-radius-control)] text-[var(--ds-text-secondary)] hover:bg-[var(--ds-surface)] hover:text-[var(--ds-text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+                    >
+                      <Copy className="h-4 w-4" aria-hidden />
+                    </button>
+                  </div>
+                ))}
+              </dl>
+              <p className="text-[12px] text-[var(--ds-text-secondary)]">
+                {t('pr.cordlessOnce', 'La password si vede solo adesso. Se la perdi, togli il cordless e aggiungilo di nuovo.')}
+              </p>
+              <div className="flex justify-end">
+                <button type="button" onClick={() => setCreatedCordless(null)} className={dsButton.secondary}>{t('pr.done', 'Fatto')}</button>
+              </div>
+            </div>
+          )}
+
+          {canEdit && sip.lines.length < MAX_CORDLESS && (
+            <div className="mt-3 flex items-center gap-2">
+              <input
+                type="text"
+                value={cordlessLabel}
+                maxLength={80}
+                onChange={e => setCordlessLabel(e.target.value)}
+                onKeyDown={e => { if (e.key === 'Enter') void addCordless(); }}
+                placeholder={t('pr.cordlessPh', 'Nome, es. Cordless sala')}
+                aria-label={t('pr.cordlessName', 'Nome del cordless')}
+                className={dsInput}
+              />
+              <button type="button" onClick={addCordless} disabled={!cordlessLabel.trim() || addingCordless} className={`${dsButton.secondary} flex-shrink-0`}>
+                {addingCordless ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> : <Plus className="h-4 w-4" aria-hidden />}
+                {t('pr.cordlessAdd', 'Aggiungi')}
+              </button>
+            </div>
+          )}
+
+          <p className="mt-3 flex gap-1.5 text-[12px] text-[var(--ds-text-muted)]">
+            <AlertTriangle className="mt-0.5 h-3.5 w-3.5 flex-shrink-0" aria-hidden />
+            {t('pr.cordlessEmergency', 'Dal cordless si chiamano solo fissi e cellulari italiani: non il 112, il 113 o il 118. Per le emergenze resta il fisso.')}
+          </p>
+        </div>
+      )}
     </div>
   );
 };

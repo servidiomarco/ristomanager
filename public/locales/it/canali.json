@@ -525,6 +525,23 @@
     "slotDays": "Giorni",
     "slotMode": "In questa fascia",
     "slotInvalid": "Scegli almeno un giorno e due orari diversi",
-    "slotAdd": "Fascia oraria"
+    "slotAdd": "Fascia oraria",
+    "cordless": "Cordless",
+    "cordlessHint": "Una base DECT IP (o un'app SIP) squilla insieme al CRM, col nome di chi chiama, e chiama i clienti col numero del locale.",
+    "cordlessRemove": "Togli questo cordless",
+    "cordlessConfig": "Da scrivere nella base del cordless",
+    "sipServer": "Server SIP",
+    "sipProxy": "Proxy in uscita",
+    "sipUser": "Utente",
+    "sipPassword": "Password",
+    "sipTransport": "Trasporto",
+    "copy": "Copia",
+    "copied": "Copiato",
+    "cordlessOnce": "La password si vede solo adesso. Se la perdi, togli il cordless e aggiungilo di nuovo.",
+    "done": "Fatto",
+    "cordlessPh": "Nome, es. Cordless sala",
+    "cordlessName": "Nome del cordless",
+    "cordlessAdd": "Aggiungi",
+    "cordlessEmergency": "Dal cordless si chiamano solo fissi e cellulari italiani: non il 112, il 113 o il 118. Per le emergenze resta il fisso."
   }
 }

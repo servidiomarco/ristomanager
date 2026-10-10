@@ -10,6 +10,7 @@
 // post-call porta metadata.phone_call.call_sid = CallSid Twilio,
 // system__caller_id = from_number. L'agente deve avere l'audio in μ-law 8000.
 
+import crypto from 'crypto';
 import jwt from 'jsonwebtoken';
 import type { PhoneAnswerMode, PhoneRoutingOverride, PhoneRoutingSlot } from '../utils/phoneSchedule.js';
 
@@ -132,6 +133,8 @@ export const dialLocaleTwiml = (args: {
     clients: string[]; mobiles: string[]; ringSeconds: number; callerId: string;
     parentCallSid: string; caller: string;
     afterDialUrl: string; whisperUrl: string; clientAnsweredUrl: string;
+    /** URI SIP dei cordless registrati (sipDialUri), squillano con gli altri. */
+    sips?: string[];
 }): string =>
     twimlResponse(
         `<Dial timeout="${args.ringSeconds}" ringTone="it" callerId="${xmlEscape(args.callerId)}" action="${xmlEscape(args.afterDialUrl)}" method="POST">`
@@ -142,6 +145,8 @@ export const dialLocaleTwiml = (args: {
             + `<Parameter name="caller" value="${xmlEscape(args.caller)}"/>`
             + `</Client>`).join('')
         + args.mobiles.map(m => `<Number url="${xmlEscape(args.whisperUrl)}" method="POST">${xmlEscape(m)}</Number>`).join('')
+        + (args.sips ?? []).map(uri =>
+            `<Sip statusCallbackEvent="answered" statusCallback="${xmlEscape(args.clientAnsweredUrl)}" statusCallbackMethod="POST">${xmlEscape(uri)}</Sip>`).join('')
         + `</Dial>`
     );
 
@@ -207,10 +212,12 @@ export function softphoneToken(config: SoftphoneConfig, identity: string): strin
     );
 }
 
-/** «Richiama» dal CRM: solo numeri italiani, col numero del locale come
- *  chiamante. Il limite all'Italia è la difesa dalle chiamate verso numeri
- *  esteri a pagamento se un token finisse in mani sbagliate. */
-export const isCallableNumber = (e164: string): boolean => /^\+39\d{6,11}$/.test(e164);
+/** «Richiama» dal CRM e chiamate dal cordless: solo fissi (0…) e cellulari
+ *  (3…) italiani, col numero del locale come chiamante. Restano fuori
+ *  l'estero e i numeri a pagamento (89x, 4xx, 1xx, 70x): la difesa se un
+ *  token o una password SIP finissero in mani sbagliate. Anche il 112 resta
+ *  fuori: il cordless non sostituisce il fisso per le emergenze. */
+export const isCallableNumber = (e164: string): boolean => /^\+39(0\d{5,10}|3\d{8,9})$/.test(e164);
 
 // La durata arriva dallo status callback della TwiML App, sul CallSid del
 // browser: è quello che finisce in phone_calls.
@@ -220,3 +227,99 @@ export const outboundTwiml = (args: { callerId: string; number: string }): strin
         + `<Number>${xmlEscape(args.number)}</Number>`
         + `</Dial>`
     );
+
+// --- Cordless e telefoni SIP (Fase 4) ---------------------------------------
+// Una base DECT IP (o un'app SIP) si registra sul dominio SIP Twilio di
+// Sympotia con utente t<tenant>c<linea>. Squilla nello stesso <Dial> del CRM
+// e dei cellulari; le chiamate in uscita arrivano a /voice/sip-call. Le
+// credenziali le crea il server nella Credential List del dominio (lo script
+// scripts/telefono-sip.mjs prepara dominio e lista): la password si mostra
+// una volta sola e non resta nel nostro database.
+
+export interface SipConfig {
+    accountSid: string;
+    authToken: string;
+    /** es. sympotia-voce.sip.twilio.com */
+    domain: string;
+    credentialListSid: string;
+    /** Il proxy in uscita più vicino all'Italia; la registrazione vale lì. */
+    proxy: string;
+    restBase: string;
+}
+
+export function sipConfig(): SipConfig | null {
+    const accountSid = process.env.TWILIO_ACCOUNT_SID;
+    const authToken = process.env.TWILIO_AUTH_TOKEN;
+    const domain = process.env.TWILIO_SIP_DOMAIN;
+    const credentialListSid = process.env.TWILIO_SIP_CREDENTIAL_LIST_SID;
+    if (!accountSid || !authToken || !domain || !credentialListSid) return null;
+    const edge = process.env.TWILIO_SIP_EDGE || 'frankfurt';
+    return {
+        accountSid, authToken, domain, credentialListSid,
+        proxy: `sip.${edge}.twilio.com`,
+        // Solo per i test: uno stub locale al posto delle API di Twilio.
+        restBase: (process.env.TWILIO_REST_URL || 'https://api.twilio.com').replace(/\/$/, ''),
+    };
+}
+
+export const sipUsername = (tenantId: number, lineId: number): string => `t${tenantId}c${lineId}`;
+
+/** L'utente SIP da un From/To di Twilio («sip:t1c3@dominio;…») o nudo. */
+export function parseSipUser(raw: unknown): { tenantId: number; lineId: number } | null {
+    const m = /^(?:sip:)?t(\d+)c(\d+)(?:@|$)/.exec(String(raw ?? '').trim());
+    return m ? { tenantId: Number(m[1]), lineId: Number(m[2]) } : null;
+}
+
+/** Il numero chiamato dal cordless: la parte utente di «sip:347…@dominio». */
+export const sipTargetNumber = (raw: unknown): string => {
+    const m = /^sips?:([^@;]+)@/.exec(String(raw ?? '').trim());
+    return m ? decodeURIComponent(m[1]) : '';
+};
+
+/** Il cordless col nome di chi chiama sul display: Twilio permette il
+ *  callerId solo uguale per tutto il <Dial> (il numero del locale, che
+ *  serve ai cellulari), il nome passa nell'intestazione Remote-Party-ID,
+ *  che le basi DECT (Yealink, Gigaset) mostrano se impostate a leggerla. */
+export const sipDialUri = (username: string, domain: string, caller?: { number: string; name?: string | null }): string => {
+    const base = `sip:${username}@${domain}`;
+    if (!caller?.number) return base;
+    const name = String(caller.name ?? '').replace(/["\\<>\r\n]/g, '').trim().slice(0, 40);
+    const rpid = `${name ? `"${name}" ` : ''}<sip:${caller.number}@${domain}>;party=calling;screen=yes;privacy=off`;
+    return `${base}?Remote-Party-ID=${encodeURIComponent(rpid)}`;
+};
+
+/** Password per la base DECT: 20 caratteri con maiuscole, minuscole e
+ *  cifre, come vuole Twilio (almeno 12, una cifra, maiuscole e minuscole). */
+export function randomSipPassword(): string {
+    const alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789';
+    for (;;) {
+        const bytes = crypto.randomBytes(20);
+        const pw = Array.from(bytes, b => alphabet[b % alphabet.length]).join('');
+        if (/[A-Z]/.test(pw) && /[a-z]/.test(pw) && /\d/.test(pw)) return pw;
+    }
+}
+
+const twilioRest = async (config: SipConfig, method: string, path: string, form?: Record<string, string>) => {
+    const res = await fetch(`${config.restBase}/2010-04-01/Accounts/${config.accountSid}${path}`, {
+        method,
+        headers: {
+            Authorization: 'Basic ' + Buffer.from(`${config.accountSid}:${config.authToken}`).toString('base64'),
+            ...(form ? { 'Content-Type': 'application/x-www-form-urlencoded' } : {}),
+        },
+        body: form ? new URLSearchParams(form).toString() : undefined,
+    });
+    const text = await res.text();
+    if (!res.ok && !(method === 'DELETE' && res.status === 404)) {
+        throw new Error(`Twilio ${method} ${path} → ${res.status} ${text.slice(0, 200)}`);
+    }
+    return text ? JSON.parse(text) : {};
+};
+
+export async function createSipCredential(config: SipConfig, username: string, password: string): Promise<string> {
+    const created = await twilioRest(config, 'POST', `/SIP/CredentialLists/${config.credentialListSid}/Credentials.json`, { Username: username, Password: password });
+    return String(created.sid || '');
+}
+
+export async function deleteSipCredential(config: SipConfig, credentialSid: string): Promise<void> {
+    await twilioRest(config, 'DELETE', `/SIP/CredentialLists/${config.credentialListSid}/Credentials/${credentialSid}.json`);
+}
