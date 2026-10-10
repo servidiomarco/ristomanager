@@ -192,10 +192,13 @@ Agente conversazionale AI (ElevenLabs) che **risponde al telefono del ristorante
 - Lo stesso vale se Sofia aggancia la chiamata ma non parla con il cliente (per esempio crediti voce finiti): dopo qualche minuto la chiamata diventa «persa» e da richiamare.
 
 **Chi risponde al telefono** (Impostazioni › AI)
-- Si sceglie se le chiamate al numero di Sofia le prende subito Sofia o se prima squilla il cellulare del locale: fino a tre cellulari, per un numero di secondi a scelta (di serie 15).
-- Il cellulare squilla come una telefonata normale, anche a schermo bloccato, dal numero di Sofia. Chi risponde sente un annuncio breve («Vecchio Frantoio: chiama Giulia Ferraro. Premi 1», oppure «un numero non in rubrica») e preme 1 per prenderla. Se nessuno risponde in tempo, o se risponde la segreteria, la chiamata passa a Sofia.
-- Se il cliente riattacca mentre squilla il cellulare, la chiamata compare in Chiamate › Da ricontattare con la push «Chiamata persa».
-- Nel CRM la card «chi chiama» segue la chiamata: «Squilla il cellulare del locale», poi «In linea col locale» o «Sofia sta parlando con…».
+- Si sceglie se le chiamate al numero di Sofia le prende subito Sofia o se prima squilla il locale, per un numero di secondi a scelta (di serie 15). Se nessuno risponde in tempo, risponde Sofia.
+- **Il CRM squilla come un telefono:** su ogni PC, tablet o telefono col CRM aperto si può accendere «Questo dispositivo squilla». Quando arriva una chiamata, la card «chi chiama» mostra **Rispondi** e **Rifiuta**. Si parla dal browser, meglio con una cuffia (il microfono si autorizza alla prima chiamata). In linea ci sono durata, microfono spento o acceso, **Nuova prenotazione** già compilata col cliente e riaggancia. Gli altri dispositivi vedono «Ha risposto …».
+- **Cellulari (facoltativi):** fino a tre squillano insieme al CRM, come telefonate normali e anche a schermo bloccato, dal numero di Sofia. Chi risponde sente un annuncio breve («Vecchio Frantoio: chiama Giulia Ferraro. Premi 1», oppure «un numero non in rubrica») e preme 1 per prenderla. Se risponde la segreteria, la chiamata passa a Sofia.
+- **Richiama dal CRM:** col telefono acceso, «Chiama» e «Richiama» in Chiamate partono dal CRM, e il cliente vede il numero di Sofia. Solo numeri italiani.
+- Se il cliente riattacca mentre squilla il locale, la chiamata compare in Chiamate › Da ricontattare con la push «Chiamata persa».
+- Nel CRM la card «chi chiama» segue la chiamata: «Squilla il cellulare del locale» o «Squilla qui», poi «Ha risposto …» o «Sofia sta parlando con…».
+- L'elenco dei dispositivi accesi è nella stessa card: chi gestisce le impostazioni può spegnerli.
 
 **Sezione Chiamate nel CRM**
 - Elenco chiamate con schede Tutte / Da ricontattare / Ricontattati / Con prenotazione.
@@ -874,6 +877,7 @@ Pagina unica a blocchi, con chip-àncora per saltare alla sezione e una **ricerc
 
 | Data | Sezione | Modifica |
 |---|---|---|
+| 2026-10-10 | Agente vocale "Sofia", Impostazioni, Chiamate | **Il CRM squilla come un telefono.** In Impostazioni › AI si accende «Questo dispositivo squilla» e si sceglie «Prima il locale»: le chiamate al numero di Sofia squillano nel CRM (e sui cellulari indicati) prima di passare a lei. Dalla card «chi chiama» si risponde, si spegne il microfono, si apre una nuova prenotazione già compilata e si riaggancia; gli altri vedono chi ha risposto. «Chiama» e «Richiama» in Chiamate partono dal CRM col numero del locale. |
 | 2026-10-10 | Agente vocale "Sofia" | «Prima il cellulare»: l'annuncio sul cellulare è più corto («Vecchio Frantoio: chiama Giulia Ferraro. Premi 1»), e un cliente che riattacca mentre squilla il cellulare finisce in Chiamate › Da ricontattare con la push «Chiamata persa». |
 | 2026-10-10 | Agente vocale "Sofia", Impostazioni | Nuovo **Chi risponde al telefono** in Impostazioni › AI: prima di Sofia può squillare il cellulare del locale (fino a tre, per i secondi scelti). Chi risponde sente chi chiama e preme 1; se nessuno risponde, la chiamata passa a Sofia. La card «chi chiama» mostra se squilla il cellulare, se è in linea col locale o con Sofia. |
 | 2026-10-10 | Agente vocale "Sofia" (Piattaforma) | Sympotia può stare davanti al numero di Sofia: registro di ogni chiamata, Sofia agganciata con register-call, messaggio di cortesia e «Chiamata persa» in Chiamate quando Sofia non risponde o resta muta. Spento finché il numero non viene collegato con `scripts/telefono-linea.mjs`. |

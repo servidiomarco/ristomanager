@@ -94,6 +94,7 @@ import { CommandPalette } from './components/CommandPalette';
 import { AppVersionBanner } from './components/AppVersionBanner';
 import { CallBanner } from './components/phone/CallBanner';
 import { PhoneRoutingCard } from './components/phone/PhoneRoutingCard';
+import { startSoftphone, stopSoftphone } from './services/softphone';
 import { BookingChannelsBar } from './components/BookingChannelsBar';
 import { useSocket } from './hooks/useSocket';
 import { useLinkRoutes } from './hooks/useLinkRoutes';
@@ -781,6 +782,16 @@ const App: React.FC = () => {
     const unsub = socketClient.onSocketChange((s) => attach(s));
     return () => { if (timer) clearTimeout(timer); unsub(); attach(null); };
   }, [isAuthenticated, canSeeVoiceCalls]);
+  // Softphone (docs/telefono-piano.md, Fase 3): se su questo browser è acceso
+  // «Questo dispositivo squilla», il telefono si registra all'accesso e si
+  // spegne all'uscita. Chi non l'ha acceso non scarica nemmeno il Voice SDK.
+  useEffect(() => {
+    if (!isAuthenticated || !canSeeVoiceCalls || isPanelSession) {
+      stopSoftphone();
+      return;
+    }
+    void startSoftphone();
+  }, [isAuthenticated, canSeeVoiceCalls, isPanelSession]);
   // Re-fetch when leaving the Conversazioni page so the badge reflects any
   // reservations linked from calls the user just handled.
   useEffect(() => {
@@ -2372,6 +2383,11 @@ const App: React.FC = () => {
           setView(ViewState.RESERVATIONS);
         }}
         onOpenCalls={() => setView(ViewState.CONVERSAZIONI)}
+        onNewReservation={(prefill) => {
+          setNewReservationPrefill(prefill);
+          setNewReservationKind('standard');
+          setAutoOpenNewReservation(true);
+        }}
       />
       {/* Skip link for keyboard users */}
       <a href="#main" className="skip-link">{t('aria.skipToContent')}</a>

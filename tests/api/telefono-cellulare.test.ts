@@ -58,13 +58,13 @@ describe('telefono: prima il cellulare, poi Sofia', () => {
     });
 
     it('le impostazioni validano numeri e secondi', async () => {
-        const empty = await api().put('/settings/phone-routing').set(bearer(token)).send({ mode: 'prima_cellulare', mobiles: [], ring_seconds: 15 });
-        expect(empty.status).toBe(400);
+        const badMode = await api().put('/settings/phone-routing').set(bearer(token)).send({ mode: 'sempre', mobiles: [], ring_seconds: 15 });
+        expect(badMode.status).toBe(400);
         const badRing = await api().put('/settings/phone-routing').set(bearer(token)).send({ mode: 'prima_cellulare', mobiles: [CELLULARE], ring_seconds: 2 });
         expect(badRing.status).toBe(400);
         const ok = await api().put('/settings/phone-routing').set(bearer(token)).send({ mode: 'prima_cellulare', mobiles: ['328 990 0011'], ring_seconds: 15 });
         expect(ok.status).toBe(200);
-        expect(ok.body).toEqual({ mode: 'prima_cellulare', mobiles: [CELLULARE], ring_seconds: 15 });
+        expect(ok.body).toEqual({ mode: 'prima_locale', mobiles: [CELLULARE], ring_seconds: 15 });
         expect((await api().get('/settings/phone-routing').set(bearer(token))).body.mobiles).toEqual([CELLULARE]);
     });
 
@@ -76,7 +76,7 @@ describe('telefono: prima il cellulare, poi Sofia', () => {
         expect(res.text).toContain(`${webhookPath}/voice/whisper?p=CAcell0001`);
         expect(res.text).toContain(`>${CELLULARE}</Number>`);
         const r = await row('CAcell0001');
-        expect(r.routing).toBe('prima_cellulare');
+        expect(r.routing).toBe('prima_locale');
         expect(r.status).toBe('ringing');
         await new Promise(res => setTimeout(res, 300));
         expect((await liveCall('CAcell0001'))?.stage).toBe('ringing');

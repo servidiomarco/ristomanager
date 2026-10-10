@@ -10,6 +10,8 @@
 // post-call porta metadata.phone_call.call_sid = CallSid Twilio,
 // system__caller_id = from_number. L'agente deve avere l'audio in μ-law 8000.
 
+import jwt from 'jsonwebtoken';
+
 const REGISTER_CALL_URL = 'https://api.elevenlabs.io/v1/convai/twilio/register-call';
 
 // Twilio aspetta il TwiML al massimo 15 secondi; register-call risponde in
@@ -91,7 +93,10 @@ export async function registerSofiaCall(args: {
 // controllo la segreteria del cellulare «risponderebbe» e la chiamata non
 // arriverebbe mai a Sofia.
 
-export type PhoneRoutingMode = 'solo_sofia' | 'prima_cellulare';
+/** 'prima_locale' fa squillare i dispositivi del CRM e i cellulari; si
+ *  chiamava 'prima_cellulare' prima del softphone (Fase 3) e il valore
+ *  vecchio salvato si legge così. */
+export type PhoneRoutingMode = 'solo_sofia' | 'prima_locale';
 
 export interface PhoneRouting {
     mode: PhoneRoutingMode;
@@ -100,20 +105,34 @@ export interface PhoneRouting {
     ring_seconds: number;
 }
 
+export const parseRoutingMode = (raw: unknown): PhoneRoutingMode =>
+    raw === 'prima_locale' || raw === 'prima_cellulare' ? 'prima_locale' : 'solo_sofia';
+
 export const DEFAULT_PHONE_ROUTING: PhoneRouting = { mode: 'solo_sofia', mobiles: [], ring_seconds: 15 };
 export const PHONE_ROUTING_MAX_MOBILES = 3;
 export const PHONE_ROUTING_RING_MIN = 5;
 export const PHONE_ROUTING_RING_MAX = 60;
 
-/** Squillo dei cellulari. answerOnBridge: chi chiama sente squillare finché
- *  qualcuno non risponde davvero (annuncio compreso), non il silenzio. Il
- *  numero mostrato è il nostro: il passaggio del numero del cliente ai
- *  cellulari italiani va provato prima di usarlo. */
-export const dialMobilesTwiml = (args: {
-    mobiles: string[]; ringSeconds: number; callerId: string; afterDialUrl: string; whisperUrl: string;
+/** Squillo del locale: i dispositivi del CRM (<Client>) e i cellulari
+ *  (<Number> con l'annuncio), tutti insieme. answerOnBridge: chi chiama sente
+ *  squillare finché qualcuno non risponde davvero (annuncio compreso), non il
+ *  silenzio. Il numero mostrato ai cellulari è il nostro: il passaggio del
+ *  numero del cliente va provato prima di usarlo. Il browser riceve il
+ *  CallSid della chiamata del cliente e il suo numero come parametri, per
+ *  agganciarsi al banner «chi chiama». */
+export const dialLocaleTwiml = (args: {
+    clients: string[]; mobiles: string[]; ringSeconds: number; callerId: string;
+    parentCallSid: string; caller: string;
+    afterDialUrl: string; whisperUrl: string; clientAnsweredUrl: string;
 }): string =>
     twimlResponse(
         `<Dial timeout="${args.ringSeconds}" answerOnBridge="true" callerId="${xmlEscape(args.callerId)}" action="${xmlEscape(args.afterDialUrl)}" method="POST">`
+        + args.clients.map(identity =>
+            `<Client statusCallbackEvent="answered" statusCallback="${xmlEscape(args.clientAnsweredUrl)}" statusCallbackMethod="POST">`
+            + `<Identity>${xmlEscape(identity)}</Identity>`
+            + `<Parameter name="parentCallSid" value="${xmlEscape(args.parentCallSid)}"/>`
+            + `<Parameter name="caller" value="${xmlEscape(args.caller)}"/>`
+            + `</Client>`).join('')
         + args.mobiles.map(m => `<Number url="${xmlEscape(args.whisperUrl)}" method="POST">${xmlEscape(m)}</Number>`).join('')
         + `</Dial>`
     );
@@ -125,4 +144,71 @@ export const whisperTwiml = (args: { announce: string; confirmUrl: string }): st
         `<Gather numDigits="1" timeout="6" action="${xmlEscape(args.confirmUrl)}" method="POST">`
         + `<Say language="it-IT">${xmlEscape(args.announce)}</Say>`
         + `</Gather><Hangup/>`
+    );
+
+// --- Softphone nel CRM (Fase 3) ---------------------------------------------
+// Il browser riceve un access token Twilio (JWT HS256 firmato con una API key)
+// e registra un Device con identità t<tenant>d<dispositivo>. Le chiamate in
+// uscita («Richiama») passano dalla TwiML App, che chiama /voice/client-call.
+
+export interface SoftphoneConfig {
+    accountSid: string;
+    apiKeySid: string;
+    apiKeySecret: string;
+    twimlAppSid: string;
+}
+
+export function softphoneConfig(): SoftphoneConfig | null {
+    const accountSid = process.env.TWILIO_ACCOUNT_SID;
+    const apiKeySid = process.env.TWILIO_API_KEY_SID;
+    const apiKeySecret = process.env.TWILIO_API_KEY_SECRET;
+    const twimlAppSid = process.env.TWILIO_TWIML_APP_SID;
+    if (!accountSid || !apiKeySid || !apiKeySecret || !twimlAppSid) return null;
+    return { accountSid, apiKeySid, apiKeySecret, twimlAppSid };
+}
+
+export const deviceIdentity = (tenantId: number, deviceId: number): string => `t${tenantId}d${deviceId}`;
+
+export function parseDeviceIdentity(raw: unknown): { tenantId: number; deviceId: number } | null {
+    const m = /^(?:client:)?t(\d+)d(\d+)$/.exec(String(raw ?? ''));
+    return m ? { tenantId: Number(m[1]), deviceId: Number(m[2]) } : null;
+}
+
+export const SOFTPHONE_TOKEN_TTL_SECONDS = 3600;
+
+/** Access token del Voice SDK: riceve le chiamate per la sua identità e
+ *  chiama solo attraverso la TwiML App di Sympotia. */
+export function softphoneToken(config: SoftphoneConfig, identity: string): string {
+    const now = Math.floor(Date.now() / 1000);
+    return jwt.sign(
+        {
+            jti: `${config.apiKeySid}-${now}`,
+            grants: {
+                identity,
+                voice: { incoming: { allow: true }, outgoing: { application_sid: config.twimlAppSid } },
+            },
+        },
+        config.apiKeySecret,
+        {
+            algorithm: 'HS256',
+            issuer: config.apiKeySid,
+            subject: config.accountSid,
+            expiresIn: SOFTPHONE_TOKEN_TTL_SECONDS,
+            header: { typ: 'JWT', alg: 'HS256', cty: 'twilio-fpa;v=1' } as any,
+        }
+    );
+}
+
+/** «Richiama» dal CRM: solo numeri italiani, col numero del locale come
+ *  chiamante. Il limite all'Italia è la difesa dalle chiamate verso numeri
+ *  esteri a pagamento se un token finisse in mani sbagliate. */
+export const isCallableNumber = (e164: string): boolean => /^\+39\d{6,11}$/.test(e164);
+
+// La durata arriva dallo status callback della TwiML App, sul CallSid del
+// browser: è quello che finisce in phone_calls.
+export const outboundTwiml = (args: { callerId: string; number: string }): string =>
+    twimlResponse(
+        `<Dial callerId="${xmlEscape(args.callerId)}" answerOnBridge="true" timeout="40">`
+        + `<Number>${xmlEscape(args.number)}</Number>`
+        + `</Dial>`
     );

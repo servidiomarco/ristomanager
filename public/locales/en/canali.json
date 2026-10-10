@@ -497,8 +497,6 @@
     "title": "Who answers the phone",
     "subtitle": "Calls to Sofia's number",
     "soloSofia": "Sofia only",
-    "primaCellulare": "Mobile first",
-    "hint": "It rings like a normal call, from Sofia's number. Whoever answers hears who is calling and presses 1; if nobody answers in time, Sofia does.",
     "mobile": "Mobile",
     "mobilePh": "Mobile, e.g. 347 123 4567",
     "remove": "Remove this mobile",
@@ -507,6 +505,18 @@
     "seconds": "seconds, then Sofia",
     "save": "Save",
     "saved": "Setting saved",
-    "err": "Could not save"
+    "err": "Could not save",
+    "primaLocale": "Restaurant first",
+    "hintLocale": "The CRM devices with the phone on and the mobiles below ring together. On a mobile you hear who is calling and press 1. If nobody answers in time, Sofia does.",
+    "mobilesTitle": "Mobiles (optional)",
+    "here": "This device rings",
+    "hereOff": "Off: it doesn't ring here",
+    "hereReady": "On: calls ring here",
+    "hereStarting": "Connecting…",
+    "unconfigured": "The CRM phone isn't active on the server yet",
+    "hereError": "Can't connect: reload the page",
+    "hereHint": "It needs the microphone (the browser asks on the first call) and the CRM page open. A headset works best.",
+    "device": "Device",
+    "removeDevice": "Turn this device off"
   }
 }

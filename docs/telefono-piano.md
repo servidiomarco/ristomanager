@@ -121,7 +121,32 @@ Il banner ha la fase (`stage`: ringing / sofia / staff, evento `phoneCall:update
 - chi riattacca durante lo squillo finisce in Da ricontattare;
 - annuncio corto e Gather a 6 s. Costo: circa 0,045 $/min verso cellulari italiani da numero EEA. Da provare: il passaggio del numero del cliente come caller ID.
 
-### Fase 3: softphone nel CRM (L, 2–3 PR)
+### Fase 3: softphone nel CRM
+
+**Fatta il 10/10 (una PR):**
+- **Dispositivi:** tabella `phone_devices` (chiave del browser, utente, `last_seen_at`).
+  - Rotte `GET/POST /phone/devices`, `DELETE /phone/devices/:id` e `POST /phone/token`: JWT del Voice SDK, identità `t<tenant>d<id>`, 1 ora, rinnovato su `tokenWillExpire`.
+  - In uscita solo la TwiML App `sympotia-softphone`.
+- **Modalità `prima_locale`** (sostituisce `prima_cellulare`, letta ancora):
+  - un solo `<Dial>` con i `<Client>` dei dispositivi visti negli ultimi 7 giorni (con i parametri `parentCallSid` e `caller` per il banner) e i `<Number>` con l'annuncio;
+  - `client-answered` (statusCallback «answered» del `<Client>`) segna `answered_by = utente:<id>` e manda `phoneCall:updated` col nome.
+- **«Richiama»:**
+  - `/webhook/twilio/voice/client-call`, senza token nel path: il tenant viene dall'identità firmata;
+  - escono solo i numeri `+39`, col numero del locale (l'ultimo `to_number` in arrivo);
+  - righe `direction = outbound`, `routing = richiamata`.
+- **Client** (`services/softphone.ts`):
+  - Voice SDK 2.18.4 in un chunk a parte, con import dinamico;
+  - Rispondi/Rifiuta, muto, riaggancia e Nuova prenotazione nella card «chi chiama»;
+  - interruttore «Questo dispositivo squilla» in Impostazioni › AI;
+  - «Chiama»/«Richiama» in Chiamate passano dal CRM se il telefono è acceso.
+- **Messa in linea:** `scripts/telefono-softphone.mjs --apply`, lanciato dall'utente, crea API key e TwiML App e imposta su Railway `TWILIO_API_KEY_SID`, `TWILIO_API_KEY_SECRET` (da stdin) e `TWILIO_TWIML_APP_SID`.
+- **Restano per dopo:**
+  - regole per fascia oraria e interruttore rapido «Sofia risponde adesso»;
+  - pagina del registro;
+  - nota a fine chiamata;
+  - collegamento automatico della prenotazione fatta in chiamata a `phone_calls`.
+
+**Piano originale:**
 - **Twilio Voice JS SDK** (`@twilio/voice-sdk`), con TwiML App e API key in nuove variabili `TWILIO_API_KEY_*` e `TWILIO_TWIML_APP_SID`.
 - **`POST /phone/token`:** identità `t{tenant}_u{user}_d{device}`. Il token si rilascia solo ai dispositivi con «Questo dispositivo squilla» attivo.
 - **Banner in arrivo**, con la scheda della Fase 1:

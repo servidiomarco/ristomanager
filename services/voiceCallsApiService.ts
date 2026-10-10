@@ -145,9 +145,25 @@ export interface LiveCall {
 
 /** Chi risponde al numero di Sofia (services/phoneRouting.ts sul server). */
 export interface PhoneRouting {
-  mode: 'solo_sofia' | 'prima_cellulare';
+  mode: 'solo_sofia' | 'prima_locale';
   mobiles: string[];
   ring_seconds: number;
+}
+
+export interface PhoneDevice {
+  id: number;
+  label: string | null;
+  user_id: number | null;
+  user_name: string | null;
+  last_seen_at: string;
+  /** Il dispositivo di questo browser. */
+  mine: boolean;
+}
+
+export interface PhoneDevicesResponse {
+  /** Il server ha API key e TwiML App: senza, nessun dispositivo può squillare. */
+  configured: boolean;
+  devices: PhoneDevice[];
 }
 
 export type LiveCallOutcome = 'booked' | 'callback' | 'follow_up' | 'missed' | 'answered' | 'ended';
@@ -304,6 +320,34 @@ class VoiceCallsApiService {
       method: 'PUT',
       headers: { ...getHeaders(), 'Content-Type': 'application/json' },
       body: JSON.stringify(routing),
+    });
+  }
+
+  // Softphone (Fase 3): i dispositivi del CRM che squillano.
+  async phoneDevices(deviceKey: string): Promise<PhoneDevicesResponse> {
+    return apiRequest<PhoneDevicesResponse>(`${API_URL}/phone/devices?device_key=${encodeURIComponent(deviceKey)}`, { headers: getHeaders() });
+  }
+
+  async registerPhoneDevice(deviceKey: string, label: string): Promise<{ id: number }> {
+    return apiRequest<{ id: number }>(`${API_URL}/phone/devices`, {
+      method: 'POST',
+      headers: { ...getHeaders(), 'Content-Type': 'application/json' },
+      body: JSON.stringify({ device_key: deviceKey, label }),
+    });
+  }
+
+  async deletePhoneDevice(id: number): Promise<void> {
+    const response = await fetchWithAuth(`${API_URL}/phone/devices/${id}`, { method: 'DELETE', headers: getHeaders() });
+    if (!response.ok && response.status !== 404) {
+      throw buildApiError(response.status, await response.json().catch(() => ({})));
+    }
+  }
+
+  async phoneToken(deviceKey: string): Promise<{ token: string; identity: string; ttl_seconds: number }> {
+    return apiRequest(`${API_URL}/phone/token`, {
+      method: 'POST',
+      headers: { ...getHeaders(), 'Content-Type': 'application/json' },
+      body: JSON.stringify({ device_key: deviceKey }),
     });
   }
 
