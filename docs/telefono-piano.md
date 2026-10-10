@@ -107,6 +107,15 @@ voice_fallback_url di entrambi = URL ElevenLabs di oggi: se Sympotia non rispond
 - **Messa in linea:** uno script, lanciato dall'utente, cambia il `voice_url` del 010032 e del ponte verso Sympotia e mette quello di ElevenLabs come fallback. La modalità iniziale è «Solo Sofia», cioè come oggi. Per tornare indietro basta rimettere il `voice_url` di prima.
 - **Credito ElevenLabs esaurito** (ad agosto 175 chiamate mute): quando `startElevenLabsQuotaWatchdog` segnala la quota finita, la linea prenotazioni passa da sola a «Solo locale».
 
+### Fase 3 ridotta: prima il cellulare (fatta il 10/10)
+In attesa di softphone e cordless, prima di Sofia squilla il cellulare del locale. La regola sta in Impostazioni › AI › «Chi risponde al telefono» (`app_settings.phone_routing`: `solo_sofia` | `prima_cellulare`, fino a 3 cellulari, 5–60 secondi). Il giro:
+1. `<Dial answerOnBridge callerId=010032 action=after-dial><Number url=whisper?p=…>`;
+2. l'annuncio «Chiamata per … da <nome o numero>. Premi 1»;
+3. `whisper-ok` col tasto 1 → `phone_calls.status = answered`, `answered_by = cellulare:+39…`;
+4. `after-dial` → Sofia se nessuno ha preso la chiamata.
+
+Il banner ha la fase (`stage`: ringing / sofia / staff, evento `phoneCall:updated`). Costo: circa 0,045 $/min verso cellulari italiani da numero EEA. Da provare: il passaggio del numero del cliente come caller ID.
+
 ### Fase 3: softphone nel CRM (L, 2–3 PR)
 - **Twilio Voice JS SDK** (`@twilio/voice-sdk`), con TwiML App e API key in nuove variabili `TWILIO_API_KEY_*` e `TWILIO_TWIML_APP_SID`.
 - **`POST /phone/token`:** identità `t{tenant}_u{user}_d{device}`. Il token si rilascia solo ai dispositivi con «Questo dispositivo squilla» attivo.

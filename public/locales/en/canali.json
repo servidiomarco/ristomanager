@@ -492,5 +492,21 @@
     "webOnTitle": "Web bookings on for this shift · click to block",
     "webOffTitle": "Web bookings blocked for this shift · click to unblock",
     "webAria": "Web bookings status for this shift"
+  },
+  "pr": {
+    "title": "Who answers the phone",
+    "subtitle": "Calls to Sofia's number",
+    "soloSofia": "Sofia only",
+    "primaCellulare": "Mobile first",
+    "hint": "It rings like a normal call, from Sofia's number. Whoever answers hears who is calling and presses 1; if nobody answers in time, Sofia does.",
+    "mobile": "Mobile",
+    "mobilePh": "Mobile, e.g. 347 123 4567",
+    "remove": "Remove this mobile",
+    "add": "Another mobile",
+    "ringFor": "Ring for",
+    "seconds": "seconds, then Sofia",
+    "save": "Save",
+    "saved": "Setting saved",
+    "err": "Could not save"
   }
 }

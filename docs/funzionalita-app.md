@@ -191,6 +191,11 @@ Agente conversazionale AI (ElevenLabs) che **risponde al telefono del ristorante
 - Se Sofia non è raggiungibile, il cliente sente un messaggio di cortesia («la richiameremo al più presto») invece del silenzio. La chiamata compare in Chiamate › Da ricontattare con la nota del perché, e titolare, direzione e manager ricevono la push «Chiamata persa».
 - Lo stesso vale se Sofia aggancia la chiamata ma non parla con il cliente (per esempio crediti voce finiti): dopo qualche minuto la chiamata diventa «persa» e da richiamare.
 
+**Chi risponde al telefono** (Impostazioni › AI)
+- Si sceglie se le chiamate al numero di Sofia le prende subito Sofia o se prima squilla il cellulare del locale: fino a tre cellulari, per un numero di secondi a scelta (di serie 15).
+- Il cellulare squilla come una telefonata normale, anche a schermo bloccato, dal numero di Sofia. Chi risponde sente «Chiamata per il locale da …» con il nome del cliente o il numero, e preme 1 per prenderla. Se nessuno risponde in tempo, o se risponde la segreteria, la chiamata passa a Sofia.
+- Nel CRM la card «chi chiama» segue la chiamata: «Squilla il cellulare del locale», poi «In linea col locale» o «Sofia sta parlando con…».
+
 **Sezione Chiamate nel CRM**
 - Elenco chiamate con schede Tutte / Da ricontattare / Ricontattati / Con prenotazione.
 - Per ogni chiamata: **riassunto AI, trascrizione completa, registrazione audio** riascoltabile, durata, esito.
@@ -868,6 +873,7 @@ Pagina unica a blocchi, con chip-àncora per saltare alla sezione e una **ricerc
 
 | Data | Sezione | Modifica |
 |---|---|---|
+| 2026-10-10 | Agente vocale "Sofia", Impostazioni | Nuovo **Chi risponde al telefono** in Impostazioni › AI: prima di Sofia può squillare il cellulare del locale (fino a tre, per i secondi scelti). Chi risponde sente chi chiama e preme 1; se nessuno risponde, la chiamata passa a Sofia. La card «chi chiama» mostra se squilla il cellulare, se è in linea col locale o con Sofia. |
 | 2026-10-10 | Agente vocale "Sofia" (Piattaforma) | Sympotia può stare davanti al numero di Sofia: registro di ogni chiamata, Sofia agganciata con register-call, messaggio di cortesia e «Chiamata persa» in Chiamate quando Sofia non risponde o resta muta. Spento finché il numero non viene collegato con `scripts/telefono-linea.mjs`. |
 | 2026-10-10 | Agente vocale "Sofia" | **Chi chiama, mentre Sofia parla**: appena Sofia risponde, in alto a destra compare il cliente al telefono con VIP, allergie, no-show, visite e prossime prenotazioni; un tocco apre la scheda o la prenotazione. A chiamata finita la card mostra l'esito, poi sparisce. L'avviso sonoro si silenzia dalla campanella della card. |
 | 2026-10-10 | Attività, Impostazioni, Menu & Banchetti | Nuova sezione **Attività programmate** in Impostazioni: si creano, cambiano ed eliminano le attività che compaiono da sole in Attività — prima di ogni banchetto, ricorrenti o una volta — scegliendo giorno, ora, squadra e priorità, con {data}, {coperti}, {banchetti} e {quantità} nel testo. «Ordinare merce» dei banchetti e il pane ora sono qui e si possono cambiare. Le attività dei banchetti compaiono il giorno stabilito invece che mesi prima; per un banchetto inserito in ritardo compare solo l'ultima finestra, e quelle già spuntate non ricompaiono più dopo un aggiornamento o una modifica del banchetto. Le attività si possono assegnare anche a Reception, General Manager e Cassa. |

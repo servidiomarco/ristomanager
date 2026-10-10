@@ -205,8 +205,8 @@ import {
     formatItalianDateReadback,
     spellItalianPhoneDigits,
 } from './services/elevenlabsService.js';
-import { buildCallerCard, addLiveCall, removeLiveCall, listLiveCalls, findRecentLiveCall, type LiveCall, type CallerCard } from './services/liveCalls.js';
-import { registerSofiaCall, unavailableTwiml, type SofiaInitData } from './services/phoneRouting.js';
+import { buildCallerCard, addLiveCall, removeLiveCall, listLiveCalls, findRecentLiveCall, updateLiveCallStage, type LiveCall, type LiveCallStage, type CallerCard } from './services/liveCalls.js';
+import { registerSofiaCall, unavailableTwiml, twimlResponse, dialMobilesTwiml, whisperTwiml, DEFAULT_PHONE_ROUTING, PHONE_ROUTING_MAX_MOBILES, PHONE_ROUTING_RING_MIN, PHONE_ROUTING_RING_MAX, type SofiaInitData, type PhoneRouting } from './services/phoneRouting.js';
 import {
     ROOM_OCCUPANCY_CAPS_KEY,
     RoomOccupancyCap,
@@ -1519,7 +1519,7 @@ function sofiaCallerIdRaw(body: any): string {
     ).trim();
 }
 
-async function announceSofiaCallStarted(tenantId: number, body: any): Promise<CallerCard | null> {
+async function announceSofiaCallStarted(tenantId: number, body: any, stage: LiveCallStage = 'sofia'): Promise<CallerCard | null> {
     try {
         if (!(await isFeatureEnabledForTenant(tenantId, 'voice'))) return null;
         const callSid = String(body?.call_sid ?? body?.dynamic_variables?.system__call_sid ?? '').trim() || null;
@@ -1533,6 +1533,7 @@ async function announceSofiaCallStarted(tenantId: number, body: any): Promise<Ca
         const call: LiveCall = {
             id: callSid || `sofia:${phone}:${Date.now()}`,
             channel: 'sofia',
+            stage,
             call_sid: callSid,
             phone,
             started_at: new Date().toISOString(),
@@ -2439,6 +2440,66 @@ async function recordMissedPhoneCall(tenantId: number, callSid: string, fromNumb
     }
 }
 
+// --- Regola del giro: solo Sofia, o prima il cellulare del locale ---------
+const PHONE_ROUTING_KEY = 'phone_routing';
+
+async function getPhoneRouting(tenantId: number): Promise<PhoneRouting> {
+    try {
+        const result = await queryWithRetry(
+            'SELECT text_value FROM app_settings WHERE tenant_id = $1 AND key = $2',
+            [tenantId, PHONE_ROUTING_KEY]
+        );
+        const raw = result.rows[0]?.text_value;
+        if (typeof raw !== 'string' || !raw) return DEFAULT_PHONE_ROUTING;
+        const parsed = JSON.parse(raw);
+        return {
+            mode: parsed.mode === 'prima_cellulare' ? 'prima_cellulare' : 'solo_sofia',
+            mobiles: Array.isArray(parsed.mobiles) ? parsed.mobiles.filter((m: unknown) => typeof m === 'string' && e164OrEmpty(m)) : [],
+            ring_seconds: Number.isInteger(parsed.ring_seconds) ? parsed.ring_seconds : DEFAULT_PHONE_ROUTING.ring_seconds,
+        };
+    } catch (err) {
+        // Una regola illeggibile non deve lasciare il telefono muto: Sofia.
+        console.error('[Telefono] regola del giro illeggibile, rispondo con Sofia:', err);
+        return DEFAULT_PHONE_ROUTING;
+    }
+}
+
+// Gli URL dei passaggi successivi stanno sotto lo stesso path col token:
+// Twilio li firma interi, query compresa.
+const voiceStepUrl = (req: express.Request, step: string, parentSid?: string): string =>
+    `${req.protocol}://${req.get('host')}/webhook/t/${req.params.tenantToken}/voice/${step}`
+    + (parentSid ? `?p=${encodeURIComponent(parentSid)}` : '');
+
+/** Passa la chiamata a Sofia con register-call. Se non si aggancia, il
+ *  chiamante sente il messaggio di cortesia e la chiamata risulta persa. */
+async function connectPhoneCallToSofia(
+    tenantId: number, res: express.Response,
+    call: { callSid: string; caller: string; fromRaw: string; to: string },
+    announced: Promise<unknown>,
+): Promise<void> {
+    const businessName = businessIdentity(tenantId).voiceName;
+    try {
+        const init = await buildSofiaInitData(tenantId, call.caller);
+        // from_number diventa system__caller_id, che gli strumenti di Sofia
+        // usano come telefono della prenotazione: va il numero vero.
+        const twiml = await registerSofiaCall({ from: call.caller || call.fromRaw, to: call.to || call.fromRaw, init });
+        await queryWithRetry(
+            `UPDATE phone_calls SET status = 'sofia', answered_at = NOW() WHERE call_sid = $1 AND tenant_id = $2`,
+            [call.callSid, tenantId]
+        );
+        res.type('text/xml').send(twiml);
+        void announced.then(() => {
+            const live = updateLiveCallStage(tenantId, call.callSid, 'sofia');
+            if (live) socketService?.broadcastToRolesRoom(tenantId, PHONE_BANNER_ROLES, 'phoneCall:updated', { id: live.id, stage: live.stage });
+        });
+    } catch (err: any) {
+        console.error('[Telefono] Sofia non agganciata:', err?.message || err);
+        void recordAppError(tenantId, 'sofia', 'register-call', err);
+        res.type('text/xml').send(unavailableTwiml(businessName));
+        void announced.then(() => recordMissedPhoneCall(tenantId, call.callSid, call.caller, 'sofia_non_disponibile'));
+    }
+}
+
 async function handleTwilioVoiceInbound(tenantId: number, req: express.Request, res: express.Response): Promise<void> {
     if (!validateTwilioSignature(req)) {
         console.warn('[Telefono] inbound: firma Twilio non valida');
@@ -2455,18 +2516,22 @@ async function handleTwilioVoiceInbound(tenantId: number, req: express.Request, 
         return;
     }
 
+    const voiceOn = await isFeatureEnabledForTenant(tenantId, 'voice');
+    const routing = voiceOn ? await getPhoneRouting(tenantId) : DEFAULT_PHONE_ROUTING;
+    const ringMobiles = routing.mode === 'prima_cellulare' && routing.mobiles.length > 0 && !!to;
+
     // Il registro per primo: anche se Sofia fallisce, la chiamata resta.
     await queryWithRetry(
         `INSERT INTO phone_calls (tenant_id, call_sid, from_number, to_number, routing)
-         VALUES ($1, $2, $3, $4, 'solo_sofia')
+         VALUES ($1, $2, $3, $4, $5)
          ON CONFLICT (call_sid) DO NOTHING`,
-        [tenantId, callSid, caller || fromRaw || null, to || null]
+        [tenantId, callSid, caller || fromRaw || null, to || null, ringMobiles ? 'prima_cellulare' : 'solo_sofia']
     );
     // Il banner in parallelo: la scheda non deve rallentare la risposta. Una
     // chiamata persa si chiude solo dopo che il banner è aperto, o la card
     // resterebbe su «Sofia sta parlando» (ElevenLabs può fallire prima che
     // la scheda sia pronta).
-    const announced = announceSofiaCallStarted(tenantId, { caller_id: caller, call_sid: callSid }).catch(() => null);
+    const announced = announceSofiaCallStarted(tenantId, { caller_id: caller, call_sid: callSid }, ringMobiles ? 'ringing' : 'sofia').catch(() => null);
     void announced.then(card => {
         if (!card?.customer) return;
         return queryWithRetry(
@@ -2475,29 +2540,108 @@ async function handleTwilioVoiceInbound(tenantId: number, req: express.Request, 
         ).then(() => undefined);
     }).catch(() => {});
 
-    const businessName = businessIdentity(tenantId).voiceName;
-    if (!(await isFeatureEnabledForTenant(tenantId, 'voice'))) {
-        res.type('text/xml').send(unavailableTwiml(businessName));
+    if (!voiceOn) {
+        res.type('text/xml').send(unavailableTwiml(businessIdentity(tenantId).voiceName));
         void announced.then(() => recordMissedPhoneCall(tenantId, callSid, caller, 'voce_non_attiva'));
         return;
     }
 
-    try {
-        const init = await buildSofiaInitData(tenantId, caller);
-        // from_number diventa system__caller_id, che gli strumenti di Sofia
-        // usano come telefono della prenotazione: va il numero vero.
-        const twiml = await registerSofiaCall({ from: caller || fromRaw, to: to || fromRaw, init });
-        await queryWithRetry(
-            `UPDATE phone_calls SET status = 'sofia', answered_at = NOW() WHERE call_sid = $1 AND tenant_id = $2`,
-            [callSid, tenantId]
-        );
-        res.type('text/xml').send(twiml);
-    } catch (err: any) {
-        console.error('[Telefono] Sofia non agganciata:', err?.message || err);
-        void recordAppError(tenantId, 'sofia', 'register-call', err);
-        res.type('text/xml').send(unavailableTwiml(businessName));
-        void announced.then(() => recordMissedPhoneCall(tenantId, callSid, caller, 'sofia_non_disponibile'));
+    if (ringMobiles) {
+        res.type('text/xml').send(dialMobilesTwiml({
+            mobiles: routing.mobiles,
+            ringSeconds: routing.ring_seconds,
+            callerId: to,
+            afterDialUrl: voiceStepUrl(req, 'after-dial'),
+            whisperUrl: voiceStepUrl(req, 'whisper', callSid),
+        }));
+        return;
     }
+
+    await connectPhoneCallToSofia(tenantId, res, { callSid, caller, fromRaw, to }, announced);
+}
+
+// Fine dello squillo ai cellulari: se qualcuno ha premuto 1 la chiamata è
+// già sua (e qui arriva a conversazione finita), altrimenti Sofia.
+async function handleTwilioVoiceAfterDial(tenantId: number, req: express.Request, res: express.Response): Promise<void> {
+    if (!validateTwilioSignature(req)) {
+        res.status(403).send();
+        return;
+    }
+    const callSid = String(req.body?.CallSid || '');
+    const found = await queryWithRetry(
+        `SELECT status, from_number, to_number FROM phone_calls WHERE call_sid = $1 AND tenant_id = $2`,
+        [callSid, tenantId]
+    );
+    const row = found.rows[0];
+    if (!row) {
+        res.type('text/xml').send(twimlResponse('<Hangup/>'));
+        return;
+    }
+    if (row.status === 'answered') {
+        res.type('text/xml').send(twimlResponse('<Hangup/>'));
+        return;
+    }
+    const fromRaw = String(row.from_number || req.body?.From || '');
+    await connectPhoneCallToSofia(
+        tenantId, res,
+        { callSid, caller: e164OrEmpty(fromRaw), fromRaw, to: e164OrEmpty(row.to_number) },
+        Promise.resolve(),
+    );
+}
+
+// Il cellulare ha risposto: prima di collegarlo, chi chiama e «premi 1».
+async function handleTwilioVoiceWhisper(tenantId: number, req: express.Request, res: express.Response): Promise<void> {
+    if (!validateTwilioSignature(req)) {
+        res.status(403).send();
+        return;
+    }
+    const parentSid = String(req.query.p || '');
+    const found = await queryWithRetry(
+        `SELECT pc.from_number, c.name AS customer_name
+         FROM phone_calls pc
+         LEFT JOIN customers c ON c.id = pc.customer_id AND c.tenant_id = pc.tenant_id
+         WHERE pc.call_sid = $1 AND pc.tenant_id = $2`,
+        [parentSid, tenantId]
+    );
+    const row = found.rows[0];
+    const name = String(row?.customer_name || '').trim();
+    const phone = e164OrEmpty(row?.from_number);
+    // Il numero si legge a cifre, come lo dice Sofia: «tre quattro sette…».
+    const who = name || (phone ? `il numero ${spellItalianPhoneDigits(phone)}` : 'un numero nascosto');
+    res.type('text/xml').send(whisperTwiml({
+        announce: `Chiamata per ${businessIdentity(tenantId).voiceName} da ${who}. Premi 1 per rispondere.`,
+        confirmUrl: voiceStepUrl(req, 'whisper-ok', parentSid),
+    }));
+}
+
+// «1» premuto: la chiamata è del cellulare. Altro tasto: la gamba si chiude
+// e, finito lo squillo, la chiamata passa a Sofia.
+async function handleTwilioVoiceWhisperOk(tenantId: number, req: express.Request, res: express.Response): Promise<void> {
+    if (!validateTwilioSignature(req)) {
+        res.status(403).send();
+        return;
+    }
+    const parentSid = String(req.query.p || '');
+    if (String(req.body?.Digits || '') !== '1') {
+        res.type('text/xml').send(twimlResponse('<Hangup/>'));
+        return;
+    }
+    const answeredBy = `cellulare:${e164OrEmpty(req.body?.To) || 'sconosciuto'}`;
+    const taken = await queryWithRetry(
+        `UPDATE phone_calls SET status = 'answered', answered_at = NOW(), answered_by = $3
+         WHERE call_sid = $1 AND tenant_id = $2 AND status = 'ringing'
+         RETURNING id`,
+        [parentSid, tenantId, answeredBy]
+    );
+    if (!taken.rowCount) {
+        // Un altro cellulare ha già preso la chiamata, o è già con Sofia.
+        res.type('text/xml').send(twimlResponse('<Say language="it-IT">La chiamata è già stata presa.</Say><Hangup/>'));
+        return;
+    }
+    // TwiML vuoto: finito l'annuncio, Twilio collega il cellulare al cliente.
+    res.type('text/xml').send(twimlResponse(''));
+    const live = updateLiveCallStage(tenantId, parentSid, 'staff');
+    if (live) socketService?.broadcastToRolesRoom(tenantId, PHONE_BANNER_ROLES, 'phoneCall:updated', { id: live.id, stage: live.stage });
 }
 
 // Fine chiamata (status callback del numero): durata, e il controllo delle
@@ -2527,6 +2671,18 @@ async function handleTwilioVoiceStatus(tenantId: number, req: express.Request, r
             `UPDATE phone_calls SET status = 'missed', missed_reason = 'riattaccata' WHERE call_sid = $1 AND tenant_id = $2 AND status = 'ringing'`,
             [callSid, tenantId]
         );
+        removeLiveCall(tenantId, { callSid });
+        socketService?.broadcastToRolesRoom(tenantId, PHONE_BANNER_ROLES, 'phoneCall:ended', {
+            id: callSid, call_sid: callSid, phone: e164OrEmpty(row.from_number) || null, outcome: 'ended', voice_call_id: null, reservation: null,
+        });
+        return;
+    }
+    // Ha risposto il locale: non c'è un post-call di Sofia a chiudere il banner.
+    if (row.status === 'answered') {
+        removeLiveCall(tenantId, { callSid });
+        socketService?.broadcastToRolesRoom(tenantId, PHONE_BANNER_ROLES, 'phoneCall:ended', {
+            id: callSid, call_sid: callSid, phone: e164OrEmpty(row.from_number) || null, outcome: 'answered', voice_call_id: null, reservation: null,
+        });
         return;
     }
     if (row.status === 'sofia' && !row.voice_call_id) {
@@ -2537,15 +2693,56 @@ async function handleTwilioVoiceStatus(tenantId: number, req: express.Request, r
     }
 }
 
-app.post('/webhook/t/:tenantToken/voice/inbound', twilioUrlEncoded, async (req, res) => {
-    const tenantId = await resolveWebhookTenantOr404(req, res);
-    if (tenantId == null) return;
-    await runWithTenantContext(tenantId, () => handleTwilioVoiceInbound(tenantId, req, res));
+const voiceRoute = (step: string, handler: (tenantId: number, req: express.Request, res: express.Response) => Promise<void>) => {
+    app.post(`/webhook/t/:tenantToken/voice/${step}`, twilioUrlEncoded, async (req, res) => {
+        const tenantId = await resolveWebhookTenantOr404(req, res);
+        if (tenantId == null) return;
+        await runWithTenantContext(tenantId, () => handler(tenantId, req, res));
+    });
+};
+voiceRoute('inbound', handleTwilioVoiceInbound);
+voiceRoute('after-dial', handleTwilioVoiceAfterDial);
+voiceRoute('whisper', handleTwilioVoiceWhisper);
+voiceRoute('whisper-ok', handleTwilioVoiceWhisperOk);
+voiceRoute('status', handleTwilioVoiceStatus);
+
+// Regola del giro nelle Impostazioni (card «Chi risponde al telefono»).
+app.get('/settings/phone-routing', authenticate, requireFeature('voice'), async (req, res) => {
+    res.json(await getPhoneRouting(req.tenantId!));
 });
-app.post('/webhook/t/:tenantToken/voice/status', twilioUrlEncoded, async (req, res) => {
-    const tenantId = await resolveWebhookTenantOr404(req, res);
-    if (tenantId == null) return;
-    await runWithTenantContext(tenantId, () => handleTwilioVoiceStatus(tenantId, req, res));
+
+app.put('/settings/phone-routing', authenticate, requireFeature('voice'), requirePermission('settings:full'), async (req, res) => {
+    const body = req.body ?? {};
+    const mode = body.mode === 'prima_cellulare' ? 'prima_cellulare' : body.mode === 'solo_sofia' ? 'solo_sofia' : null;
+    if (!mode) return res.status(400).json({ error: 'invalid_value', message: 'mode deve essere solo_sofia o prima_cellulare' });
+    const ring = Number(body.ring_seconds);
+    if (!Number.isInteger(ring) || ring < PHONE_ROUTING_RING_MIN || ring > PHONE_ROUTING_RING_MAX) {
+        return res.status(400).json({ error: 'invalid_value', message: `ring_seconds fra ${PHONE_ROUTING_RING_MIN} e ${PHONE_ROUTING_RING_MAX}` });
+    }
+    const rawMobiles: unknown[] = Array.isArray(body.mobiles) ? body.mobiles : [];
+    const mobiles: string[] = [];
+    for (const m of rawMobiles) {
+        const raw = String(m ?? '').trim();
+        if (!raw) continue;
+        const e164 = e164OrEmpty(normalizeItalianPhone(raw));
+        if (!e164) return res.status(400).json({ error: 'invalid_value', message: `Numero non valido: ${raw}` });
+        if (!mobiles.includes(e164)) mobiles.push(e164);
+    }
+    if (mobiles.length > PHONE_ROUTING_MAX_MOBILES) {
+        return res.status(400).json({ error: 'invalid_value', message: `Al massimo ${PHONE_ROUTING_MAX_MOBILES} cellulari` });
+    }
+    if (mode === 'prima_cellulare' && mobiles.length === 0) {
+        return res.status(400).json({ error: 'invalid_value', message: 'Serve almeno un cellulare' });
+    }
+    const routing: PhoneRouting = { mode, mobiles, ring_seconds: ring };
+    await queryWithRetry(
+        `INSERT INTO app_settings (tenant_id, key, text_value, updated_at)
+         VALUES ($1, $2, $3, CURRENT_TIMESTAMP)
+         ON CONFLICT (tenant_id, key) DO UPDATE
+           SET text_value = EXCLUDED.text_value, updated_at = CURRENT_TIMESTAMP`,
+        [req.tenantId!, PHONE_ROUTING_KEY, JSON.stringify(routing)]
+    );
+    res.json(routing);
 });
 
 // ============================================

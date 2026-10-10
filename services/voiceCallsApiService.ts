@@ -130,16 +130,27 @@ export interface CallerCard {
   }[];
 }
 
+export type LiveCallStage = 'ringing' | 'sofia' | 'staff';
+
 export interface LiveCall {
   id: string;
   channel: 'sofia';
+  /** Assente dai server precedenti alla Fase 3: leggerlo come 'sofia'. */
+  stage?: LiveCallStage;
   call_sid: string | null;
   phone: string;
   started_at: string;
   card: CallerCard;
 }
 
-export type LiveCallOutcome = 'booked' | 'callback' | 'follow_up' | 'missed' | 'ended';
+/** Chi risponde al numero di Sofia (services/phoneRouting.ts sul server). */
+export interface PhoneRouting {
+  mode: 'solo_sofia' | 'prima_cellulare';
+  mobiles: string[];
+  ring_seconds: number;
+}
+
+export type LiveCallOutcome = 'booked' | 'callback' | 'follow_up' | 'missed' | 'answered' | 'ended';
 
 export interface LiveCallEnded {
   id: string | null;
@@ -281,6 +292,18 @@ class VoiceCallsApiService {
   async live(): Promise<{ calls: LiveCall[] }> {
     return apiRequest<{ calls: LiveCall[] }>(`${API_URL}/phone/live`, {
       headers: getHeaders(),
+    });
+  }
+
+  async phoneRouting(): Promise<PhoneRouting> {
+    return apiRequest<PhoneRouting>(`${API_URL}/settings/phone-routing`, { headers: getHeaders() });
+  }
+
+  async updatePhoneRouting(routing: PhoneRouting): Promise<PhoneRouting> {
+    return apiRequest<PhoneRouting>(`${API_URL}/settings/phone-routing`, {
+      method: 'PUT',
+      headers: { ...getHeaders(), 'Content-Type': 'application/json' },
+      body: JSON.stringify(routing),
     });
   }
 
