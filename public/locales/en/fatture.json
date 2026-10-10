@@ -100,8 +100,11 @@
   },
   "fornitoreCollegato": "Supplier linked",
   "ignora": "Skip",
-  "ignoraAltre": "Skip the {{n}} to match",
-  "ignoraAltreTitolo": "Skip {{n}} lines",
+  "ignoraDaAbbinare_one": "Skip the line to match",
+  "ignoraDaAbbinare_other": "Skip the {{count}} to match",
+  "ignoraNota": "Lines already matched stay as they are. Future invoices skip these on their own.",
+  "ignoraTitolo_one": "Skip one line",
+  "ignoraTitolo_other": "Skip {{count}} lines",
   "indietro": "Invoices",
   "invio": "{{fatti}} of {{totali}}",
   "iva": "VAT {{iva}}",
@@ -150,6 +153,7 @@
     "spesa": "extra charge"
   },
   "titolo": "Supplier invoices",
+  "toccaRiga": "Tap a line to match it or skip it.",
   "vuoto": {
     "altre": "No invoices here.",
     "daControllare": "No invoices to review. Upload the XML, p7m or the accountant's zip."

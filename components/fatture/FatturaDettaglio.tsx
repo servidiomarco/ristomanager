@@ -331,10 +331,10 @@ export const FatturaDettaglio: React.FC<Props> = ({ id, onBack, showToast }) => 
         <section className="space-y-2">
           <SectionHeader
             meta={merce.length}
-            action={aperto && !f.notaDiCredito && daDecidere.length > 1 ? (
+            action={aperto && !f.notaDiCredito && daDecidere.length > 0 ? (
               <button type="button" className="text-[14px] font-medium text-[var(--ds-text-secondary)] hover:text-[var(--ds-text-primary)]"
                 onClick={() => setIgnoraAltre(true)}>
-                {t('ignoraAltre', 'Ignora le {{n}} da abbinare', { n: daDecidere.length })}
+                {t('ignoraDaAbbinare', 'Ignora le {{count}} da abbinare', { count: daDecidere.length })}
               </button>
             ) : undefined}
           >
@@ -415,14 +415,30 @@ export const FatturaDettaglio: React.FC<Props> = ({ id, onBack, showToast }) => 
               </Field>
             ))}
             <div className="flex min-w-0 flex-1 flex-col gap-2 sm:flex-row sm:items-center sm:justify-end sm:gap-3">
-              <span className="text-[13px] text-[var(--ds-text-muted)]">
-                {daDecidere.length > 0
-                  ? t('mancano', 'Mancano {{count}} righe', { count: daDecidere.length })
-                  : [
-                      inMagazzino.length > 0 ? t('riepilogo.carico', '{{count}} in magazzino', { count: inMagazzino.length }) : null,
-                      merce.length > inMagazzino.length ? t('riepilogo.ignorate', '{{count}} ignorate', { count: merce.length - inMagazzino.length }) : null,
-                    ].filter(Boolean).join(' · ')}
+              {/* Il tasto spento da solo non dice perché: qui si legge cosa
+                  manca e, accanto, l'uscita per le righe che non vanno in
+                  magazzino (al primo cash & carry sono quasi tutte). */}
+              <span className="min-w-0 text-[13px] text-[var(--ds-text-muted)]">
+                {daDecidere.length > 0 ? (
+                  <>
+                    <span className="font-medium text-[var(--ds-pending-text)]">
+                      {t('mancano', 'Mancano {{count}} righe', { count: daDecidere.length })}
+                    </span>
+                    {'. '}
+                    {t('toccaRiga', 'Tocca una riga per abbinarla o ignorarla.')}
+                  </>
+                ) : [
+                    inMagazzino.length > 0 ? t('riepilogo.carico', '{{count}} in magazzino', { count: inMagazzino.length }) : null,
+                    merce.length > inMagazzino.length ? t('riepilogo.ignorate', '{{count}} ignorate', { count: merce.length - inMagazzino.length }) : null,
+                  ].filter(Boolean).join(' · ')}
               </span>
+              {daDecidere.length > 0 && (
+                <button type="button" onClick={() => setIgnoraAltre(true)} disabled={lavoro != null}
+                  className={`${dsButton.secondary} w-full whitespace-nowrap sm:w-auto`}>
+                  <Ban className="h-4 w-4" aria-hidden />
+                  {t('ignoraDaAbbinare', 'Ignora le {{count}} da abbinare', { count: daDecidere.length })}
+                </button>
+              )}
               <button type="button" onClick={caricaInMagazzino} className={`${dsButton.primary} w-full whitespace-nowrap sm:w-auto`}
                 disabled={daDecidere.length > 0 || lavoro != null || areeDelCarico.some(a => !celleScelte[a])}>
                 {lavoro === 'carica' ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> : <PackageCheck className="h-4 w-4" aria-hidden />}
@@ -448,7 +464,7 @@ export const FatturaDettaglio: React.FC<Props> = ({ id, onBack, showToast }) => 
       <ModalShell
         open={ignoraAltre}
         onClose={() => setIgnoraAltre(false)}
-        title={t('ignoraAltreTitolo', 'Ignora {{n}} righe', { n: daDecidere.length })}
+        title={t('ignoraTitolo', 'Ignora {{count}} righe', { count: daDecidere.length })}
         size="sm"
         closeOnEscape
         bodyClassName="p-5"
@@ -459,7 +475,7 @@ export const FatturaDettaglio: React.FC<Props> = ({ id, onBack, showToast }) => 
           </button>
         }
       >
-        <Field label={t('abbina.categoria', 'Conta nella spesa come')}>
+        <Field label={t('abbina.categoria', 'Conta nella spesa come')} hint={t('ignoraNota', 'Le righe già abbinate restano come sono. Le prossime fatture le ignorano da sole.')}>
           <div className="flex flex-wrap gap-2">
             {CATEGORIE_SPESA.map(c => (
               <button key={c.value} type="button" onClick={() => setCategoriaAltre(c.value)} aria-pressed={categoriaAltre === c.value}
