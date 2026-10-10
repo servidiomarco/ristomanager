@@ -1298,6 +1298,13 @@ body {
    than the phone. */
 .ds-select-sm { padding-right: 1.875rem; background-position: right 0.625rem center; }
 
+/* Ricerca in Impostazioni (components/settingsSearch.ts). Le card che non
+   corrispondono si nascondono con un attributo e !important: l'attributo
+   `hidden` perderebbe contro le classi `flex`/`grid` delle card. Lo stile
+   della parola evidenziata (::highlight) lo inserisce il modulo stesso:
+   l'ottimizzatore CSS della build non conosce quello pseudo-elemento. */
+[data-imp-nascosto] { display: none !important; }
+
 /* Native date inputs: Android/iOS give the field an intrinsic min-width and
    generous internal chrome, so inside narrow two-column grids (~360px CSS
    viewports) the value gets clipped mid-digit. Trim padding and the picker

@@ -82,5 +82,7 @@
   "save": "Salva",
   "add": "Aggiungi",
   "addDetails": "Aggiungi dettagli…",
-  "todos": "Attività"
+  "todos": "Attività",
+  "scheduled": "Programmata",
+  "scheduledHint": "Nata da un'attività programmata: si cambia in Impostazioni"
 }

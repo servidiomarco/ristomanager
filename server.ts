@@ -308,6 +308,7 @@ import {
     type ServiceOpen,
 } from './utils/leavePlan.js';
 import { formatMoneyMinor } from './utils/money.js';
+import { createScheduledTasksRouter, scheduledTasksTick, syncBanquetScheduledTasks, TODO_FULL_SELECT, type ScheduledTaskDeps } from './services/scheduledTasks.js';
 import { createHaccpRouter, haccpSensorWatchTick, runHaccpExpiryReminder, runHaccpMissingReminder, type HaccpDeps } from './services/haccpRoutes.js';
 import { createFoodCostRouter } from './services/foodCostRoutes.js';
 import { createFattureFornitoriRouter } from './services/fattureFornitoriRoutes.js';
@@ -17042,30 +17043,15 @@ app.delete('/dishes/:id', authenticate, requirePermission('menu:full'), async (r
 
 
 // ============================================
-// BANQUET KITCHEN REMINDER TODOS
+// ATTIVITÀ PROGRAMMATE (ex promemoria cucina dei banchetti e pane)
 // ============================================
-const BANQUET_REMINDER_WINDOWS = [72, 48, 24] as const;
-
-const TODO_FULL_SELECT = `
-    id,
-    title,
-    description,
-    completed,
-    priority,
-    category,
-    TO_CHAR(due_date, 'YYYY-MM-DD') as "dueDate",
-    created_at as "createdAt",
-    completed_at as "completedAt",
-    linked_reservation_id as "linkedReservationId",
-    linked_banquet_ids as "linkedBanquetIds",
-    banquet_reminder_hours as "banquetReminderHours",
-    auto_kind as "autoKind",
-    assigned_to_user_id as "assignedToUserId",
-    assigned_to_user_name as "assignedToUserName",
-    assigned_to_team as "assignedToTeam",
-    created_by_user_id as "createdByUserId",
-    created_by_user_name as "createdByUserName"
-`;
+// Le attività che nascono da sole in Attività — «Ordinare merce» prima dei
+// banchetti, il pane, quelle che il ristorante si crea — stanno in
+// services/scheduledTasks.ts e si configurano in Impostazioni › Attività
+// programmate. Fino all'ottobre 2026 erano scritte qui (72/48/24 h prima di
+// ogni banchetto, alla Cucina; il pane alle 20 al Titolare). Qui restano i
+// tag delle campanelle, anche quelli delle attività nate prima del modulo.
+const BREAD_AUTO_KIND = 'BREAD_DAILY';
 
 // Le campanelle nate da un todo, per spegnerle quando il todo è svolto o
 // eliminato: il promemoria cucina dei banchetti, il promemoria pane e il
@@ -17083,138 +17069,27 @@ function todoNotificationTags(todo: {
     return tags;
 }
 
-const computeReminderDueDate = (eventDateIso: string, hoursBefore: number): string => {
-    const event = new Date(eventDateIso + 'T00:00:00Z');
-    event.setUTCDate(event.getUTCDate() - hoursBefore / 24);
-    return event.toISOString().substring(0, 10);
+const scheduledTaskDeps: ScheduledTaskDeps = {
+    pushToRoles: (tenantId, roles, push) => pushSendToRoles(tenantId, roles, push),
+    markNotificationsRead: (tenantId, tags) => markSharedNotificationsRead(tenantId, tags),
+    broadcast: (tenantId, event, data) => { socketService?.broadcastToAll(tenantId, event, data); },
 };
 
-const formatItalianDateLong = (iso: string): string => {
-    try {
-        const d = new Date(iso + 'T00:00:00');
-        return d.toLocaleDateString('it-IT', { day: '2-digit', month: 'long', year: 'numeric' });
-    } catch { return iso; }
+// Il banchetto è nato, cambiato o sparito: le sue attività programmate lo
+// seguono. In sottofondo, come prima: il salvataggio del banchetto non le
+// aspetta. `catchUp` quando il banchetto può aver appena guadagnato
+// un'attività già scoccata (nuovo, data spostata, confermato).
+const syncBanquetTasks = (tenantId: number, banquetId: number, catchUp: boolean): void => {
+    syncBanquetScheduledTasks(scheduledTaskDeps, tenantId, banquetId, { catchUp }).catch(err =>
+        console.error(`[attivita-programmate] banchetto ${banquetId}:`, err?.message || err));
 };
-
-const buildReminderTitle = (eventDate: string, hoursBefore: number): string =>
-    `Ordinare merce — banchetti del ${formatItalianDateLong(eventDate)} (${hoursBefore}h prima)`;
-
-const buildReminderDescription = (eventDate: string): string =>
-    `Ricorda di ordinare la merce necessaria per i banchetti programmati il ${formatItalianDateLong(eventDate)}.`;
-
-const reminderPriority = (hoursBefore: number): 'LOW' | 'MEDIUM' | 'HIGH' => {
-    if (hoursBefore <= 24) return 'HIGH';
-    if (hoursBefore <= 48) return 'MEDIUM';
-    return 'LOW';
-};
-
-// tenantId arriva dal chiamante: req.tenantId! nelle route dei banchetti,
-// la tenant_id della riga banquet_menus nel backfill di boot. Senza questo
-// il reminder cucina di un ristorante aggregherebbe i banchetti dell'altro.
-async function addBanquetToReminders(tenantId: number, banquetId: number, eventDate: string): Promise<void> {
-    for (const hours of BANQUET_REMINDER_WINDOWS) {
-        const dueDate = computeReminderDueDate(eventDate, hours);
-
-        const existing = await queryWithRetry(`
-            SELECT ${TODO_FULL_SELECT}
-            FROM todos
-            WHERE tenant_id = $3
-              AND banquet_reminder_hours = $1
-              AND due_date = $2
-              AND assigned_to_team = 'KITCHEN'
-              AND completed = false
-            LIMIT 1
-        `, [hours, dueDate, tenantId]);
-
-        if (existing.rows.length > 0) {
-            const todo = existing.rows[0];
-            const ids: number[] = Array.isArray(todo.linkedBanquetIds) ? todo.linkedBanquetIds : [];
-            if (ids.includes(banquetId)) continue;
-            const newIds = [...ids, banquetId];
-            const updated = await queryWithRetry(`
-                UPDATE todos
-                SET linked_banquet_ids = $1, title = $2, description = $3
-                WHERE id = $4 AND tenant_id = $5
-                RETURNING ${TODO_FULL_SELECT}
-            `, [newIds, buildReminderTitle(eventDate, hours), buildReminderDescription(eventDate), todo.id, tenantId]);
-            if (socketService && updated.rows[0]) socketService.broadcastToAll(tenantId, 'todo:updated', updated.rows[0]);
-        } else {
-            const created = await queryWithRetry(`
-                INSERT INTO todos (
-                    tenant_id, title, description, priority, category, due_date,
-                    assigned_to_team, linked_banquet_ids, banquet_reminder_hours
-                ) VALUES ($8, $1, $2, $3, $4, $5, 'KITCHEN', $6, $7)
-                RETURNING ${TODO_FULL_SELECT}
-            `, [
-                buildReminderTitle(eventDate, hours),
-                buildReminderDescription(eventDate),
-                reminderPriority(hours),
-                'INVENTORY',
-                dueDate,
-                [banquetId],
-                hours,
-                tenantId,
-            ]);
-            if (socketService && created.rows[0]) socketService.broadcastToAll(tenantId, 'todo:created', created.rows[0]);
-            if (created.rows[0]) {
-                pushSendToRoles(
-                    tenantId,
-                    ['KITCHEN'],
-                    {
-                        category: 'system',
-                        title: 'Promemoria cucina',
-                        body: created.rows[0].title,
-                        url: '/?view=ATTIVITA',
-                        tag: `kitchen-reminder-${dueDate}-${hours}`,
-                    }
-                ).catch(err => console.error('Push (kitchen reminder) failed:', err));
-            }
-        }
-    }
-}
-
-async function removeBanquetFromReminders(tenantId: number, banquetId: number): Promise<void> {
-    const todos = await queryWithRetry(`
-        SELECT ${TODO_FULL_SELECT}
-        FROM todos
-        WHERE tenant_id = $2
-          AND banquet_reminder_hours IS NOT NULL
-          AND $1 = ANY(linked_banquet_ids)
-    `, [banquetId, tenantId]);
-
-    for (const todo of todos.rows) {
-        const ids: number[] = Array.isArray(todo.linkedBanquetIds) ? todo.linkedBanquetIds : [];
-        const newIds = ids.filter((id: number) => id !== banquetId);
-
-        if (newIds.length === 0) {
-            await queryWithRetry('DELETE FROM todos WHERE id = $1 AND tenant_id = $2', [todo.id, tenantId]);
-            if (socketService) socketService.broadcastToAll(tenantId, 'todo:deleted', { id: todo.id });
-            // Banchetto eliminato o spostato: il promemoria sparisce da
-            // Attività, e con lui la sua campanella sui telefoni della cucina.
-            await markSharedNotificationsRead(tenantId, todoNotificationTags(todo));
-        } else {
-            const updated = await queryWithRetry(`
-                UPDATE todos
-                SET linked_banquet_ids = $1
-                WHERE id = $2 AND tenant_id = $3
-                RETURNING ${TODO_FULL_SELECT}
-            `, [newIds, todo.id, tenantId]);
-            if (socketService && updated.rows[0]) socketService.broadcastToAll(tenantId, 'todo:updated', updated.rows[0]);
-        }
-    }
-}
-
-async function syncBanquetReminders(tenantId: number, banquetId: number, newEventDate: string): Promise<void> {
-    await removeBanquetFromReminders(tenantId, banquetId);
-    await addBanquetToReminders(tenantId, banquetId, newEventDate);
-}
 
 // ============================================
-// DAILY BREAD REMINDER (OWNER team, fires at 20:00 Europe/Rome)
+// DATE SUL FUSO DEL RISTORANTE
 // ============================================
-const BREAD_AUTO_KIND = 'BREAD_DAILY';
+// Nate per il promemoria del pane, ora le usa tutto il file: il default è il
+// fuso del primo ristorante, ogni chiamata nuova passa quello del tenant.
 const BREAD_TARGET_TZ = 'Europe/Rome';
-const BREAD_TRIGGER_HOUR = 20;
 
 const getItalianDateParts = (date: Date, tz: string = BREAD_TARGET_TZ): { year: string; month: string; day: string; hour: string; minute: string } => {
     const fmt = new Intl.DateTimeFormat('en-CA', {
@@ -17237,107 +17112,6 @@ const addDaysIso = (iso: string, days: number): string => {
     d.setUTCDate(d.getUTCDate() + days);
     return d.toISOString().substring(0, 10);
 };
-
-// tenantId arriva dalla riga di reminders che ha fatto scattare il tick: il
-// conteggio coperti e il todo devono restare del ristorante del reminder,
-// altrimenti il pane di un locale conterebbe i tavoli dell'altro.
-async function runDailyBreadReminder(tenantId: number, targetRoles: string[] = ['OWNER']): Promise<void> {
-    const fusoOggi = (await getTenantLocale(tenantId)).timezone;
-    const todayIso = getItalianTodayIso(new Date(), fusoOggi);
-    const tomorrowIso = addDaysIso(todayIso, 1);
-
-    // Sum guests for tomorrow's covers. Banquets live in their own table
-    // (banquet_menus, keyed by event_date) and are NOT stored as reservation
-    // rows, so they must be added explicitly — otherwise a banquet's covers are
-    // silently missing from the bread count.
-    const result = await queryWithRetry(
-        `SELECT (
-            COALESCE((
-                SELECT SUM(guests) FROM reservations
-                WHERE tenant_id = $2
-                  AND DATE(reservation_time) = $1
-                  AND COALESCE(reservation_status, 'CONFIRMED') NOT IN ('CANCELLED', 'DECLINED')
-            ), 0)
-            + COALESCE((
-                SELECT SUM(guests) FROM banquet_menus
-                WHERE tenant_id = $2
-                  AND event_date = $1
-            ), 0)
-         )::int AS total`,
-        [tomorrowIso, tenantId]
-    );
-    const totalGuests: number = result.rows[0]?.total ?? 0;
-    const kg = Math.max(1, Math.ceil(totalGuests / 10));
-
-    const tomorrowPretty = formatItalianDateLong(tomorrowIso);
-    const title = totalGuests > 0
-        ? `Ordinare ${kg} kg di pane per domani (${totalGuests} coperti)`
-        : `Ordinare pane per domani (nessuna prenotazione)`;
-    const description = totalGuests > 0
-        ? `Pane previsto per ${tomorrowPretty}: ${kg} kg (1 kg ogni 10 coperti, ${totalGuests} coperti previsti).`
-        : `Nessuna prenotazione registrata per ${tomorrowPretty}. Valutare se ordinare comunque una scorta minima.`;
-
-    // Upsert: one OWNER bread reminder per due_date
-    const existing = await queryWithRetry(`
-        SELECT ${TODO_FULL_SELECT}
-        FROM todos
-        WHERE tenant_id = $3
-          AND auto_kind = $1
-          AND due_date = $2
-          AND assigned_to_team = 'OWNER'
-        LIMIT 1
-    `, [BREAD_AUTO_KIND, tomorrowIso, tenantId]);
-
-    // Upsert the todo record. Skip only if the todo already exists AND has
-    // been completed by the owner — in that case they've already acted on
-    // it and re-firing the notification would be spam.
-    let todoAlreadyDone = false;
-    if (existing.rows.length > 0) {
-        const todo = existing.rows[0];
-        if (todo.completed) {
-            todoAlreadyDone = true;
-        } else {
-            const updated = await queryWithRetry(`
-                UPDATE todos
-                SET title = $1, description = $2
-                WHERE id = $3 AND tenant_id = $4
-                RETURNING ${TODO_FULL_SELECT}
-            `, [title, description, todo.id, tenantId]);
-            if (socketService && updated.rows[0]) socketService.broadcastToAll(tenantId, 'todo:updated', updated.rows[0]);
-        }
-    } else {
-        const created = await queryWithRetry(`
-            INSERT INTO todos (
-                tenant_id, title, description, priority, category, due_date,
-                assigned_to_team, auto_kind
-            ) VALUES ($5, $1, $2, 'HIGH', 'INVENTORY', $3, 'OWNER', $4)
-            RETURNING ${TODO_FULL_SELECT}
-        `, [title, description, tomorrowIso, BREAD_AUTO_KIND, tenantId]);
-        if (socketService && created.rows[0]) socketService.broadcastToAll(tenantId, 'todo:created', created.rows[0]);
-    }
-
-    // Always fire the push (unless the todo is already completed): the push
-    // IS the reminder. Previously the push lived inside the INSERT branch,
-    // so if a prior tick had already created tomorrow's todo (e.g. after a
-    // deploy at midnight) the operator never got the notification when the
-    // reminder was actually scheduled to fire. Tag stays stable per day so
-    // the browser (and our notifications table) deduplicate on retries.
-    if (!todoAlreadyDone) {
-        const roles = (targetRoles && targetRoles.length > 0) ? targetRoles : ['OWNER'];
-        pushSendToRoles(
-            tenantId,
-            roles,
-            {
-                category: 'system',
-                title: 'Promemoria pane',
-                body: title,
-                url: '/?view=ATTIVITA',
-                tag: `bread-${tomorrowIso}`,
-            }
-        ).catch(err => console.error('Push (bread reminder) failed:', err));
-    }
-    console.log(`🥖 Bread reminder for ${tomorrowIso}: ${kg}kg (${totalGuests} coperti)`);
-}
 
 // ============================================
 // SCHEDULER — advisory lock per replica singola
@@ -17688,16 +17462,19 @@ const startPaymentLinkExpiryScheduler = () => {
 };
 
 // Registry of hardcoded handlers for reminders that need dynamic content
-// (e.g. Pane computes kg from tomorrow's coperti at fire time). Keyed by
+// (e.g. the HACCP checks count today's readings at fire time). Keyed by
 // the `system_key` column; a reminder row with a matching key delegates
 // firing to the handler, so title/description edits in the UI don't
 // clobber the auto-computed body. Rows without a system_key just push
 // their stored title/description verbatim.
+// BREAD_DAILY non c'è più: il pane è un'attività programmata
+// (services/scheduledTasks.ts). La sua riga resta in reminders spenta e
+// nascosta, perché createSchema la riseminerebbe se sparisse.
+const RETIRED_REMINDER_KEYS = ['BREAD_DAILY'];
 type ReminderHandler = (reminder: ReminderRow) => Promise<void>;
 const SYSTEM_REMINDER_HANDLERS: Record<string, ReminderHandler> = {
     // Forward the reminder's target_roles so the operator's Impostazioni
     // choice ("Chi riceve?") is honoured by the system handler as well.
-    BREAD_DAILY: async (r) => { await runDailyBreadReminder(r.tenant_id, r.target_roles); },
     HACCP_TEMPERATURES: async (r) => { await runHaccpMissingReminder(haccpDeps, r.tenant_id, r.target_roles); },
     HACCP_EXPIRIES: async (r) => { await runHaccpExpiryReminder(haccpDeps, r.tenant_id, r.target_roles); },
     SHOPPING_LIST: async (r) => { await runShoppingListReminder(r.tenant_id, r.target_roles); },
@@ -17796,7 +17573,8 @@ const startRemindersScheduler = () => {
                         to_char(schedule_date, 'YYYY-MM-DD') AS schedule_date,
                         weekdays, month_day, target_roles, active, system_key, last_run_at
                  FROM reminders
-                 WHERE active = TRUE`
+                 WHERE active = TRUE AND NOT (COALESCE(system_key, '') = ANY($1::text[]))`,
+                [RETIRED_REMINDER_KEYS]
             );
             const now = new Date();
             // Un giro a getTenantLocale per tenant, non per riga: la cache ha
@@ -17828,6 +17606,13 @@ const startRemindersScheduler = () => {
             }
         } catch (err) {
             console.error('Reminders scheduler error:', err);
+        }
+        // Le attività programmate girano nello stesso giro e sotto lo stesso
+        // lock: stessa cadenza, stesso orologio del ristorante.
+        try {
+            await scheduledTasksTick(scheduledTaskDeps);
+        } catch (err) {
+            console.error('Scheduled tasks tick error:', err);
         }
     };
     const lockedTick = () => runSchedulerTickWithLock(SCHEDULER_LOCK_REMINDERS, 'reminders', tick)
@@ -20081,10 +19866,9 @@ app.post('/banquet-menus', authenticate, requirePermission('menu:full'), async (
         // Broadcast to all connected clients
         if (socketService) socketService.broadcastBanquetCreated(req.tenantId!, newMenu);
 
-        // Generate kitchen reminder todos (72h/48h/24h before event_date)
-        addBanquetToReminders(req.tenantId!, newMenu.id, newMenu.event_date).catch(err => {
-            console.error('Failed to create banquet reminder todos:', err);
-        });
+        // Attività programmate del banchetto (Impostazioni › Attività
+        // programmate): nascono subito solo quelle il cui giorno è già passato.
+        syncBanquetTasks(req.tenantId!, Number(newMenu.id), true);
 
         res.status(201).json(newMenu);
     } catch (err) {
@@ -20125,6 +19909,12 @@ app.put('/banquet-menus/:id', authenticate, requirePermission('menu:full'), asyn
                 });
             }
         }
+        // La data di prima decide se il banchetto può aver appena guadagnato
+        // un'attività programmata già scoccata (vedi syncBanquetTasks).
+        const before = await queryWithRetry(
+            "SELECT TO_CHAR(event_date, 'YYYY-MM-DD') AS event_date FROM banquet_menus WHERE id = $1 AND tenant_id = $2",
+            [id, req.tenantId!]
+        );
         const result = await queryWithRetry(
             // Lo status non passa da qui: il wizard riscrive l'anagrafica
             // dell'evento, la conferma ha la sua rotta dedicata — così un
@@ -20155,10 +19945,10 @@ app.put('/banquet-menus/:id', authenticate, requirePermission('menu:full'), asyn
         // Broadcast to all connected clients
         if (socketService) socketService.broadcastBanquetUpdated(req.tenantId!, updatedMenu);
 
-        // Re-sync kitchen reminder todos (handles event_date changes)
-        syncBanquetReminders(req.tenantId!, parseInt(id, 10), updatedMenu.event_date).catch(err => {
-            console.error('Failed to sync banquet reminder todos:', err);
-        });
+        // Attività programmate: seguono data, nome e coperti. Una modifica
+        // che non sposta la data non fa rinascere quelle eliminate a mano —
+        // prima ogni salvataggio ricreava anche quelle già spuntate.
+        syncBanquetTasks(req.tenantId!, Number(id), before.rows[0]?.event_date !== updatedMenu.event_date);
 
         res.json(updatedMenu);
     } catch (err) {
@@ -20195,6 +19985,8 @@ app.put('/banquet-menus/:id/status', authenticate, requirePermission('menu:full'
         );
         const banquet = refreshed.rows[0];
         if (socketService && banquet) socketService.broadcastBanquetUpdated(req.tenantId!, banquet);
+        // Le attività «solo banchetti confermati» seguono lo stato.
+        syncBanquetTasks(req.tenantId!, id, status === 'CONFIRMED');
         if (req.user) {
             LogService.logActivity(
                 req.tenantId!, req.user.userId, req.user.email, req.user.email,
@@ -20579,10 +20371,9 @@ app.delete('/banquet-menus/:id', authenticate, requirePermission('menu:full'), a
         // Broadcast to all connected clients
         if (socketService) socketService.broadcastBanquetDeleted(req.tenantId!, Number(id));
 
-        // Remove banquet from kitchen reminder todos
-        removeBanquetFromReminders(req.tenantId!, Number(id)).catch(err => {
-            console.error('Failed to remove banquet from reminder todos:', err);
-        });
+        // Il banchetto esce dalle sue attività programmate; quelle rimaste
+        // vuote spariscono, con la loro campanella.
+        syncBanquetTasks(req.tenantId!, Number(id), false);
 
         res.status(204).send();
     } catch (err) {
@@ -20754,6 +20545,7 @@ app.get('/todos', authenticate, async (req, res) => {
                 linked_banquet_ids as "linkedBanquetIds",
                 banquet_reminder_hours as "banquetReminderHours",
                 auto_kind as "autoKind",
+                scheduled_task_id as "scheduledTaskId",
                 assigned_to_user_id as "assignedToUserId",
                 assigned_to_user_name as "assignedToUserName",
                 assigned_to_team as "assignedToTeam",
@@ -20799,6 +20591,7 @@ app.get('/todos/my', authenticate, async (req, res) => {
                 linked_banquet_ids as "linkedBanquetIds",
                 banquet_reminder_hours as "banquetReminderHours",
                 auto_kind as "autoKind",
+                scheduled_task_id as "scheduledTaskId",
                 assigned_to_user_id as "assignedToUserId",
                 assigned_to_user_name as "assignedToUserName",
                 assigned_to_team as "assignedToTeam",
@@ -20881,6 +20674,7 @@ app.post('/todos', authenticate, async (req, res) => {
                 linked_banquet_ids as "linkedBanquetIds",
                 banquet_reminder_hours as "banquetReminderHours",
                 auto_kind as "autoKind",
+                scheduled_task_id as "scheduledTaskId",
                 assigned_to_user_id as "assignedToUserId",
                 assigned_to_user_name as "assignedToUserName",
                 assigned_to_team as "assignedToTeam",
@@ -21037,6 +20831,7 @@ app.put('/todos/:id', authenticate, async (req, res) => {
                 linked_banquet_ids as "linkedBanquetIds",
                 banquet_reminder_hours as "banquetReminderHours",
                 auto_kind as "autoKind",
+                scheduled_task_id as "scheduledTaskId",
                 assigned_to_user_id as "assignedToUserId",
                 assigned_to_user_name as "assignedToUserName",
                 assigned_to_team as "assignedToTeam",
@@ -21123,6 +20918,7 @@ app.put('/todos/:id/toggle', authenticate, async (req, res) => {
                 linked_banquet_ids as "linkedBanquetIds",
                 banquet_reminder_hours as "banquetReminderHours",
                 auto_kind as "autoKind",
+                scheduled_task_id as "scheduledTaskId",
                 assigned_to_user_id as "assignedToUserId",
                 assigned_to_user_name as "assignedToUserName",
                 assigned_to_team as "assignedToTeam",
@@ -21160,7 +20956,7 @@ app.delete('/todos/:id', authenticate, async (req, res) => {
             `DELETE FROM todos WHERE id = $1 AND tenant_id = $2
              RETURNING id, TO_CHAR(due_date, 'YYYY-MM-DD') as "dueDate",
                        banquet_reminder_hours as "banquetReminderHours",
-                       assigned_to_team as "assignedToTeam", auto_kind as "autoKind"`,
+                       assigned_to_team as "assignedToTeam", auto_kind as "autoKind", scheduled_task_id as "scheduledTaskId"`,
             [id, req.tenantId!]
         );
 
@@ -28753,9 +28549,9 @@ app.get('/reminders', authenticate, async (req, res) => {
                     weekdays, month_day, target_roles, active, system_key,
                     last_run_at, created_at, updated_at
              FROM reminders
-             WHERE tenant_id = $1
+             WHERE tenant_id = $1 AND NOT (COALESCE(system_key, '') = ANY($2::text[]))
              ORDER BY active DESC, created_at DESC`,
-            [req.tenantId!]
+            [req.tenantId!, RETIRED_REMINDER_KEYS]
         );
         res.json({ reminders: r.rows });
     } catch (err: any) {
@@ -29019,6 +28815,10 @@ const haccpDeps: HaccpDeps = {
     onAiKeyInvalid: (res, route, err) => sendAiKeyInvalid(res, route, err),
 };
 app.use('/haccp', createHaccpRouter(haccpDeps));
+
+// Attività programmate (Impostazioni › Attività programmate): le rotte e lo
+// scheduler stanno in services/scheduledTasks.ts.
+app.use('/scheduled-tasks', createScheduledTasksRouter(scheduledTaskDeps));
 
 // ============================================
 // FOOD COST (schede tecniche, costi, margini)
@@ -45423,7 +45223,7 @@ const startServer = async () => {
                 console.error('Socket.IO initialization failed:', socketError);
             }
 
-            // Initialize database schema in background, then backfill banquet reminders
+            // Initialize database schema in background, then start the schedulers
             // Tutta la catena di boot è lavoro di piattaforma dichiarato:
             // schema, migration, seed e warm-up attraversano i tenant.
             // rls-bypass: boot senza richiesta, createSchema fa DDL e seed/backfill su tutti i tenant
@@ -45643,23 +45443,10 @@ const startServer = async () => {
                     } catch (permErr) {
                         console.warn('Permission cache warm-up skipped:', permErr);
                     }
-                    if (!isServiceNode) try {
-                        const today = new Date().toISOString().substring(0, 10);
-                        // Backfill di boot: nessuna richiesta in mano, il
-                        // tenant si legge dalla riga del banchetto stesso.
-                        const upcoming = await queryWithRetry(
-                            "SELECT id, tenant_id, TO_CHAR(event_date, 'YYYY-MM-DD') AS event_date FROM banquet_menus WHERE event_date >= $1",
-                            [today]
-                        );
-                        for (const row of upcoming.rows) {
-                            await addBanquetToReminders(row.tenant_id, row.id, row.event_date);
-                        }
-                        if (upcoming.rows.length > 0) {
-                            console.log(`✅ Backfilled kitchen reminder todos for ${upcoming.rows.length} upcoming banquet(s)`);
-                        }
-                    } catch (backfillErr) {
-                        console.error('Banquet reminder backfill failed:', backfillErr);
-                    }
+                    // Il backfill di boot dei promemoria cucina non serve più:
+                    // le attività programmate dei banchetti le fa nascere il
+                    // giro dello scheduler, al giorno e all'ora stabiliti. Era
+                    // anche lui a ricreare a ogni deploy quelle già spuntate.
                     if (!isServiceNode) try {
                         startRemindersScheduler();
                         console.log('✅ Reminders scheduler started (polls every 5 min, Europe/Rome)');

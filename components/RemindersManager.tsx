@@ -21,7 +21,7 @@ type TFunc = (key: string, defaultValue: string, options?: Record<string, unknow
    l'indice combacia con l'ordine di questa lista. */
 const WEEKDAY_CODES = ['MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT', 'SUN'] as const;
 
-const weekdays = (): { code: string; short: string; long: string }[] => {
+export const weekdays = (): { code: string; short: string; long: string }[] => {
   const loc = displayLocale();
   const breve = new Intl.DateTimeFormat(loc, { weekday: 'short', timeZone: 'UTC' });
   const lungo = new Intl.DateTimeFormat(loc, { weekday: 'long', timeZone: 'UTC' });

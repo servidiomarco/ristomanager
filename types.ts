@@ -1267,6 +1267,8 @@ export interface TodoItem {
   linkedBanquetIds?: number[];
   banquetReminderHours?: number;
   autoKind?: string;
+  /** Nata da un'attività programmata (Impostazioni › Attività programmate). */
+  scheduledTaskId?: number | null;
   // Assignment fields
   assignedToUserId?: number;
   assignedToUserName?: string;
