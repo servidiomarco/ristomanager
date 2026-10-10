@@ -100,8 +100,11 @@
   },
   "fornitoreCollegato": "Fornitore collegato",
   "ignora": "Ignora",
-  "ignoraAltre": "Ignora le {{n}} da abbinare",
-  "ignoraAltreTitolo": "Ignora {{n}} righe",
+  "ignoraDaAbbinare_one": "Ignora la riga da abbinare",
+  "ignoraDaAbbinare_other": "Ignora le {{count}} da abbinare",
+  "ignoraNota": "Le righe già abbinate restano come sono. Le prossime fatture le ignorano da sole.",
+  "ignoraTitolo_one": "Ignora una riga",
+  "ignoraTitolo_other": "Ignora {{count}} righe",
   "indietro": "Fatture",
   "invio": "{{fatti}} di {{totali}}",
   "iva": "IVA {{iva}}",
@@ -150,6 +153,7 @@
     "spesa": "spesa accessoria"
   },
   "titolo": "Fatture fornitori",
+  "toccaRiga": "Tocca una riga per abbinarla o ignorarla.",
   "vuoto": {
     "altre": "Nessuna fattura qui.",
     "daControllare": "Nessuna fattura da controllare. Carica gli XML, i p7m o lo zip del commercialista."

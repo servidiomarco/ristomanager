@@ -857,6 +857,7 @@ Pagina unica a blocchi, con chip-àncora per saltare alla sezione. Blocchi e con
 
 | Data | Sezione | Modifica |
 |---|---|---|
+| 2026-10-10 | Inventario | Fatture fornitori: in fondo alla fattura ora si legge perché «Carica in magazzino» è spento (le righe ancora da abbinare) e, accanto, c'è **«Ignora le N da abbinare»** per chiudere in un colpo detersivi e acquisti che non vanno in magazzino. |
 | 2026-10-10 | Inventario; Food cost; Lista della spesa e fornitori | Nuove **Fatture fornitori** nel Magazzino: si caricano le fatture elettroniche (XML, p7m o lo zip del commercialista), si abbina ogni riga a un prodotto o la si ignora, e un tasto carica il magazzino con lotti e quantità giuste. La volta dopo le righe dello stesso fornitore arrivano già abbinate. Col Food cost acceso il carico aggiorna anche i prezzi degli ingredienti. Le vedono titolare, direzione e manager. |
 | 2026-10-10 | Aiuto e supporto | «Chiedi a Sympotia» risponde anche sul food cost e sulle novità di settembre e ottobre: messaggi automatici all'ospite, «La tua prenotazione», palmare, monitor di cucina, cassa e comande nella cassa Passepartout. I manuali dell'app sono aggiornati e ce n'è uno nuovo per il food cost. |
 | 2026-10-09 | Prenotazioni | La pagina «La tua prenotazione» mostra il logo senza il riquadro bianco (anche il preventivo e il conto dal QR) e il pulsante «Cambia giorno, ora o persone» è grande come «Ci saremo». La conferma su WhatsApp col pulsante «Gestisci la prenotazione» ritrova anche «Come raggiungerci», appena Meta approva il nuovo messaggio. |
