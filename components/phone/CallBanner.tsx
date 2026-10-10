@@ -1,9 +1,9 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Bell, BellOff, CalendarDays, Phone, Wand2, X } from 'lucide-react';
+import { Bell, BellOff, CalendarDays, Phone, PhoneCall, PhoneIncoming, Wand2, X } from 'lucide-react';
 import { Avatar, StatusPill } from '../ds';
 import { socketClient } from '../../services/socketClient';
-import { voiceCallsApiService, type LiveCall, type LiveCallEnded } from '../../services/voiceCallsApiService';
+import { voiceCallsApiService, type LiveCall, type LiveCallEnded, type LiveCallStage } from '../../services/voiceCallsApiService';
 import { getRomeDatePart } from '../../utils/reservationTime';
 import { chime } from '../../utils/chime';
 
@@ -115,16 +115,24 @@ export const CallBanner: React.FC<{
       }, ENDED_VISIBLE_MS);
     };
 
+    // Squillava il cellulare e ha risposto qualcuno, o è passata a Sofia.
+    const onUpdated = (update: { id: string; stage: LiveCallStage }) => {
+      if (!update?.id) return;
+      setCalls(prev => prev.map(c => (c.id === update.id && !c.ended ? { ...c, stage: update.stage } : c)));
+    };
+
     let attached: ReturnType<typeof socketClient.getSocket> = null;
     const attach = (s: ReturnType<typeof socketClient.getSocket>) => {
       if (attached === s) return;
       if (attached) {
         attached.off('phoneCall:started', onStarted);
+        attached.off('phoneCall:updated', onUpdated);
         attached.off('phoneCall:ended', onEnded);
       }
       attached = s;
       if (attached) {
         attached.on('phoneCall:started', onStarted);
+        attached.on('phoneCall:updated', onUpdated);
         attached.on('phoneCall:ended', onEnded);
         refresh();
       }
@@ -167,22 +175,31 @@ export const CallBanner: React.FC<{
         const phoneLabel = card.phone ? displayPhone(card.phone) : '';
         const title = name || phoneLabel || t('phone.hiddenNumber');
         const booking = ended?.reservation;
-        const headline = ended ? t(`phone.outcome.${ended.outcome}`) : t('phone.sofiaTalking');
+        const stage: LiveCallStage = call.stage ?? 'sofia';
+        const headline = ended
+          ? t(`phone.outcome.${ended.outcome}`)
+          : stage === 'ringing' ? t('phone.ringing') : stage === 'staff' ? t('phone.staff') : t('phone.sofiaTalking');
+        // Il telaio che gira dice «la macchina sta lavorando»: solo con Sofia.
+        const live = !ended && stage === 'sofia';
+        // La bacchetta solo dove c'è Sofia di mezzo; il resto è telefono.
+        const HeadIcon = ended
+          ? (ended.outcome === 'answered' ? PhoneCall : ended.outcome === 'missed' ? PhoneIncoming : Wand2)
+          : stage === 'ringing' ? PhoneIncoming : stage === 'staff' ? PhoneCall : Wand2;
         return (
           <div
             key={call.id}
             role="status"
             aria-live="polite"
-            className={`pointer-events-auto shadow-[var(--ds-shadow-raised)] ${ended ? 'rounded-[var(--ds-radius)] border border-[var(--ds-border)]' : 'ds-ai-frame'}`}
+            className={`pointer-events-auto shadow-[var(--ds-shadow-raised)] ${live ? 'ds-ai-frame' : `rounded-[var(--ds-radius)] border ${ended ? 'border-[var(--ds-border)]' : 'border-[var(--ds-arriving-solid)]'}`}`}
             style={{ animation: 'tileIn 200ms ease-out both' }}
           >
-            <div className={`${ended ? 'rounded-[var(--ds-radius)]' : 'rounded-[calc(var(--ds-radius)-1.5px)]'} bg-[var(--ds-surface)] p-3`}>
+            <div className={`${live ? 'rounded-[calc(var(--ds-radius)-1.5px)]' : 'rounded-[var(--ds-radius)]'} bg-[var(--ds-surface)] p-3`}>
               <div className="flex items-start gap-3">
                 {/* La cornetta e non le iniziali: è una chiamata, non una scheda. */}
                 <Avatar icon={Phone} tone={customer?.is_blacklisted ? 'critical' : 'info'} />
                 <div className="min-w-0 flex-1">
                   <p className="flex items-center gap-1.5 text-[12px] font-medium text-[var(--ds-arriving-text)]">
-                    <Wand2 className="h-3.5 w-3.5 flex-shrink-0" aria-hidden />
+                    <HeadIcon className="h-3.5 w-3.5 flex-shrink-0" aria-hidden />
                     <span className="truncate">{headline}</span>
                   </p>
                   {customer?.phone ? (

@@ -47,9 +47,14 @@ export interface CallerCard {
 
 export type LiveCallChannel = 'sofia';
 
+/** Dove sta la chiamata: squilla in sala (il cellulare del locale), è con
+ *  Sofia, o ha risposto qualcuno del locale. */
+export type LiveCallStage = 'ringing' | 'sofia' | 'staff';
+
 export interface LiveCall {
     id: string;
     channel: LiveCallChannel;
+    stage: LiveCallStage;
     call_sid: string | null;
     phone: string;
     started_at: string;
@@ -156,6 +161,14 @@ export function removeLiveCall(tenantId: number, ref: { callSid?: string | null;
     if (entry) clearTimeout(entry.timer);
     calls.delete(id);
     return id;
+}
+
+/** Cambia la fase di una chiamata aperta; null se non c'è (già chiusa). */
+export function updateLiveCallStage(tenantId: number, id: string, stage: LiveCallStage): LiveCall | null {
+    const entry = liveByTenant.get(tenantId)?.get(id);
+    if (!entry) return null;
+    entry.call = { ...entry.call, stage };
+    return entry.call;
 }
 
 /** Una chiamata dello stesso numero aperta da poco: con Sympotia davanti al

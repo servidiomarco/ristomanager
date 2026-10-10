@@ -159,6 +159,7 @@ export const DOMAIN_EVENTS: Record<string, DomainEventSpec> = {
     // la chiamata finita resta in voiceCall:changed.
     'phoneCall:started': spec('transient'),
     'phoneCall:ended': spec('transient'),
+    'phoneCall:updated': spec('transient'),
 
     // --- Gestione (staff, turni, spesa, todo, fornitori): tolleranza alta
     //     alla latenza, conflitti rari — master in cloud.

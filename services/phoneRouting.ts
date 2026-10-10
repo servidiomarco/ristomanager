@@ -83,3 +83,46 @@ export async function registerSofiaCall(args: {
         clearTimeout(timer);
     }
 }
+
+// --- Prima il cellulare, poi Sofia (Fase 3 ridotta) -------------------------
+// In attesa del softphone e del cordless, squilla il cellulare del locale
+// come una telefonata normale: suona anche a schermo bloccato e non serve
+// nessuna app. Chi risponde sente chi chiama e preme 1: senza questo
+// controllo la segreteria del cellulare «risponderebbe» e la chiamata non
+// arriverebbe mai a Sofia.
+
+export type PhoneRoutingMode = 'solo_sofia' | 'prima_cellulare';
+
+export interface PhoneRouting {
+    mode: PhoneRoutingMode;
+    /** E.164, al massimo tre: squillano insieme, vince il primo che preme 1. */
+    mobiles: string[];
+    ring_seconds: number;
+}
+
+export const DEFAULT_PHONE_ROUTING: PhoneRouting = { mode: 'solo_sofia', mobiles: [], ring_seconds: 15 };
+export const PHONE_ROUTING_MAX_MOBILES = 3;
+export const PHONE_ROUTING_RING_MIN = 5;
+export const PHONE_ROUTING_RING_MAX = 60;
+
+/** Squillo dei cellulari. answerOnBridge: chi chiama sente squillare finché
+ *  qualcuno non risponde davvero (annuncio compreso), non il silenzio. Il
+ *  numero mostrato è il nostro: il passaggio del numero del cliente ai
+ *  cellulari italiani va provato prima di usarlo. */
+export const dialMobilesTwiml = (args: {
+    mobiles: string[]; ringSeconds: number; callerId: string; afterDialUrl: string; whisperUrl: string;
+}): string =>
+    twimlResponse(
+        `<Dial timeout="${args.ringSeconds}" answerOnBridge="true" callerId="${xmlEscape(args.callerId)}" action="${xmlEscape(args.afterDialUrl)}" method="POST">`
+        + args.mobiles.map(m => `<Number url="${xmlEscape(args.whisperUrl)}" method="POST">${xmlEscape(m)}</Number>`).join('')
+        + `</Dial>`
+    );
+
+/** Annuncio al cellulare che ha risposto: chi chiama, e «premi 1». Senza il
+ *  tasto la gamba si chiude e la chiamata passa a Sofia. */
+export const whisperTwiml = (args: { announce: string; confirmUrl: string }): string =>
+    twimlResponse(
+        `<Gather numDigits="1" timeout="8" action="${xmlEscape(args.confirmUrl)}" method="POST">`
+        + `<Say language="it-IT">${xmlEscape(args.announce)}</Say>`
+        + `</Gather><Hangup/>`
+    );

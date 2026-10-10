@@ -333,6 +333,8 @@
   },
   "phone": {
     "sofiaTalking": "Sofia is talking to",
+    "ringing": "Ringing the restaurant's phone",
+    "staff": "On the line with the restaurant",
     "hiddenNumber": "Hidden number",
     "notInBook": "Not in contacts",
     "firstVisit": "Never visited",
@@ -355,7 +357,8 @@
       "callback": "Wants a call back",
       "follow_up": "To follow up",
       "ended": "Call ended",
-      "missed": "Missed call"
+      "missed": "Missed call",
+      "answered": "Answered by the restaurant"
     }
   }
 }

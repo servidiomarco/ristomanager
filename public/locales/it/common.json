@@ -333,6 +333,8 @@
   },
   "phone": {
     "sofiaTalking": "Sofia sta parlando con",
+    "ringing": "Squilla il cellulare del locale",
+    "staff": "In linea col locale",
     "hiddenNumber": "Numero nascosto",
     "notInBook": "Non in rubrica",
     "firstVisit": "Mai venuto",
@@ -355,7 +357,8 @@
       "callback": "Vuole essere richiamato",
       "follow_up": "Da ricontattare",
       "ended": "Chiamata finita",
-      "missed": "Chiamata persa"
+      "missed": "Chiamata persa",
+      "answered": "Ha risposto il locale"
     }
   }
 }

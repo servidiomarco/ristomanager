@@ -93,6 +93,7 @@ import { DateNavigator } from './components/DateNavigator';
 import { CommandPalette } from './components/CommandPalette';
 import { AppVersionBanner } from './components/AppVersionBanner';
 import { CallBanner } from './components/phone/CallBanner';
+import { PhoneRoutingCard } from './components/phone/PhoneRoutingCard';
 import { BookingChannelsBar } from './components/BookingChannelsBar';
 import { useSocket } from './hooks/useSocket';
 import { useLinkRoutes } from './hooks/useLinkRoutes';
@@ -3901,6 +3902,13 @@ const App: React.FC = () => {
                 {hasFeature('voice') && (
                   <CardErrorBoundary label={t('settings.voiceUsage', 'Minuti di Sofia')}>
                     <VoiceUsageCard showToast={addToast} />
+                  </CardErrorBoundary>
+                )}
+                {/* Chi risponde al numero di Sofia: lei subito, o prima il
+                    cellulare del locale (docs/telefono-piano.md). */}
+                {hasFeature('voice') && (
+                  <CardErrorBoundary label={t('settings.phoneRouting', 'Chi risponde al telefono')}>
+                    <PhoneRoutingCard showToast={addToast} />
                   </CardErrorBoundary>
                 )}
                 <CardErrorBoundary label={t('settings.aiMessages')}>
