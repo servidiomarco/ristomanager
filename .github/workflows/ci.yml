@@ -1,5 +1,8 @@
 # CI del repo: typecheck + build di entrambi i lati, poi i test API contro
 # un Postgres di servizio. Gira su ogni PR e su main.
+# Postgres arriva dalla copia di Google di Docker Hub (mirror.gcr.io), stessa
+# immagine e stesso digest: Docker Hub senza login ha un limite di download
+# che il 09/10/2026 ha fermato tutti i job dei test con «toomanyrequests».
 name: CI
 
 on:
@@ -51,7 +54,7 @@ jobs:
     runs-on: ubuntu-latest
     services:
       postgres:
-        image: postgres:18
+        image: mirror.gcr.io/library/postgres:18
         env:
           POSTGRES_PASSWORD: ci
         ports:
@@ -155,7 +158,7 @@ jobs:
     runs-on: ubuntu-latest
     services:
       postgres:
-        image: postgres:16
+        image: mirror.gcr.io/library/postgres:16
         env:
           POSTGRES_PASSWORD: ci
         ports:
@@ -186,7 +189,7 @@ jobs:
     runs-on: ubuntu-latest
     services:
       postgres:
-        image: postgres:16
+        image: mirror.gcr.io/library/postgres:16
         env:
           POSTGRES_PASSWORD: ci
         ports:
@@ -218,7 +221,7 @@ jobs:
     runs-on: ubuntu-latest
     services:
       postgres:
-        image: postgres:16
+        image: mirror.gcr.io/library/postgres:16
         env:
           POSTGRES_PASSWORD: ci
         ports:
