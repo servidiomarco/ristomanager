@@ -126,6 +126,13 @@ export default async function globalSetup(): Promise<() => Promise<void>> {
             TWILIO_AUTH_TOKEN: 'test-twilio-auth-token',
             SOFIA_REGISTER_CALL_URL: `http://127.0.0.1:${port + 11}/register-call`,
             SOFIA_SILENT_CHECK_MS: '500',
+            // Softphone (Fase 3): token firmati con una API key finta. Con il
+            // solo SID dell'account WhatsApp e SMS restano spenti: servono
+            // anche il mittente o il messaging service.
+            TWILIO_ACCOUNT_SID: 'ACtest00000000000000000000000000',
+            TWILIO_API_KEY_SID: 'SKtest00000000000000000000000000',
+            TWILIO_API_KEY_SECRET: 'test-api-key-secret',
+            TWILIO_TWIML_APP_SID: 'APtest00000000000000000000000000',
             DEFAULT_OWNER_PASSWORD: OWNER_PASSWORD,
             // Gate degli endpoint /admin/tenants (Fase D1): senza questo i
             // test di provisioning riceverebbero solo 503.

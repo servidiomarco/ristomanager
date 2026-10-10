@@ -497,8 +497,6 @@
     "title": "Chi risponde al telefono",
     "subtitle": "Le chiamate al numero di Sofia",
     "soloSofia": "Solo Sofia",
-    "primaCellulare": "Prima il cellulare",
-    "hint": "Squilla come una chiamata normale, dal numero di Sofia. Chi risponde sente chi chiama e preme 1; se nessuno risponde in tempo, risponde Sofia.",
     "mobile": "Cellulare",
     "mobilePh": "Cellulare, es. 347 123 4567",
     "remove": "Togli questo cellulare",
@@ -507,6 +505,18 @@
     "seconds": "secondi, poi Sofia",
     "save": "Salva",
     "saved": "Impostazione salvata",
-    "err": "Salvataggio non riuscito"
+    "err": "Salvataggio non riuscito",
+    "primaLocale": "Prima il locale",
+    "hintLocale": "Squillano insieme i dispositivi del CRM col telefono acceso e i cellulari qui sotto. Dal cellulare si sente chi chiama e si preme 1. Se nessuno risponde in tempo, risponde Sofia.",
+    "mobilesTitle": "Cellulari (facoltativi)",
+    "here": "Questo dispositivo squilla",
+    "hereOff": "Spento: qui non squilla",
+    "hereReady": "Acceso: le chiamate squillano qui",
+    "hereStarting": "Collegamento…",
+    "unconfigured": "Il telefono del CRM non è ancora attivo sul server",
+    "hereError": "Non riesco a collegarmi: ricarica la pagina",
+    "hereHint": "Serve il microfono (il browser lo chiede alla prima chiamata) e la pagina del CRM aperta. Meglio con una cuffia.",
+    "device": "Dispositivo",
+    "removeDevice": "Spegni questo dispositivo"
   }
 }

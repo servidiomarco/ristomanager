@@ -27,6 +27,7 @@ import {
 } from './ds';
 import type { PillTone } from './ds';
 import { sessionTimeZone } from '../utils/displayTime';
+import { callFromCrm } from '../services/softphone';
 
 const formatDuration = (secs: number | null | undefined): string => {
   if (secs == null || !Number.isFinite(secs) || secs < 0) return '—';
@@ -51,6 +52,12 @@ const formatDateTime = (iso: string | null | undefined): string => {
 };
 
 type TFunc = (key: string, options?: Record<string, unknown>) => string;
+
+// «Chiama»: col telefono del CRM acceso la chiamata parte da qui, col numero
+// del locale; altrimenti il link tel: apre il telefono del dispositivo.
+const callFromCrmOrSystem = (phone: string) => (e: React.MouseEvent) => {
+  if (callFromCrm(phone)) e.preventDefault();
+};
 
 const formatPhone = (phone: string | null | undefined, t: TFunc): string => {
   if (!phone) return t('unknownNumber');
@@ -340,7 +347,7 @@ const CallDetail: React.FC<CallDetailProps> = ({ callId, reservations, onClose, 
               </button>
             )}
             {detail?.phone && (
-              <a href={`tel:${detail.phone.replace(/[^\d+]/g, '')}`} className={dsButton.primary}>
+              <a href={`tel:${detail.phone.replace(/[^\d+]/g, '')}`} onClick={callFromCrmOrSystem(detail.phone)} className={dsButton.primary}>
                 <Phone className="h-4 w-4" />
                 {t('call')}
               </a>
@@ -695,7 +702,7 @@ const CallDetail: React.FC<CallDetailProps> = ({ callId, reservations, onClose, 
               {t('customerRecord')}
             </button>
           )}
-          <a href={`tel:${detail.phone.replace(/[^\d+]/g, '')}`} className={`${dsButton.primary} flex-1`}>
+          <a href={`tel:${detail.phone.replace(/[^\d+]/g, '')}`} onClick={callFromCrmOrSystem(detail.phone)} className={`${dsButton.primary} flex-1`}>
             <Phone className="h-4 w-4" />
             {t('call')}
           </a>
@@ -943,7 +950,7 @@ const ConversazioniPage: React.FC<ConversazioniPageProps> = ({ reservations, onF
           label: t('callBack'),
           tone: 'primary',
           icon: <ArrowRight className="h-4 w-4" aria-hidden />,
-          onAction: () => { window.location.href = `tel:${tel}`; },
+          onAction: () => { if (!callFromCrm(tel)) window.location.href = `tel:${tel}`; },
         } : undefined}
       >
         <button

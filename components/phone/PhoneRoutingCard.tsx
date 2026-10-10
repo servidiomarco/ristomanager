@@ -1,16 +1,16 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Loader2, PhoneForwarded, Plus, X } from 'lucide-react';
+import { Loader2, Monitor, PhoneForwarded, Plus, X } from 'lucide-react';
 import { SegmentedControl, dsButton, dsInput } from '../ds';
 import { useAuth } from '../../contexts/AuthContext';
-import { voiceCallsApiService, type PhoneRouting } from '../../services/voiceCallsApiService';
+import { voiceCallsApiService, type PhoneDevice, type PhoneRouting } from '../../services/voiceCallsApiService';
+import { deviceKey, disableSoftphone, enableSoftphone, isEnabledHere, useSoftphone } from '../../services/softphone';
 
-/* ── Chi risponde al telefono (docs/telefono-piano.md, Fase 3 ridotta) ─────
+/* ── Chi risponde al telefono (docs/telefono-piano.md, Fase 3) ─────────────
    Con Sympotia davanti al numero di Sofia, il ristoratore sceglie se
-   risponde subito Sofia o se prima squilla il cellulare del locale. Il
-   cellulare squilla come una telefonata normale: chi risponde sente chi
-   chiama e preme 1; se nessuno lo fa entro il tempo scelto, risponde Sofia.
-   Softphone nel CRM e cordless arriveranno sullo stesso giro. */
+   risponde subito Sofia o se prima squilla il locale: i browser del CRM con
+   «Questo dispositivo squilla» acceso e, se servono, fino a tre cellulari.
+   Se nessuno risponde entro il tempo scelto, risponde Sofia. */
 
 const MAX_MOBILES = 3;
 
@@ -21,16 +21,28 @@ interface Props {
 const sameRouting = (a: PhoneRouting, b: PhoneRouting): boolean =>
   a.mode === b.mode && a.ring_seconds === b.ring_seconds && a.mobiles.join(',') === b.mobiles.join(',');
 
+// Un nome riconoscibile nell'elenco: chi e su cosa.
+const deviceLabel = (userName: string): string => {
+  const ua = navigator.userAgent;
+  const what = /iPhone/.test(ua) ? 'iPhone' : /iPad/.test(ua) ? 'iPad' : /Android/.test(ua) ? 'Android'
+    : /Mac/.test(ua) ? 'Mac' : /Windows/.test(ua) ? 'Windows' : 'Browser';
+  return userName ? `${userName} · ${what}` : what;
+};
+
 export const PhoneRoutingCard: React.FC<Props> = ({ showToast }) => {
-  const { t } = useTranslation('canali', { useSuspense: false });
-  const { hasPermission } = useAuth();
+  const { t, i18n } = useTranslation('canali', { useSuspense: false });
+  const { hasPermission, user } = useAuth();
   const canEdit = hasPermission('settings:full');
+  const soft = useSoftphone();
 
   const [saved, setSaved] = useState<PhoneRouting | null>(null);
   const [mode, setMode] = useState<PhoneRouting['mode']>('solo_sofia');
   const [mobiles, setMobiles] = useState<string[]>(['']);
   const [ring, setRing] = useState('15');
   const [saving, setSaving] = useState(false);
+  const [devices, setDevices] = useState<PhoneDevice[]>([]);
+  const [configured, setConfigured] = useState(false);
+  const [toggling, setToggling] = useState(false);
 
   const showToastRef = useRef(showToast);
   useEffect(() => { showToastRef.current = showToast; });
@@ -41,6 +53,10 @@ export const PhoneRoutingCard: React.FC<Props> = ({ showToast }) => {
     setMobiles(r.mobiles.length > 0 ? r.mobiles : ['']);
     setRing(String(r.ring_seconds));
   };
+  const loadDevices = () =>
+    voiceCallsApiService.phoneDevices(deviceKey())
+      .then(d => { setDevices(d.devices); setConfigured(d.configured); })
+      .catch(() => {});
 
   useEffect(() => {
     let cancelled = false;
@@ -48,6 +64,7 @@ export const PhoneRoutingCard: React.FC<Props> = ({ showToast }) => {
       .then(r => { if (!cancelled) load(r); })
       // Un server senza la rotta (deploy in corso) non mostra la card.
       .catch(() => { if (!cancelled) setSaved(null); });
+    void loadDevices();
     return () => { cancelled = true; };
   }, []);
 
@@ -60,9 +77,10 @@ export const PhoneRoutingCard: React.FC<Props> = ({ showToast }) => {
     mobiles: mobiles.map(m => m.trim()).filter(Boolean),
     ring_seconds: Number(ring),
   };
-  const ringValid = Number.isInteger(draft.ring_seconds) && draft.ring_seconds >= 5 && draft.ring_seconds <= 60;
-  const valid = ringValid && (mode === 'solo_sofia' || draft.mobiles.length > 0);
+  const valid = Number.isInteger(draft.ring_seconds) && draft.ring_seconds >= 5 && draft.ring_seconds <= 60;
   const dirty = !sameRouting(draft, saved);
+  const mine = devices.find(d => d.mine) ?? null;
+  const hereOn = !!mine && isEnabledHere();
 
   const save = async () => {
     if (!valid || !dirty || saving) return;
@@ -76,6 +94,38 @@ export const PhoneRoutingCard: React.FC<Props> = ({ showToast }) => {
       setSaving(false);
     }
   };
+
+  const toggleHere = async () => {
+    if (toggling) return;
+    setToggling(true);
+    try {
+      if (hereOn) await disableSoftphone(mine?.id ?? null);
+      else await enableSoftphone(deviceLabel(user?.full_name || ''));
+      await loadDevices();
+    } catch (err: any) {
+      showToast(err?.message || t('pr.err', 'Salvataggio non riuscito'), 'error');
+    } finally {
+      setToggling(false);
+    }
+  };
+
+  const removeDevice = async (d: PhoneDevice) => {
+    try {
+      if (d.mine) await disableSoftphone(d.id);
+      else await voiceCallsApiService.deletePhoneDevice(d.id);
+      await loadDevices();
+    } catch (err: any) {
+      showToast(err?.message || t('pr.err', 'Salvataggio non riuscito'), 'error');
+    }
+  };
+
+  const statusText = !hereOn ? t('pr.hereOff', 'Spento: qui non squilla')
+    : soft.status === 'ready' ? t('pr.hereReady', 'Acceso: le chiamate squillano qui')
+    : soft.status === 'starting' ? t('pr.hereStarting', 'Collegamento…')
+    : soft.status === 'unconfigured' ? t('pr.unconfigured', 'Il telefono del CRM non è ancora attivo sul server')
+    : t('pr.hereError', 'Non riesco a collegarmi: ricarica la pagina');
+  const lastSeen = (iso: string) =>
+    new Intl.DateTimeFormat(i18n.language, { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }).format(new Date(iso));
 
   return (
     <div className="rounded-[var(--ds-radius)] bg-[var(--ds-surface)] p-4 shadow-[var(--ds-shadow-card)]">
@@ -97,16 +147,17 @@ export const PhoneRoutingCard: React.FC<Props> = ({ showToast }) => {
           equalWidth={false}
           options={[
             { value: 'solo_sofia', label: t('pr.soloSofia', 'Solo Sofia') },
-            { value: 'prima_cellulare', label: t('pr.primaCellulare', 'Prima il cellulare') },
+            { value: 'prima_locale', label: t('pr.primaLocale', 'Prima il locale') },
           ]}
         />
       </div>
 
-      {mode === 'prima_cellulare' && (
+      {mode === 'prima_locale' && (
         <div className="mt-4 space-y-3">
           <p className="text-[13px] text-[var(--ds-text-secondary)]">
-            {t('pr.hint', 'Squilla come una chiamata normale, dal numero di Sofia. Chi risponde sente chi chiama e preme 1; se nessuno risponde in tempo, risponde Sofia.')}
+            {t('pr.hintLocale', 'Squillano insieme i dispositivi del CRM col telefono acceso e i cellulari qui sotto. Dal cellulare si sente chi chiama e si preme 1. Se nessuno risponde in tempo, risponde Sofia.')}
           </p>
+          <p className="text-[13px] font-medium text-[var(--ds-text-primary)]">{t('pr.mobilesTitle', 'Cellulari (facoltativi)')}</p>
           {mobiles.map((m, i) => (
             <div key={i} className="flex items-center gap-2">
               <input
@@ -119,10 +170,10 @@ export const PhoneRoutingCard: React.FC<Props> = ({ showToast }) => {
                 aria-label={t('pr.mobile', 'Cellulare')}
                 className={dsInput}
               />
-              {mobiles.length > 1 && canEdit && (
+              {(mobiles.length > 1 || m.trim() !== '') && canEdit && (
                 <button
                   type="button"
-                  onClick={() => setMobiles(prev => prev.filter((_, j) => j !== i))}
+                  onClick={() => setMobiles(prev => (prev.length > 1 ? prev.filter((_, j) => j !== i) : ['']))}
                   aria-label={t('pr.remove', 'Togli questo cellulare')}
                   className="inline-flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-[var(--ds-radius-control)] bg-[var(--ds-surface-row)] text-[var(--ds-text-secondary)] hover:text-[var(--ds-text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
                 >
@@ -164,6 +215,58 @@ export const PhoneRoutingCard: React.FC<Props> = ({ showToast }) => {
           </button>
         </div>
       )}
+
+      {/* Il telefono di questo browser e degli altri dispositivi del locale. */}
+      <div className="mt-4 border-t border-[var(--ds-border)] pt-4">
+        <div className="flex items-center gap-3">
+          <div className="min-w-0 flex-1">
+            <p className="text-[14px] font-medium text-[var(--ds-text-primary)]">{t('pr.here', 'Questo dispositivo squilla')}</p>
+            <p className="text-[13px] text-[var(--ds-text-muted)]">{statusText}</p>
+          </div>
+          {configured && (
+            <button
+              type="button"
+              role="switch"
+              aria-checked={hereOn}
+              aria-label={t('pr.here', 'Questo dispositivo squilla')}
+              disabled={toggling}
+              onClick={toggleHere}
+              className={`relative inline-flex h-6 w-11 flex-shrink-0 rounded-full transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--ds-surface)] disabled:opacity-50 disabled:cursor-not-allowed ${
+                hereOn ? 'bg-[var(--ds-seated-solid)]' : 'bg-[var(--ds-surface-row)] border border-[var(--ds-border)]'
+              }`}
+            >
+              <span aria-hidden="true"
+                    className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition-transform ${hereOn ? 'translate-x-5' : 'translate-x-0.5'} translate-y-0.5`} />
+            </button>
+          )}
+        </div>
+        {hereOn && (
+          <p className="mt-2 text-[12px] text-[var(--ds-text-muted)]">
+            {t('pr.hereHint', 'Serve il microfono (il browser lo chiede alla prima chiamata) e la pagina del CRM aperta. Meglio con una cuffia.')}
+          </p>
+        )}
+        {devices.filter(d => !d.mine).length > 0 && (
+          <ul className="mt-3 space-y-1.5">
+            {devices.filter(d => !d.mine).map(d => (
+              <li key={d.id} className="flex items-center gap-2 rounded-[var(--ds-radius-sm)] bg-[var(--ds-surface-row)] px-3 py-2 text-[13px]">
+                <Monitor className="h-4 w-4 flex-shrink-0 text-[var(--ds-text-secondary)]" aria-hidden />
+                <span className="min-w-0 flex-1 truncate text-[var(--ds-text-primary)]">{d.label || d.user_name || t('pr.device', 'Dispositivo')}</span>
+                <span className="flex-shrink-0 tabular-nums text-[var(--ds-text-muted)]">{lastSeen(d.last_seen_at)}</span>
+                {canEdit && (
+                  <button
+                    type="button"
+                    onClick={() => removeDevice(d)}
+                    aria-label={t('pr.removeDevice', 'Spegni questo dispositivo')}
+                    className="inline-flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-[var(--ds-radius-control)] text-[var(--ds-text-secondary)] hover:text-[var(--ds-text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+                  >
+                    <X className="h-4 w-4" aria-hidden />
+                  </button>
+                )}
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
     </div>
   );
 };

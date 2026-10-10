@@ -206,7 +206,7 @@ import {
     spellItalianPhoneDigits,
 } from './services/elevenlabsService.js';
 import { buildCallerCard, addLiveCall, removeLiveCall, listLiveCalls, findRecentLiveCall, updateLiveCallStage, type LiveCall, type LiveCallStage, type CallerCard } from './services/liveCalls.js';
-import { registerSofiaCall, unavailableTwiml, twimlResponse, dialMobilesTwiml, whisperTwiml, DEFAULT_PHONE_ROUTING, PHONE_ROUTING_MAX_MOBILES, PHONE_ROUTING_RING_MIN, PHONE_ROUTING_RING_MAX, type SofiaInitData, type PhoneRouting } from './services/phoneRouting.js';
+import { registerSofiaCall, unavailableTwiml, twimlResponse, dialLocaleTwiml, whisperTwiml, outboundTwiml, parseRoutingMode, softphoneConfig, softphoneToken, deviceIdentity, parseDeviceIdentity, isCallableNumber, SOFTPHONE_TOKEN_TTL_SECONDS, DEFAULT_PHONE_ROUTING, PHONE_ROUTING_MAX_MOBILES, PHONE_ROUTING_RING_MIN, PHONE_ROUTING_RING_MAX, type SofiaInitData, type PhoneRouting } from './services/phoneRouting.js';
 import {
     ROOM_OCCUPANCY_CAPS_KEY,
     RoomOccupancyCap,
@@ -2454,7 +2454,7 @@ async function getPhoneRouting(tenantId: number): Promise<PhoneRouting> {
         if (typeof raw !== 'string' || !raw) return DEFAULT_PHONE_ROUTING;
         const parsed = JSON.parse(raw);
         return {
-            mode: parsed.mode === 'prima_cellulare' ? 'prima_cellulare' : 'solo_sofia',
+            mode: parseRoutingMode(parsed.mode),
             mobiles: Array.isArray(parsed.mobiles) ? parsed.mobiles.filter((m: unknown) => typeof m === 'string' && e164OrEmpty(m)) : [],
             ring_seconds: Number.isInteger(parsed.ring_seconds) ? parsed.ring_seconds : DEFAULT_PHONE_ROUTING.ring_seconds,
         };
@@ -2519,20 +2519,23 @@ async function handleTwilioVoiceInbound(tenantId: number, req: express.Request, 
 
     const voiceOn = await isFeatureEnabledForTenant(tenantId, 'voice');
     const routing = voiceOn ? await getPhoneRouting(tenantId) : DEFAULT_PHONE_ROUTING;
-    const ringMobiles = routing.mode === 'prima_cellulare' && routing.mobiles.length > 0 && !!to;
+    // I dispositivi del CRM squillano solo se il softphone è configurato e
+    // se si sono fatti vivi di recente: uno spento da giorni non serve.
+    const clients = routing.mode === 'prima_locale' && softphoneConfig() ? await ringingDeviceIdentities(tenantId) : [];
+    const ringLocale = routing.mode === 'prima_locale' && (clients.length > 0 || routing.mobiles.length > 0) && !!to;
 
     // Il registro per primo: anche se Sofia fallisce, la chiamata resta.
     await queryWithRetry(
         `INSERT INTO phone_calls (tenant_id, call_sid, from_number, to_number, routing)
          VALUES ($1, $2, $3, $4, $5)
          ON CONFLICT (call_sid) DO NOTHING`,
-        [tenantId, callSid, caller || fromRaw || null, to || null, ringMobiles ? 'prima_cellulare' : 'solo_sofia']
+        [tenantId, callSid, caller || fromRaw || null, to || null, ringLocale ? 'prima_locale' : 'solo_sofia']
     );
     // Il banner in parallelo: la scheda non deve rallentare la risposta. Una
     // chiamata persa si chiude solo dopo che il banner è aperto, o la card
     // resterebbe su «Sofia sta parlando» (ElevenLabs può fallire prima che
     // la scheda sia pronta).
-    const announced = announceSofiaCallStarted(tenantId, { caller_id: caller, call_sid: callSid }, ringMobiles ? 'ringing' : 'sofia').catch(() => null);
+    const announced = announceSofiaCallStarted(tenantId, { caller_id: caller, call_sid: callSid }, ringLocale ? 'ringing' : 'sofia').catch(() => null);
     void announced.then(card => {
         if (!card?.customer) return;
         return queryWithRetry(
@@ -2547,13 +2550,17 @@ async function handleTwilioVoiceInbound(tenantId: number, req: express.Request, 
         return;
     }
 
-    if (ringMobiles) {
-        res.type('text/xml').send(dialMobilesTwiml({
+    if (ringLocale) {
+        res.type('text/xml').send(dialLocaleTwiml({
+            clients,
             mobiles: routing.mobiles,
             ringSeconds: routing.ring_seconds,
             callerId: to,
+            parentCallSid: callSid,
+            caller,
             afterDialUrl: voiceStepUrl(req, 'after-dial'),
             whisperUrl: voiceStepUrl(req, 'whisper', callSid),
+            clientAnsweredUrl: voiceStepUrl(req, 'client-answered', callSid),
         }));
         return;
     }
@@ -2656,6 +2663,185 @@ async function handleTwilioVoiceWhisperOk(tenantId: number, req: express.Request
     if (live) socketService?.broadcastToRolesRoom(tenantId, PHONE_BANNER_ROLES, 'phoneCall:updated', { id: live.id, stage: live.stage });
 }
 
+// --- Softphone nel CRM (Fase 3) -------------------------------------------
+const SOFTPHONE_DEVICE_FRESH_DAYS = 7;
+
+async function ringingDeviceIdentities(tenantId: number): Promise<string[]> {
+    const result = await queryWithRetry(
+        `SELECT id FROM phone_devices
+         WHERE tenant_id = $1 AND last_seen_at > NOW() - make_interval(days => $2)
+         ORDER BY last_seen_at DESC LIMIT 10`,
+        [tenantId, SOFTPHONE_DEVICE_FRESH_DAYS]
+    );
+    return result.rows.map(r => deviceIdentity(tenantId, r.id));
+}
+
+/** Il dispositivo dietro un'identità Twilio, col nome di chi lo usa. */
+async function findPhoneDevice(tenantId: number, deviceId: number): Promise<{ id: number; user_id: number | null; user_name: string | null } | null> {
+    const result = await queryWithRetry(
+        `SELECT d.id, d.user_id, u.full_name AS user_name
+         FROM phone_devices d LEFT JOIN users u ON u.id = d.user_id
+         WHERE d.tenant_id = $1 AND d.id = $2`,
+        [tenantId, deviceId]
+    );
+    return result.rows[0] ?? null;
+}
+
+// Un dispositivo del CRM ha risposto (status callback «answered» del
+// <Client>): la chiamata è sua, Twilio ha già chiuso gli altri squilli.
+async function handleTwilioVoiceClientAnswered(tenantId: number, req: express.Request, res: express.Response): Promise<void> {
+    if (!validateTwilioSignature(req)) {
+        res.status(403).send();
+        return;
+    }
+    res.status(204).send();
+    const parentSid = String(req.query.p || req.body?.ParentCallSid || '');
+    const who = parseDeviceIdentity(req.body?.To || req.body?.Called);
+    if (!parentSid || !who || who.tenantId !== tenantId) return;
+    const device = await findPhoneDevice(tenantId, who.deviceId);
+    const answeredBy = device?.user_id ? `utente:${device.user_id}` : `dispositivo:${who.deviceId}`;
+    const taken = await queryWithRetry(
+        `UPDATE phone_calls SET status = 'answered', answered_at = NOW(), answered_by = $3
+         WHERE call_sid = $1 AND tenant_id = $2 AND status = 'ringing'
+         RETURNING id`,
+        [parentSid, tenantId, answeredBy]
+    );
+    if (!taken.rowCount) return;
+    const live = updateLiveCallStage(tenantId, parentSid, 'staff');
+    if (live) {
+        socketService?.broadcastToRolesRoom(tenantId, PHONE_BANNER_ROLES, 'phoneCall:updated', {
+            id: live.id, stage: live.stage, answered_by_name: device?.user_name ?? null,
+        });
+    }
+}
+
+// «Richiama» dal CRM: la TwiML App chiama qui quando il browser fa
+// device.connect({ params: { To } }). Il tenant viene dall'identità del
+// dispositivo (firmata da Twilio), così la TwiML App serve tutti i locali.
+async function handleTwilioVoiceClientCall(req: express.Request, res: express.Response): Promise<void> {
+    if (!validateTwilioSignature(req)) {
+        res.status(403).send();
+        return;
+    }
+    const who = parseDeviceIdentity(req.body?.From || req.body?.Caller);
+    const refuse = (text: string): void => {
+        res.type('text/xml').send(twimlResponse(`<Say language="it-IT">${text}</Say><Hangup/>`));
+    };
+    if (!who) return refuse('Dispositivo non riconosciuto.');
+    await runWithTenantContext(who.tenantId, async () => {
+        const device = await findPhoneDevice(who.tenantId, who.deviceId);
+        if (!device) return refuse('Dispositivo non riconosciuto.');
+        const target = e164OrEmpty(normalizeItalianPhone(String(req.body?.To || '')));
+        if (!target || !isCallableNumber(target)) return refuse('Numero non chiamabile dal CRM.');
+        // Il numero del locale è quello su cui arrivano le chiamate di Sofia.
+        const line = await queryWithRetry(
+            `SELECT to_number FROM phone_calls
+             WHERE tenant_id = $1 AND direction = 'inbound' AND to_number IS NOT NULL
+             ORDER BY started_at DESC LIMIT 1`,
+            [who.tenantId]
+        );
+        const callerId = e164OrEmpty(line.rows[0]?.to_number);
+        if (!callerId) return refuse('Il numero del locale non è ancora collegato.');
+        const customer = await findCustomerByPhone(who.tenantId, target);
+        await queryWithRetry(
+            `INSERT INTO phone_calls (tenant_id, call_sid, direction, from_number, to_number, customer_id, routing, status, answered_at, answered_by)
+             VALUES ($1, $2, 'outbound', $3, $4, $5, 'richiamata', 'answered', NOW(), $6)
+             ON CONFLICT (call_sid) DO NOTHING`,
+            [who.tenantId, String(req.body?.CallSid || ''), callerId, target,
+             customer.exists ? customer.customer_id : null,
+             device.user_id ? `utente:${device.user_id}` : `dispositivo:${device.id}`]
+        );
+        res.type('text/xml').send(outboundTwiml({ callerId, number: target }));
+    });
+}
+
+// Fine della chiamata in uscita (status callback della TwiML App).
+async function handleTwilioVoiceClientStatus(req: express.Request, res: express.Response): Promise<void> {
+    if (!validateTwilioSignature(req)) {
+        res.status(403).send();
+        return;
+    }
+    res.status(204).send();
+    const who = parseDeviceIdentity(req.body?.From || req.body?.Caller);
+    if (!who) return;
+    const duration = Number(req.body?.CallDuration);
+    await runWithTenantContext(who.tenantId, () => queryWithRetry(
+        `UPDATE phone_calls SET ended_at = NOW(), duration_seconds = $3 WHERE call_sid = $1 AND tenant_id = $2`,
+        [String(req.body?.CallSid || ''), who.tenantId, Number.isFinite(duration) ? Math.trunc(duration) : null]
+    ));
+}
+
+app.post('/webhook/twilio/voice/client-call', twilioUrlEncoded, (req, res) => { void handleTwilioVoiceClientCall(req, res); });
+app.post('/webhook/twilio/voice/client-status', twilioUrlEncoded, (req, res) => { void handleTwilioVoiceClientStatus(req, res); });
+
+// Dispositivi che squillano («Questo dispositivo squilla» nelle Impostazioni).
+const phoneDevicesAuthorize = authorize(...PHONE_BANNER_ROLES);
+const DEVICE_KEY_RE = /^[A-Za-z0-9-]{16,64}$/;
+
+app.get('/phone/devices', authenticate, requireFeature('voice'), phoneDevicesAuthorize, async (req, res) => {
+    const result = await queryWithRetry(
+        `SELECT d.id, d.device_key, d.label, d.user_id, u.full_name AS user_name, d.last_seen_at
+         FROM phone_devices d LEFT JOIN users u ON u.id = d.user_id
+         WHERE d.tenant_id = $1 ORDER BY d.last_seen_at DESC`,
+        [req.tenantId!]
+    );
+    res.json({
+        configured: softphoneConfig() != null,
+        // La chiave del dispositivo resta al suo browser: agli altri basta sapere se è il loro.
+        devices: result.rows.map(r => ({
+            id: r.id, label: r.label, user_id: r.user_id, user_name: r.user_name,
+            last_seen_at: r.last_seen_at, mine: r.device_key === String(req.query.device_key || ''),
+        })),
+    });
+});
+
+app.post('/phone/devices', authenticate, requireFeature('voice'), phoneDevicesAuthorize, async (req, res) => {
+    const deviceKey = String(req.body?.device_key || '');
+    if (!DEVICE_KEY_RE.test(deviceKey)) return res.status(400).json({ error: 'invalid_device_key' });
+    const label = String(req.body?.label || '').trim().slice(0, 80) || null;
+    // La chiave di un altro locale non si ruba: l'ON CONFLICT aggiorna solo
+    // una riga dello stesso tenant (RLS e filtro esplicito).
+    const result = await queryWithRetry(
+        `INSERT INTO phone_devices (tenant_id, device_key, user_id, label)
+         VALUES ($1, $2, $3, $4)
+         ON CONFLICT (device_key) DO UPDATE
+           SET user_id = EXCLUDED.user_id, label = COALESCE(EXCLUDED.label, phone_devices.label), last_seen_at = NOW()
+           WHERE phone_devices.tenant_id = EXCLUDED.tenant_id
+         RETURNING id`,
+        [req.tenantId!, deviceKey, req.user?.userId ?? null, label]
+    );
+    if (!result.rowCount) return res.status(409).json({ error: 'device_key_in_use' });
+    res.status(201).json({ id: result.rows[0].id });
+});
+
+app.delete('/phone/devices/:id', authenticate, requireFeature('voice'), phoneDevicesAuthorize, async (req, res) => {
+    const id = Number(req.params.id);
+    // Il proprio dispositivo lo spegne chiunque; quelli degli altri solo chi
+    // gestisce le impostazioni.
+    const canAll = await RolePermissionService.hasPermission(req.user!.tenantId, req.user!.role, 'settings:full');
+    const result = await queryWithRetry(
+        `DELETE FROM phone_devices WHERE tenant_id = $1 AND id = $2 AND ($3::boolean OR user_id = $4) RETURNING id`,
+        [req.tenantId!, id, canAll, req.user?.userId ?? null]
+    );
+    if (!result.rowCount) return res.status(404).json({ error: 'not_found' });
+    res.status(204).send();
+});
+
+// Token del Voice SDK per un dispositivo acceso. Rinnovato dal browser prima
+// della scadenza (un'ora); ogni rinnovo dice che il dispositivo è vivo.
+app.post('/phone/token', authenticate, requireFeature('voice'), phoneDevicesAuthorize, async (req, res) => {
+    const config = softphoneConfig();
+    if (!config) return res.status(503).json({ error: 'softphone_non_configurato' });
+    const deviceKey = String(req.body?.device_key || '');
+    const result = await queryWithRetry(
+        `UPDATE phone_devices SET last_seen_at = NOW() WHERE tenant_id = $1 AND device_key = $2 RETURNING id`,
+        [req.tenantId!, deviceKey]
+    );
+    if (!result.rowCount) return res.status(404).json({ error: 'device_not_enabled' });
+    const identity = deviceIdentity(req.tenantId!, result.rows[0].id);
+    res.json({ token: softphoneToken(config, identity), identity, ttl_seconds: SOFTPHONE_TOKEN_TTL_SECONDS });
+});
+
 // Fine chiamata (status callback del numero): durata, e il controllo delle
 // chiamate di Sofia rimaste senza conversazione.
 async function handleTwilioVoiceStatus(tenantId: number, req: express.Request, res: express.Response): Promise<void> {
@@ -2679,7 +2865,7 @@ async function handleTwilioVoiceStatus(tenantId: number, req: express.Request, r
     // Riattaccata mentre squillava il cellulare del locale: il cliente ha
     // aspettato e non ha trovato nessuno, va richiamato (10/10: due chiamate
     // vere chiuse così, mai finite in Da ricontattare).
-    if (row.status === 'ringing' && row.routing === 'prima_cellulare') {
+    if (row.status === 'ringing' && (row.routing === 'prima_locale' || row.routing === 'prima_cellulare')) {
         await recordMissedPhoneCall(tenantId, callSid, e164OrEmpty(row.from_number), 'riattaccata_in_attesa');
         return;
     }
@@ -2723,6 +2909,7 @@ voiceRoute('inbound', handleTwilioVoiceInbound);
 voiceRoute('after-dial', handleTwilioVoiceAfterDial);
 voiceRoute('whisper', handleTwilioVoiceWhisper);
 voiceRoute('whisper-ok', handleTwilioVoiceWhisperOk);
+voiceRoute('client-answered', handleTwilioVoiceClientAnswered);
 voiceRoute('status', handleTwilioVoiceStatus);
 
 // Regola del giro nelle Impostazioni (card «Chi risponde al telefono»).
@@ -2732,8 +2919,9 @@ app.get('/settings/phone-routing', authenticate, requireFeature('voice'), async 
 
 app.put('/settings/phone-routing', authenticate, requireFeature('voice'), requirePermission('settings:full'), async (req, res) => {
     const body = req.body ?? {};
-    const mode = body.mode === 'prima_cellulare' ? 'prima_cellulare' : body.mode === 'solo_sofia' ? 'solo_sofia' : null;
-    if (!mode) return res.status(400).json({ error: 'invalid_value', message: 'mode deve essere solo_sofia o prima_cellulare' });
+    const mode = body.mode === 'solo_sofia' ? 'solo_sofia'
+        : (body.mode === 'prima_locale' || body.mode === 'prima_cellulare') ? 'prima_locale' : null;
+    if (!mode) return res.status(400).json({ error: 'invalid_value', message: 'mode deve essere solo_sofia o prima_locale' });
     const ring = Number(body.ring_seconds);
     if (!Number.isInteger(ring) || ring < PHONE_ROUTING_RING_MIN || ring > PHONE_ROUTING_RING_MAX) {
         return res.status(400).json({ error: 'invalid_value', message: `ring_seconds fra ${PHONE_ROUTING_RING_MIN} e ${PHONE_ROUTING_RING_MAX}` });
@@ -2750,9 +2938,8 @@ app.put('/settings/phone-routing', authenticate, requireFeature('voice'), requir
     if (mobiles.length > PHONE_ROUTING_MAX_MOBILES) {
         return res.status(400).json({ error: 'invalid_value', message: `Al massimo ${PHONE_ROUTING_MAX_MOBILES} cellulari` });
     }
-    if (mode === 'prima_cellulare' && mobiles.length === 0) {
-        return res.status(400).json({ error: 'invalid_value', message: 'Serve almeno un cellulare' });
-    }
+    // Senza cellulari squillano solo i dispositivi del CRM accesi; se non ce
+    // n'è nessuno la chiamata va subito a Sofia, quindi nessun vincolo qui.
     const routing: PhoneRouting = { mode, mobiles, ring_seconds: ring };
     await queryWithRetry(
         `INSERT INTO app_settings (tenant_id, key, text_value, updated_at)

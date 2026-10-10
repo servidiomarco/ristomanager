@@ -1,7 +1,8 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Bell, BellOff, CalendarDays, Phone, PhoneCall, PhoneIncoming, Wand2, X } from 'lucide-react';
-import { Avatar, StatusPill } from '../ds';
+import { Bell, BellOff, CalendarDays, CalendarPlus, Mic, MicOff, Phone, PhoneCall, PhoneIncoming, PhoneOff, PhoneOutgoing, Wand2, X } from 'lucide-react';
+import { Avatar, StatusPill, dsButton } from '../ds';
+import { useSoftphone, answer, decline, hangUp, toggleMute, type SoftphoneCall } from '../../services/softphone';
 import { socketClient } from '../../services/socketClient';
 import { voiceCallsApiService, type LiveCall, type LiveCallEnded, type LiveCallStage } from '../../services/voiceCallsApiService';
 import { getRomeDatePart } from '../../utils/reservationTime';
@@ -27,7 +28,14 @@ const STALE_MS = 20 * 60 * 1000;
 const MAX_VISIBLE = 3;
 const MUTE_KEY = 'sympotia.callBanner.muted';
 
-type BannerCall = LiveCall & { ended?: LiveCallEnded };
+type BannerCall = LiveCall & { ended?: LiveCallEnded; answeredByName?: string | null };
+
+export interface CallPrefill { customer_name?: string; phone?: string }
+
+const duration = (since: number): string => {
+  const s = Math.max(0, Math.floor((Date.now() - since) / 1000));
+  return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
+};
 
 // Italiani senza +39 e a gruppi, come li si detta: lo staff richiama da qui.
 // I fissi non hanno un prefisso di lunghezza fissa, restano interi.
@@ -48,7 +56,9 @@ export const CallBanner: React.FC<{
   onOpenCustomer: (phone: string) => void;
   onOpenReservation: (r: { id: number; reservation_time: string }) => void;
   onOpenCalls: () => void;
-}> = ({ enabled, onOpenCustomer, onOpenReservation, onOpenCalls }) => {
+  /** «Nuova prenotazione» durante la chiamata, coi dati del cliente. */
+  onNewReservation: (prefill: CallPrefill) => void;
+}> = ({ enabled, onOpenCustomer, onOpenReservation, onOpenCalls, onNewReservation }) => {
   const { t, i18n } = useTranslation(undefined, { useSuspense: false });
   const [calls, setCalls] = useState<BannerCall[]>([]);
   const [muted, setMuted] = useState<boolean>(readMuted);
@@ -116,9 +126,11 @@ export const CallBanner: React.FC<{
     };
 
     // Squillava il cellulare e ha risposto qualcuno, o è passata a Sofia.
-    const onUpdated = (update: { id: string; stage: LiveCallStage }) => {
+    const onUpdated = (update: { id: string; stage: LiveCallStage; answered_by_name?: string | null }) => {
       if (!update?.id) return;
-      setCalls(prev => prev.map(c => (c.id === update.id && !c.ended ? { ...c, stage: update.stage } : c)));
+      setCalls(prev => prev.map(c => (c.id === update.id && !c.ended
+        ? { ...c, stage: update.stage, answeredByName: update.answered_by_name ?? c.answeredByName ?? null }
+        : c)));
     };
 
     let attached: ReturnType<typeof socketClient.getSocket> = null;
@@ -148,7 +160,17 @@ export const CallBanner: React.FC<{
     return () => { alive = false; clearInterval(sweep); unsub(); attach(null); };
   }, [enabled]);
 
-  if (!enabled || calls.length === 0) return null;
+  // Il telefono di questo browser: squilla qui, o qui si sta parlando. La
+  // durata della chiamata si aggiorna ogni secondo.
+  const soft = useSoftphone();
+  const [, setTick] = useState(0);
+  useEffect(() => {
+    if (!soft.active?.connectedAt) return;
+    const id = setInterval(() => setTick(n => n + 1), 1000);
+    return () => clearInterval(id);
+  }, [soft.active?.connectedAt]);
+
+  if (!enabled || (calls.length === 0 && !soft.incoming && !soft.active)) return null;
 
   const todayRome = getRomeDatePart(new Date());
   const tomorrowRome = getRomeDatePart(new Date(Date.now() + 24 * 60 * 60 * 1000));
@@ -166,8 +188,67 @@ export const CallBanner: React.FC<{
   // Le più recenti in alto; oltre tre si vedono le ultime.
   const visible = calls.slice(-MAX_VISIBLE).reverse();
 
+  const isHere = (sc: SoftphoneCall | null, id: string): boolean => !!sc && sc.parentCallSid === id;
+  // Una chiamata del telefono di questo browser senza la sua card: in uscita
+  // («Richiama») o arrivata prima dell'evento del banner.
+  const orphan = [soft.incoming, soft.active].find(sc => sc && !(sc.parentCallSid && calls.some(c => c.id === sc.parentCallSid))) ?? null;
+
+  const ringButtons = (
+    <div className="mt-3 flex gap-2">
+      <button type="button" onClick={answer} className={`${dsButton.primary} flex-1`}>
+        <PhoneCall className="h-4 w-4" aria-hidden /> {t('phone.answer')}
+      </button>
+      <button type="button" onClick={decline} className={dsButton.quiet}>{t('phone.decline')}</button>
+    </div>
+  );
+  const inCallBar = (sc: SoftphoneCall, prefill: CallPrefill) => (
+    <div className="mt-3 flex items-center gap-2">
+      <span className="min-w-[3.25rem] text-[14px] font-semibold tabular-nums text-[var(--ds-seated-text)]">
+        {sc.connectedAt ? duration(sc.connectedAt) : '…'}
+      </span>
+      <button
+        type="button"
+        onClick={toggleMute}
+        aria-pressed={soft.muted}
+        aria-label={soft.muted ? t('phone.micOn') : t('phone.micOff')}
+        title={soft.muted ? t('phone.micOn') : t('phone.micOff')}
+        className={`inline-flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-[var(--ds-radius-control)] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] ${soft.muted ? 'bg-[var(--ds-pending-tint)] text-[var(--ds-pending-text)]' : 'bg-[var(--ds-surface-row)] text-[var(--ds-text-secondary)]'}`}
+      >
+        {soft.muted ? <MicOff className="h-4 w-4" aria-hidden /> : <Mic className="h-4 w-4" aria-hidden />}
+      </button>
+      <button type="button" onClick={() => onNewReservation(prefill)} className={`${dsButton.secondary} min-w-0 flex-1 px-3`}>
+        <CalendarPlus className="h-4 w-4 flex-shrink-0" aria-hidden /> <span className="truncate">{t('phone.newBooking')}</span>
+      </button>
+      <button
+        type="button"
+        onClick={hangUp}
+        aria-label={t('phone.hangup')}
+        title={t('phone.hangup')}
+        className="inline-flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-[var(--ds-radius-control)] bg-[var(--ds-critical-tint)] text-[var(--ds-critical-text)] transition-colors hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+      >
+        <PhoneOff className="h-4 w-4" aria-hidden />
+      </button>
+    </div>
+  );
+
   return (
     <div className="pointer-events-none fixed inset-x-2 top-2 z-[58] flex flex-col gap-2 md:inset-x-auto md:right-4 md:top-[88px] md:w-[380px]">
+      {orphan && (
+        <div role="status" aria-live="polite" className="pointer-events-auto rounded-[var(--ds-radius)] border border-[var(--ds-arriving-solid)] bg-[var(--ds-surface)] p-3 shadow-[var(--ds-shadow-raised)]" style={{ animation: 'tileIn 200ms ease-out both' }}>
+          <div className="flex items-start gap-3">
+            <Avatar icon={orphan.direction === 'out' ? PhoneOutgoing : PhoneIncoming} tone="info" />
+            <div className="min-w-0 flex-1">
+              <p className="text-[12px] font-medium text-[var(--ds-arriving-text)]">
+                {orphan.direction === 'out' ? t('phone.outgoing') : t('phone.incomingHere')}
+              </p>
+              <p className="truncate text-[16px] font-semibold tabular-nums text-[var(--ds-text-primary)]">
+                {orphan.number ? displayPhone(orphan.number) : t('phone.hiddenNumber')}
+              </p>
+            </div>
+          </div>
+          {orphan === soft.incoming ? ringButtons : inCallBar(orphan, { phone: orphan.number })}
+        </div>
+      )}
       {visible.map(call => {
         const { card, ended } = call;
         const customer = card.customer;
@@ -178,7 +259,11 @@ export const CallBanner: React.FC<{
         const stage: LiveCallStage = call.stage ?? 'sofia';
         const headline = ended
           ? t(`phone.outcome.${ended.outcome}`)
-          : stage === 'ringing' ? t('phone.ringing') : stage === 'staff' ? t('phone.staff') : t('phone.sofiaTalking');
+          : isHere(soft.incoming, call.id) ? t('phone.incomingHere')
+          : isHere(soft.active, call.id) ? t('phone.onCallHere')
+          : stage === 'ringing' ? t('phone.ringing')
+          : stage === 'staff' ? (call.answeredByName ? t('phone.staffBy', { name: call.answeredByName }) : t('phone.staff'))
+          : t('phone.sofiaTalking');
         // Il telaio che gira dice «la macchina sta lavorando»: solo con Sofia.
         const live = !ended && stage === 'sofia';
         // La bacchetta solo dove c'è Sofia di mezzo; il resto è telefono.
@@ -269,6 +354,9 @@ export const CallBanner: React.FC<{
                   </span>
                 </button>
               ))}
+
+              {!ended && isHere(soft.incoming, call.id) && ringButtons}
+              {!ended && isHere(soft.active, call.id) && inCallBar(soft.active!, { customer_name: name || undefined, phone: customer?.phone || card.phone })}
 
               {ended && (ended.outcome === 'callback' || ended.outcome === 'follow_up' || ended.outcome === 'missed') && (
                 <button
