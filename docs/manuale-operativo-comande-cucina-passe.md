@@ -2,7 +2,10 @@
 
 Aggiornato al 27 agosto 2026. Vale per il ciclo comande completo in produzione
 (PR #285–#287 comprese: servita, annulla, riporta, fuoco a consumo, avvisi
-sonori).
+sonori). La parte sulla cassa Passepartout (§5), la presenza sul tavolo e
+l'avviso di uscita pronta (§1) sono aggiornati al 10 ottobre 2026; le altre
+novità arrivate dopo il 27 agosto sono descritte nel catalogo delle
+funzionalità.
 
 ## Il giro in una frase
 
@@ -36,6 +39,10 @@ l'uscita intera attraverso tutte le partite.
 - I piatti si aggiungono all'**uscita** corrente (1ª, 2ª, 3ª…). Il numero di
   uscita proposto è quello dopo l'ultima già mandata. Varianti e note viaggiano
   sulla riga e la cucina le vede sempre.
+- Se sul tavolo sta già lavorando un collega da un altro palmare, un banner lo
+  dice per nome e da quanto («Ci sta lavorando anche Rosa · da 3′»). Non
+  blocca niente: si continua a lavorare, ma nessuno batte gli stessi piatti
+  senza sapere dell'altro.
 
 ### Inviare
 
@@ -57,8 +64,15 @@ l'uscita intera attraverso tutte le partite.
 
 ### Quando l'uscita è pronta
 
-Arriva una **notifica push** sul telefono: «Tavolo N — servizio, nª uscita
-pronta al passe». La manda il passe col bottone *Chiama*. Vai a ritirare.
+Quando la cucina spunta l'ultima riga dell'uscita arriva da sola una
+**notifica push** ai ruoli di sala («Tavolo 40 — cucina · 2ª uscita pronta»)
+e il palmare suona con una vibrazione, anche se sei sulla griglia tavoli o su
+un altro tavolo. Se poi il passe preme *Chiama*, l'avviso suona di nuovo e la
+notifica si aggiorna invece di raddoppiare. Vai a ritirare.
+
+La notifica si spegne per tutti quando l'uscita è servita, quando il cuoco
+toglie la spunta «pronto» (si riaccende al nuovo pronto) e quando la comanda
+viene chiusa o cancellata.
 
 ---
 
@@ -162,7 +176,61 @@ scarico, parte da solo. Il passe può comunque lanciare a mano in anticipo.
 
 ---
 
-## 5 · Se qualcosa non torna
+## 5 · Con la cassa Passepartout
+
+Vale solo nei locali con la cassa Passepartout e la scheda **«Comande del CRM
+in cassa»** accesa (Impostazioni → Passepartout). Servono le comande accese, i
+tavoli del CRM abbinati a quelli della cassa, il tipo di pagamento in cassa e
+l'agente del PC della cassa aggiornato: la scheda dice cosa manca.
+
+### Il principio
+
+La comanda presa nel CRM nasce e cresce nella **comanda in cassa del tavolo
+vero**, con varianti, aggiunte e storni. Se il tavolo è già aperto in cassa,
+le righe del CRM si aggiungono alla stessa comanda. Il giro di sala, cucina e
+passe resta quello dei §1–§4.
+
+### Sul palmare
+
+- **Il tavolo aperto dalla cassa** (serve anche «Tavoli aperti in cassa»
+  acceso): un tavolo aperto dalla cassa o dal palmare Passepartout, che nel
+  CRM non ha ancora una comanda, sta fra le comande aperte col totale della
+  cassa («17,50 € · in cassa»), non fra i tavoli liberi. Aprendolo, il
+  riquadro «Dalla cassa» mostra subito quello che c'è già; quello che mandi
+  dal CRM si aggiunge alla stessa comanda in cassa. Sui tavoli uniti si apre
+  quello che ha la comanda in cassa.
+- **Il riquadro «Dalla cassa»**: in coda alla comanda del CRM c'è quello che
+  sul tavolo hanno battuto la cassa o il palmare Passepartout, col totale del
+  tavolo in cassa («Tavolo in cassa 42,00 €»). È in sola lettura — quelle
+  righe si correggono in cassa — e non passa dal monitor di cucina del CRM,
+  perché in cucina le manda la cassa. Si aggiorna da solo entro qualche
+  secondo; se la cassa non risponde, il riquadro lo dice.
+- **Non tenere aperto in cassa un tavolo che riceve comande dal CRM**:
+  salvando, la cassa perderebbe le sue modifiche, e finché resta aperto i
+  piatti del CRM su quel tavolo aspettano.
+
+### Chi stampa in cucina e al bar
+
+| Scelta | Cosa succede |
+|---|---|
+| **La cassa** | Le uscite lanciate nel CRM le manda in produzione la cassa, alle sue stampanti. Le stampanti di partita del CRM non stampano questi tavoli; i monitor di cucina restano. Se dopo qualche secondo i piatti non sono partiti, il CRM chiede alla cassa: se risponde li manda lei (anche quando è lenta o ha il tavolo aperto), se non risponde stampa il CRM. Così non escono doppioni. |
+| **Il CRM** (solo col conto del CRM) | Stampano le stampanti di partita del CRM. In cassa **non premere «Invia» e non chiudere dallo schermo** questi tavoli: manderebbe in produzione le righe del CRM una seconda volta. Il tavolo lo chiude il pagamento nel CRM. |
+
+### Chi fa il conto
+
+| Scelta | Cosa succede |
+|---|---|
+| **La cassa** | Il conto è la comanda in cassa, con le righe battute in cassa, il coperto della cassa al suo prezzo e lo sconto della cassa. Si paga in cassa, dal QR del tavolo o dal CRM, che lo prende dalla cassa. Chiudendo il tavolo in cassa, l'ordine si chiude da solo anche nel CRM. |
+| **Il CRM** | Il conto nasce dalle righe del CRM, col coperto e gli sconti del CRM. Pagato nel CRM o dal QR, chiude la comanda in cassa col tipo di pagamento esterno e lo scontrino lo fa la cassa. Gli sconti del CRM vanno sul conto in cassa: righe a prezzo pieno, totale e scontrino scontati. Se sul tavolo c'è qualcosa battuto in cassa o dal palmare Passepartout, il conto lo fa comunque la cassa (e lo sconto si fa lì). |
+
+### Col nodo di sala
+
+Con il nodo di sala e «Servizio completo sul nodo» acceso, le comande in cassa
+le scrive il nodo, anche a internet caduta; senza nodo le scrive il cloud.
+
+---
+
+## 6 · Se qualcosa non torna
 
 - **«riconnessione…» sull'header** — la rete balla. I monitor ricaricano la
   coda da soli al ritorno; nel dubbio, il ricarico periodico (60″ cucina, 20″
@@ -179,4 +247,13 @@ scarico, parte da solo. Il passe può comunque lanciare a mano in anticipo.
   il blocco «In attesa di lancio» del passe: qualcuno deve premere *Lancia*.
 - **La stampante di partita è muta** — il lancio e la stampa viaggiano
   insieme: se l'uscita è sul monitor, la stampa è stata accodata. Il problema
-  è a valle (agente di stampa / stampante): vedi il playbook stampanti.
+  è a valle (agente di stampa / stampante): vedi il playbook stampanti. Con la
+  cassa Passepartout e «Chi stampa: la cassa», i tavoli del CRM li stampa la
+  cassa alle sue stampanti, non quelle di partita del CRM (§5).
+- **Con la cassa Passepartout, i piatti del CRM non arrivano in cassa** — il
+  tavolo è probabilmente aperto sullo schermo della cassa: finché resta aperto
+  lì, i piatti del CRM su quel tavolo aspettano. Esci dal tavolo in cassa.
+- **Il riquadro «Dalla cassa» dice che la cassa non risponde** — la cassa o il
+  PC della cassa sono spenti o fuori rete. Con «Chi stampa: la cassa» i piatti
+  li stampa il CRM, quindi il servizio va avanti; la «Verifica della cassa»
+  in Impostazioni → Passepartout dice cosa sistemare.

@@ -2,7 +2,7 @@
 
 **Gestione clienti, comunicazioni e relazioni**
 
-Versione 1.0 · Luglio 2026
+Versione 1.1 · Ottobre 2026
 
 ---
 
@@ -18,10 +18,11 @@ Versione 1.0 · Luglio 2026
 8. [Gestione dei no-show](#8-gestione-dei-no-show)
 9. [Rilevamento e unione dei duplicati](#9-rilevamento-e-unione-dei-duplicati)
 10. [Il modulo Conversazioni](#10-il-modulo-conversazioni)
-11. [Collegamento con Prenotazioni e Banchetti](#11-collegamento-con-prenotazioni-e-banchetti)
-12. [Flussi di lavoro consigliati](#12-flussi-di-lavoro-consigliati)
-13. [Domande frequenti (FAQ)](#13-domande-frequenti-faq)
-14. [Glossario](#14-glossario)
+11. [Messaggi automatici e «La tua prenotazione»](#11-messaggi-automatici-e-la-tua-prenotazione)
+12. [Collegamento con Prenotazioni e Banchetti](#12-collegamento-con-prenotazioni-e-banchetti)
+13. [Flussi di lavoro consigliati](#13-flussi-di-lavoro-consigliati)
+14. [Domande frequenti (FAQ)](#14-domande-frequenti-faq)
+15. [Glossario](#15-glossario)
 
 ---
 
@@ -42,6 +43,7 @@ Il CRM è l'insieme degli strumenti che permettono di **conoscere e gestire la c
 - **Clienti** — la rubrica anagrafica, con dati di contatto, preferenze, allergie, stato VIP e storico delle visite. È il cuore del CRM.
 - **Conversazioni** — il registro delle chiamate gestite dall'agente vocale e dei messaggi inviati, con la possibilità di ricontattare, prendere nota e creare prenotazioni.
 - **Prenotazioni e Banchetti** — ogni prenotazione e ogni evento a banchetto è associato a un cliente, alimentando automaticamente il suo storico.
+- **Messaggi automatici** — conferma, promemoria e il link «La tua prenotazione», da cui l'ospite conferma, cambia o annulla da solo (vedi §11).
 
 L'obiettivo del CRM è duplice: da un lato **velocizzare il lavoro in sala** (riconoscere subito un cliente abituale, il suo tavolo preferito, le sue allergie), dall'altro **supportare le decisioni commerciali** (identificare i clienti VIP, monitorare i no-show, non perdere occasioni di ricontatto).
 
@@ -83,6 +85,8 @@ Il modulo **Clienti** si apre dal menu laterale, gruppo **Gestione → Clienti**
 
 In alto è presente una **barra di ricerca**. Si può cercare per nome, numero di telefono o email: l'elenco si filtra man mano che si digita. È il modo più rapido per trovare la scheda di un cliente che sta chiamando o si presenta al ristorante.
 
+La ricerca trova le parole **in qualsiasi ordine** e bastano le prime lettere: «Rossi Mar» trova «Mario Rossi». Il telefono si cerca per sole cifre, senza badare a spazi o al prefisso +39. In cima compaiono i clienti il cui nome comincia con quello che si è scritto. La stessa ricerca vale nei suggerimenti del form di prenotazione e nella ricerca globale: scrivendo il nome di un cliente già in rubrica lo si ritrova, invece di creare un doppione.
+
 ### 4.2 Aggiungere un nuovo cliente
 
 Il pulsante **"+ Nuovo"** (o "Aggiungi alla rubrica") apre la scheda di inserimento. I campi disponibili sono:
@@ -117,6 +121,7 @@ Cliccando su un cliente si apre il **pannello di dettaglio**, che raccoglie in u
 - **Preferenze e note alimentari/allergie** — sempre visibili per un rapido riferimento in sala.
 - **Storico prenotazioni** — l'elenco delle prenotazioni registrate, con data, orario, numero di ospiti e indicazione del turno (pranzo con l'icona del sole, cena con l'icona della luna). Un contatore mostra quante prenotazioni ha totalizzato il cliente.
 - **Conteggio no-show** — quante volte il cliente non si è presentato (vedi §8).
+- **Spesa** — quanto ha **speso** il cliente, le **visite con conto** e la spesa **media a coperto**. Contano i conti chiusi nel CRM delle sue prenotazioni e, nei locali con la cassa Passepartout e la lettura dei conti accesa (Impostazioni → Passepartout → «Conti della cassa nel CRM»), anche i tavoli chiusi solo in cassa. La striscia compare solo quando c'è almeno un conto.
 
 Questa scheda è pensata per essere consultata **al volo**, ad esempio mentre si è al telefono con il cliente o mentre lo si accoglie all'ingresso.
 
@@ -129,6 +134,8 @@ Queste tre funzioni trasformano la rubrica da semplice elenco a strumento di ser
 ### 6.1 Clienti VIP
 
 La spunta **"Cliente VIP"** contrassegna i clienti più importanti. Un cliente VIP viene **evidenziato nella prenotazione in sala**, così che lo staff possa riservargli un'attenzione particolare. È lo strumento più immediato per riconoscere gli habitué, i clienti di riguardo o chi merita un trattamento premium.
+
+Quando un cliente VIP prenota, da qualunque canale (CRM, sito, Sofia, WhatsApp), **titolare e direzione ricevono un avviso a parte**: «Prenotazione VIP · Marco Rossi · 4 ospiti · sab 3 ott 20:30». Basta che uno lo legga perché si spenga per tutti; si spegne da solo anche se la prenotazione viene annullata o cancellata.
 
 *Uso di gestione:* filtrare o rivedere periodicamente i clienti VIP aiuta a impostare azioni commerciali dedicate (inviti a eventi, offerte riservate).
 
@@ -229,7 +236,48 @@ I filtri "Da ricontattare" e "Ricontattati" permettono di lavorare la lista in m
 
 ---
 
-## 11. Collegamento con Prenotazioni e Banchetti
+## 11. Messaggi automatici e «La tua prenotazione»
+
+Oltre alle conversazioni, il CRM scrive da solo all'ospite nei momenti chiave della prenotazione. I messaggi partono sui canali configurati per la fonte della prenotazione (di solito WhatsApp, con l'SMS se il numero non è su WhatsApp, più una copia via email) e, nella lingua dell'ospite, entrano nello **storico messaggi della prenotazione** (passo **Comunicazione** della scheda prenotazione), con lo stato In coda / Inviato / Consegnato / Fallito.
+
+### 11.1 Conferma e avviso di modifica
+
+- Alla **conferma** della prenotazione l'ospite riceve il messaggio di conferma; al rifiuto, la disdetta con l'invito a chiamare.
+- Nella conferma WhatsApp, accanto a «Gestisci la prenotazione» (vedi §11.3), c'è il pulsante **«Come raggiungerci»**, che apre Google Maps sul locale. Compare se è compilato il campo **«Link Google Maps (Come raggiungerci)»** in Impostazioni → Ristorante → Identità e documenti legali (un link breve, `https://maps.app.goo.gl/…`).
+- Se cambiano **ora o coperti** di una prenotazione già confermata, l'ospite riceve un **avviso di modifica**.
+
+### 11.2 Promemoria automatico
+
+Il promemoria si può mandare a mano dal passo **Comunicazione** della prenotazione, oppure lasciarlo partire da solo.
+
+- **Dove si accende:** Impostazioni → Prenotazioni → **«Promemoria all'ospite»**. È spento finché il locale non lo accende.
+- **Quando parte:** a scelta, **il giorno prima a un'ora fissa** (fra le 9 e le 20; di serie alle 11) oppure **un numero di ore prima** dell'arrivo (da 2 a 48). Non parte mai fra le 21 e le 9.
+- **Chi lo riceve:** ogni prenotazione confermata, con lo stesso testo del promemoria manuale. Viene saltato chi ha prenotato o ricevuto la conferma da meno di 12 ore, chi ha già avuto il promemoria a mano e chi arriva entro un'ora. Se la prenotazione viene spostata a un altro giorno, il promemoria riparte per la data nuova.
+- **Cosa vede lo staff:** sulla card della prenotazione compare la **campanella** del promemoria inviato e il messaggio entra nello storico. Se un invio non riesce, chi gestisce le prenotazioni riceve un avviso con i nomi degli ospiti da chiamare.
+
+### 11.3 «La tua prenotazione»: l'ospite conferma, cambia o annulla
+
+È la pagina personale dell'ospite, col marchio del locale, in italiano o in inglese. Ci arriva dal link **«Gestisci la prenotazione»** che compare nella conferma e nel promemoria (pulsante nell'email e nel WhatsApp, link nell'SMS).
+
+- **Dove si accende:** Impostazioni → Prenotazioni → **«Gestione dall'ospite»**. È spenta finché il locale non la accende. Lì si sceglie anche **fino a quante ore prima** dell'arrivo l'ospite può cambiare o annullare (di serie 3, da 1 a 72); più tardi la pagina gli dice di chiamare.
+- **Cosa vede l'ospite:** data, ora, persone e sala, e tre pulsanti:
+  - **«Ci saremo»** — conferma che verrà;
+  - **«Cambia giorno, ora o persone»** — sceglie un altro giorno (fino a 60 giorni avanti) e il numero di persone (fino a 20) e vede **solo gli orari dove un tavolo si trova da solo**: il suo, se va ancora bene, altrimenti uno libero con le stesse regole del sito e di Sofia (prima nella stessa sala). Dove servirebbe lo staff, o se le persone in più farebbero scattare la caparra, la pagina gli dice di chiamare;
+  - **«Annulla la prenotazione»** — annulla, e il tavolo si libera.
+- **Limiti:** con una caparra pagata si sposta l'orario ma non il numero di persone; una prenotazione legata a un banchetto non si sposta dal link; una richiesta ancora da confermare si può ritirare.
+- **Caparra e annullo:** se mancano almeno 24 ore, l'avviso allo staff dice «caparra da rimborsare» e il rimborso si fa a mano dal pulsante di sempre (passo **Pagamenti** della prenotazione). Sotto le 24 ore la caparra resta al locale, e la pagina lo dice all'ospite prima che confermi l'annullo.
+
+**Cosa vede lo staff.**
+
+- La conferma dell'ospite compare sulla card della prenotazione: la **persona con la spunta**, in verde.
+- Un cambio arriva come avviso **«Modificata dall'ospite»**, con il prima e il dopo; l'ospite riceve la conferma col nuovo orario e la card lo mostra come confermato.
+- Un annullo arriva come avviso **«Annullata dall'ospite»** e compare sulla card.
+
+**Mandare il link a mano.** Nel passo **Comunicazione** della prenotazione, **«Copia link ospite»** mette il link negli appunti: si incolla in una chat (per esempio quando l'ospite scrive per spostare la prenotazione) o si detta al telefono.
+
+---
+
+## 12. Collegamento con Prenotazioni e Banchetti
 
 Il CRM non è un archivio isolato: i dati del cliente sono **intrecciati** con l'operatività quotidiana.
 
@@ -237,12 +285,14 @@ Il CRM non è un archivio isolato: i dati del cliente sono **intrecciati** con l
 - **Dalla conversazione alla prenotazione.** Una chiamata può diventare una prenotazione con un clic, e la prenotazione risultante compare tra quelle collegate al numero.
 - **Dalla prenotazione allo storico.** Ogni prenotazione ed evento a banchetto alimenta lo storico del cliente, costruendo nel tempo il suo profilo.
 - **No-show.** Le prenotazioni chiuse come NO_SHOW aggiornano il contatore nella scheda cliente.
+- **Dall'ospite alla prenotazione.** Conferma, cambio o annullo fatti dall'ospite dal link «La tua prenotazione» aggiornano la prenotazione e la sua card, e arrivano allo staff come avviso (vedi §11.3).
+- **Dal conto alla scheda.** I conti chiusi delle prenotazioni del cliente (e, con la cassa Passepartout, i tavoli chiusi solo in cassa) alimentano la sua spesa nella scheda (vedi §5).
 
 Questa integrazione fa sì che ogni interazione — una telefonata, una prenotazione, un banchetto — arricchisca automaticamente la conoscenza del cliente, senza doppio inserimento manuale.
 
 ---
 
-## 12. Flussi di lavoro consigliati
+## 13. Flussi di lavoro consigliati
 
 **Accoglienza di un cliente abituale (reception/sala).**
 Cercare il cliente nella rubrica → aprire la scheda → verificare tavolo preferito, allergie e note → riconoscere l'eventuale stato VIP → procedere con l'accoglienza personalizzata.
@@ -259,9 +309,18 @@ Aprire Clienti → controllare il badge "Duplicati" → aprire "Clienti duplicat
 **Analisi della clientela (titolare/manager).**
 Rivedere i clienti VIP e lo storico visite per impostare iniziative dedicate; monitorare i no-show per definire politiche di conferma o caparra.
 
+**Attivare i messaggi automatici (titolare/manager).**
+Impostazioni → Prenotazioni → «Promemoria all'ospite»: accendere e scegliere quando parte → «Gestione dall'ospite»: accendere e scegliere fino a quante ore prima l'ospite può cambiare o annullare → Impostazioni → Ristorante → Identità e documenti legali: inserire il link Google Maps, per il pulsante «Come raggiungerci».
+
+**Ospite che vuole spostare la prenotazione via chat (reception).**
+Aprire la prenotazione → passo Comunicazione → «Copia link ospite» → incollarlo nella chat: l'ospite sceglie da solo fra gli orari dove c'è posto, e lo staff riceve l'avviso «Modificata dall'ospite».
+
+**Ospite che annulla dal link con una caparra pagata (reception).**
+Arriva l'avviso «Annullata dall'ospite». Se dice «caparra da rimborsare», aprire la prenotazione → passo Pagamenti → rimborso. Sotto le 24 ore dall'arrivo la caparra resta al locale e non c'è niente da fare.
+
 ---
 
-## 13. Domande frequenti (FAQ)
+## 14. Domande frequenti (FAQ)
 
 **Perché non riesco a modificare una scheda cliente?**
 Probabilmente il tuo ruolo ha solo il permesso di consultazione (`customers:view`). La modifica richiede `customers:full`, disponibile per Reception, Manager, Direttore generale e Titolare.
@@ -281,9 +340,21 @@ Il modulo richiede il permesso `voice_calls:view`. Verifica il tuo ruolo con l'a
 **Cosa fa il pulsante "Sincronizza" in Conversazioni?**
 Importa le chiamate più recenti gestite dall'agente vocale e mostra un riepilogo dell'importazione.
 
+**Perché a un ospite non è arrivato il promemoria automatico?**
+Il promemoria salta chi ha prenotato o ricevuto la conferma da meno di 12 ore, chi l'ha già avuto a mano e chi arriva entro un'ora, e non parte mai fra le 21 e le 9. Se invece l'invio è fallito, chi gestisce le prenotazioni ha ricevuto un avviso col nome dell'ospite. In ogni caso si può mandare a mano dal passo Comunicazione della prenotazione.
+
+**Un ospite dice che dal link non riesce più ad annullare o cambiare.**
+È oltre il limite di ore scelto in «Gestione dall'ospite» (di serie 3 ore prima dell'arrivo): la pagina gli dice di chiamare. Annulla o sposta la prenotazione tu, dal CRM.
+
+**Perché l'ospite non trova l'orario che vuole nel cambio dal link?**
+La pagina mostra solo gli orari dove un tavolo si trova da solo. Dove servirebbe lo staff (per esempio unire tavoli), o se le persone in più farebbero scattare la caparra, gli chiede di chiamare.
+
+**Non vedo la spesa nella scheda del cliente.**
+La striscia della spesa compare solo quando il cliente ha almeno un conto chiuso.
+
 ---
 
-## 14. Glossario
+## 15. Glossario
 
 **CRM** — Customer Relationship Management: l'insieme degli strumenti per gestire dati e relazioni con i clienti.
 
@@ -303,6 +374,12 @@ Importa le chiamate più recenti gestite dall'agente vocale e mostra un riepilog
 
 **Permesso** — autorizzazione associata a un ruolo che abilita determinate azioni (es. `customers:full`).
 
+**Promemoria automatico** — il messaggio che ricorda all'ospite la prenotazione, mandato da solo il giorno prima o un numero di ore prima dell'arrivo.
+
+**«La tua prenotazione»** — la pagina personale dell'ospite, aperta dal link «Gestisci la prenotazione», da cui conferma («Ci saremo»), cambia o annulla da solo.
+
+**Caparra** — somma pagata online in anticipo per garantire il tavolo; si scala dal conto e, se l'ospite annulla per tempo, si rimborsa.
+
 ---
 
-*Documento generato per RistoManager AI. Le funzionalità descritte fanno riferimento ai moduli Clienti, Conversazioni e ai relativi collegamenti con Prenotazioni e Banchetti.*
+*Documento generato per RistoManager AI. Le funzionalità descritte fanno riferimento ai moduli Clienti, Conversazioni, ai messaggi automatici all'ospite e ai relativi collegamenti con Prenotazioni e Banchetti.*
