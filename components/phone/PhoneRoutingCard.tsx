@@ -1,25 +1,34 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Loader2, Monitor, PhoneForwarded, Plus, X } from 'lucide-react';
+import { Clock, Loader2, Monitor, PhoneForwarded, Plus, X } from 'lucide-react';
 import { SegmentedControl, dsButton, dsInput } from '../ds';
 import { useAuth } from '../../contexts/AuthContext';
 import { voiceCallsApiService, type PhoneDevice, type PhoneRouting } from '../../services/voiceCallsApiService';
 import { deviceKey, disableSoftphone, enableSoftphone, isEnabledHere, useSoftphone } from '../../services/softphone';
+import { PHONE_SLOTS_MAX, isHHMM, type PhoneRoutingSlot } from '../../utils/phoneSchedule';
 
 /* ── Chi risponde al telefono (docs/telefono-piano.md, Fase 3) ─────────────
    Con Sympotia davanti al numero di Sofia, il ristoratore sceglie se
    risponde subito Sofia o se prima squilla il locale: i browser del CRM con
    «Questo dispositivo squilla» acceso e, se servono, fino a tre cellulari.
-   Se nessuno risponde entro il tempo scelto, risponde Sofia. */
+   Se nessuno risponde entro il tempo scelto, risponde Sofia. Le fasce
+   orarie cambiano la regola in certi giorni e orari (per esempio Sofia
+   durante il servizio della sera); l'interruttore rapido sta in testata. */
 
 const MAX_MOBILES = 3;
+// Lunedì per primo, come il calendario italiano.
+const DAYS = [1, 2, 3, 4, 5, 6, 7];
+const NEW_SLOT: PhoneRoutingSlot = { days: [1, 2, 3, 4, 5, 6, 7], start: '19:30', end: '22:30', mode: 'solo_sofia' };
 
 interface Props {
   showToast: (msg: string, kind?: 'success' | 'error' | 'info') => void;
 }
 
 const sameRouting = (a: PhoneRouting, b: PhoneRouting): boolean =>
-  a.mode === b.mode && a.ring_seconds === b.ring_seconds && a.mobiles.join(',') === b.mobiles.join(',');
+  a.mode === b.mode && a.ring_seconds === b.ring_seconds && a.mobiles.join(',') === b.mobiles.join(',')
+  && JSON.stringify(a.slots ?? []) === JSON.stringify(b.slots ?? []);
+
+const slotValid = (s: PhoneRoutingSlot): boolean => s.days.length > 0 && isHHMM(s.start) && isHHMM(s.end) && s.start !== s.end;
 
 // Un nome riconoscibile nell'elenco: chi e su cosa.
 const deviceLabel = (userName: string): string => {
@@ -39,6 +48,7 @@ export const PhoneRoutingCard: React.FC<Props> = ({ showToast }) => {
   const [mode, setMode] = useState<PhoneRouting['mode']>('solo_sofia');
   const [mobiles, setMobiles] = useState<string[]>(['']);
   const [ring, setRing] = useState('15');
+  const [slots, setSlots] = useState<PhoneRoutingSlot[]>([]);
   const [saving, setSaving] = useState(false);
   const [devices, setDevices] = useState<PhoneDevice[]>([]);
   const [configured, setConfigured] = useState(false);
@@ -52,6 +62,7 @@ export const PhoneRoutingCard: React.FC<Props> = ({ showToast }) => {
     setMode(r.mode);
     setMobiles(r.mobiles.length > 0 ? r.mobiles : ['']);
     setRing(String(r.ring_seconds));
+    setSlots(r.slots ?? []);
   };
   const loadDevices = () =>
     voiceCallsApiService.phoneDevices(deviceKey())
@@ -76,8 +87,20 @@ export const PhoneRoutingCard: React.FC<Props> = ({ showToast }) => {
     mode,
     mobiles: mobiles.map(m => m.trim()).filter(Boolean),
     ring_seconds: Number(ring),
+    slots,
   };
-  const valid = Number.isInteger(draft.ring_seconds) && draft.ring_seconds >= 5 && draft.ring_seconds <= 60;
+  const valid = Number.isInteger(draft.ring_seconds) && draft.ring_seconds >= 5 && draft.ring_seconds <= 60
+    && slots.every(slotValid);
+  // Squilla il locale con la regola di base o in almeno una fascia: servono
+  // cellulari e secondi.
+  const usesLocale = mode === 'prima_locale' || slots.some(sl => sl.mode === 'prima_locale');
+  const patchSlot = (i: number, patch: Partial<PhoneRoutingSlot>) =>
+    setSlots(prev => prev.map((sl, j) => (j === i ? { ...sl, ...patch } : sl)));
+  const dayShort = (d: number) =>
+    // 5 gennaio 2026 era un lunedì: d = 1 … 7 → lun … dom.
+    new Intl.DateTimeFormat(i18n.language, { weekday: 'narrow' }).format(new Date(2026, 0, 4 + d));
+  const dayLong = (d: number) =>
+    new Intl.DateTimeFormat(i18n.language, { weekday: 'long' }).format(new Date(2026, 0, 4 + d));
   const dirty = !sameRouting(draft, saved);
   const mine = devices.find(d => d.mine) ?? null;
   const hereOn = !!mine && isEnabledHere();
@@ -140,6 +163,9 @@ export const PhoneRoutingCard: React.FC<Props> = ({ showToast }) => {
       </div>
 
       <div className="mt-4">
+        {slots.length > 0 && (
+          <p className="mb-2 text-[13px] font-medium text-[var(--ds-text-primary)]">{t('pr.outsideSlots', 'Fuori dalle fasce')}</p>
+        )}
         <SegmentedControl
           value={mode}
           onChange={next => canEdit && setMode(next)}
@@ -152,7 +178,89 @@ export const PhoneRoutingCard: React.FC<Props> = ({ showToast }) => {
         />
       </div>
 
-      {mode === 'prima_locale' && (
+      {/* Fasce orarie: in quei giorni e orari vale un'altra regola. */}
+      <div className="mt-4 space-y-3">
+        {slots.map((sl, i) => (
+          <div key={i} className="space-y-3 rounded-[var(--ds-radius-sm)] bg-[var(--ds-surface-row)] p-3">
+            <div className="flex items-center gap-2">
+              <Clock className="h-4 w-4 flex-shrink-0 text-[var(--ds-text-secondary)]" aria-hidden />
+              <input
+                type="time"
+                value={sl.start}
+                disabled={!canEdit}
+                onChange={e => patchSlot(i, { start: e.target.value })}
+                aria-label={t('pr.slotFrom', 'Dalle')}
+                className="h-10 min-w-0 flex-1 rounded-[var(--ds-radius-control)] bg-[var(--ds-surface)] px-3 text-[14px] tabular-nums text-[var(--ds-text-primary)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+              />
+              <span className="flex-shrink-0 text-[var(--ds-text-muted)]" aria-hidden>→</span>
+              <input
+                type="time"
+                value={sl.end}
+                disabled={!canEdit}
+                onChange={e => patchSlot(i, { end: e.target.value })}
+                aria-label={t('pr.slotTo', 'Alle')}
+                className="h-10 min-w-0 flex-1 rounded-[var(--ds-radius-control)] bg-[var(--ds-surface)] px-3 text-[14px] tabular-nums text-[var(--ds-text-primary)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+              />
+              {canEdit && (
+                <button
+                  type="button"
+                  onClick={() => setSlots(prev => prev.filter((_, j) => j !== i))}
+                  aria-label={t('pr.slotRemove', 'Togli questa fascia')}
+                  className="inline-flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-[var(--ds-radius-control)] bg-[var(--ds-surface)] text-[var(--ds-text-secondary)] hover:text-[var(--ds-text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+                >
+                  <X className="h-4 w-4" aria-hidden />
+                </button>
+              )}
+            </div>
+            <div className="flex flex-wrap gap-1.5" role="group" aria-label={t('pr.slotDays', 'Giorni')}>
+              {DAYS.map(d => {
+                const on = sl.days.includes(d);
+                return (
+                  <button
+                    key={d}
+                    type="button"
+                    disabled={!canEdit}
+                    aria-pressed={on}
+                    aria-label={dayLong(d)}
+                    title={dayLong(d)}
+                    onClick={() => patchSlot(i, { days: on ? sl.days.filter(x => x !== d) : [...sl.days, d].sort() })}
+                    className={`inline-flex h-10 w-10 items-center justify-center rounded-[var(--ds-radius-control)] text-[13px] font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] ${
+                      on ? 'bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)]' : 'bg-[var(--ds-surface)] text-[var(--ds-text-secondary)]'
+                    }`}
+                  >
+                    {dayShort(d)}
+                  </button>
+                );
+              })}
+            </div>
+            <SegmentedControl
+              value={sl.mode}
+              onChange={next => canEdit && patchSlot(i, { mode: next })}
+              ariaLabel={t('pr.slotMode', 'In questa fascia')}
+              size="sm"
+              equalWidth={false}
+              options={[
+                { value: 'solo_sofia', label: t('pr.soloSofia', 'Solo Sofia') },
+                { value: 'prima_locale', label: t('pr.primaLocale', 'Prima il locale') },
+              ]}
+            />
+            {!slotValid(sl) && (
+              <p className="text-[13px] text-[var(--ds-critical-text)]">{t('pr.slotInvalid', 'Scegli almeno un giorno e due orari diversi')}</p>
+            )}
+          </div>
+        ))}
+        {canEdit && slots.length < PHONE_SLOTS_MAX && (
+          <button
+            type="button"
+            onClick={() => setSlots(prev => [...prev, { ...NEW_SLOT, mode: mode === 'solo_sofia' ? 'prima_locale' : 'solo_sofia' }])}
+            className="inline-flex h-9 items-center gap-1.5 rounded-[var(--ds-radius-control)] px-3 text-[13px] font-medium text-[var(--ds-text-secondary)] hover:bg-[var(--ds-surface-row)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+          >
+            <Plus className="h-4 w-4" aria-hidden /> {t('pr.slotAdd', 'Fascia oraria')}
+          </button>
+        )}
+      </div>
+
+      {usesLocale && (
         <div className="mt-4 space-y-3">
           <p className="text-[13px] text-[var(--ds-text-secondary)]">
             {t('pr.hintLocale', 'Squillano insieme i dispositivi del CRM col telefono acceso e i cellulari qui sotto. Dal cellulare si sente chi chiama e si preme 1. Se nessuno risponde in tempo, risponde Sofia.')}

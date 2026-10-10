@@ -93,6 +93,7 @@ import { DateNavigator } from './components/DateNavigator';
 import { CommandPalette } from './components/CommandPalette';
 import { AppVersionBanner } from './components/AppVersionBanner';
 import { CallBanner } from './components/phone/CallBanner';
+import { PhoneModeSwitch } from './components/phone/PhoneModeSwitch';
 import { PhoneRoutingCard } from './components/phone/PhoneRoutingCard';
 import { startSoftphone, stopSoftphone } from './services/softphone';
 import { BookingChannelsBar } from './components/BookingChannelsBar';
@@ -660,6 +661,9 @@ const App: React.FC = () => {
   // If set, the next reservation that gets created is linked to this voice
   // call. Cleared once the link finishes (or the modal is dismissed).
   const linkVoiceCallOnCreateRef = useRef<number | null>(null);
+  // CallSid della chiamata in corso da cui parte «Nuova prenotazione» nella
+  // card «chi chiama»: la prenotazione creata si aggancia al registro.
+  const linkPhoneCallOnCreateRef = useRef<string | null>(null);
   // Phone_digits of the inbox conversation a new reservation should link back
   // to (set when creating from the chat). Cleared once the link finishes.
   const linkInboxConversationOnCreateRef = useRef<string | null>(null);
@@ -2179,6 +2183,12 @@ const App: React.FC = () => {
           })
           .catch((err) => console.warn('linkReservation failed:', err));
       }
+      const linkPhoneCall = linkPhoneCallOnCreateRef.current;
+      if (linkPhoneCall) {
+        linkPhoneCallOnCreateRef.current = null;
+        voiceCallsApiService.linkPhoneCallReservation(linkPhoneCall, returnedRes.id)
+          .catch((err) => console.warn('linkPhoneCallReservation failed:', err));
+      }
       // If created from an inbox conversation, link it back so staff can
       // reopen/modify the booking from the chat. Best-effort.
       const linkInboxPhone = linkInboxConversationOnCreateRef.current;
@@ -2383,7 +2393,8 @@ const App: React.FC = () => {
           setView(ViewState.RESERVATIONS);
         }}
         onOpenCalls={() => setView(ViewState.CONVERSAZIONI)}
-        onNewReservation={(prefill) => {
+        onNewReservation={({ phone_call_ref, ...prefill }) => {
+          linkPhoneCallOnCreateRef.current = phone_call_ref ?? null;
           setNewReservationPrefill(prefill);
           setNewReservationKind('standard');
           setAutoOpenNewReservation(true);
@@ -2870,6 +2881,9 @@ const App: React.FC = () => {
               {/* Mobile-only status dot */}
               <LivePill connected={isConnected} time={currentTime} variant="dot" className="md:hidden mx-1" />
 
+              {/* Chi risponde adesso: Sofia o il locale, con l'interruttore rapido. */}
+              <PhoneModeSwitch enabled={isAuthenticated && canSeeVoiceCalls && !isPanelSession} />
+
               {/* Global search — opens the command palette. Same button surface
                   as the bell so it stays reachable on mobile, where ⌘K does not apply. */}
               <button
@@ -3075,6 +3089,7 @@ const App: React.FC = () => {
               setNewReservationKind('standard');
               setNewReservationPrefill(undefined);
               linkVoiceCallOnCreateRef.current = null;
+              linkPhoneCallOnCreateRef.current = null;
               linkInboxConversationOnCreateRef.current = null;
             }}
           />
@@ -3213,6 +3228,12 @@ const App: React.FC = () => {
             onOpenCustomerProfile={({ phone }) => {
               setAutoEditCustomerByPhone(phone);
               setView(ViewState.CLIENTI);
+            }}
+            onCreateReservationFromPhoneCall={({ phone_call_ref, ...prefill }) => {
+              linkPhoneCallOnCreateRef.current = phone_call_ref;
+              setNewReservationPrefill(prefill);
+              setNewReservationKind('standard');
+              setAutoOpenNewReservation(true);
             }}
             refreshTick={voiceCallsRefreshTick}
           />

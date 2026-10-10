@@ -369,6 +369,30 @@
       "ended": "Chiamata finita",
       "missed": "Chiamata persa",
       "answered": "Ha risposto il locale"
+    },
+    "lastNote": "Nota del {{date}}: {{text}}",
+    "addNote": "Aggiungi una nota",
+    "notePlaceholder": "Cosa ha chiesto, cosa resta da fare",
+    "saveNote": "Salva nota",
+    "noteSaved": "Nota salvata: la rivedi quando richiama",
+    "noteError": "Nota non salvata, riprova",
+    "mode": {
+      "sofia": "Risponde Sofia",
+      "locale": "Prima il locale, poi Sofia",
+      "pillSofia": "Sofia",
+      "pillLocale": "Locale",
+      "aria": "Telefono: {{who}}",
+      "title": "Chi risponde adesso",
+      "rule": "Come da regola",
+      "slotUntil": "Fascia oraria, fino alle {{time}}",
+      "byHandUntil": "Cambiato a mano, fino alle {{time}}",
+      "backToRule": "Torna alla regola",
+      "switchToSofia": "Passa a Sofia",
+      "switchToLocale": "Fai rispondere il locale",
+      "oneHour": "Per 1 ora",
+      "twoHours": "Per 2 ore",
+      "tonight": "Fino a stanotte",
+      "error": "Non riuscito, riprova"
     }
   }
 }

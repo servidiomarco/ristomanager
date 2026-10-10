@@ -207,6 +207,7 @@ import {
 } from './services/elevenlabsService.js';
 import { buildCallerCard, addLiveCall, removeLiveCall, listLiveCalls, findRecentLiveCall, updateLiveCallStage, type LiveCall, type LiveCallStage, type CallerCard } from './services/liveCalls.js';
 import { registerSofiaCall, unavailableTwiml, twimlResponse, dialLocaleTwiml, whisperTwiml, outboundTwiml, parseRoutingMode, softphoneConfig, softphoneToken, deviceIdentity, parseDeviceIdentity, isCallableNumber, SOFTPHONE_TOKEN_TTL_SECONDS, DEFAULT_PHONE_ROUTING, PHONE_ROUTING_MAX_MOBILES, PHONE_ROUTING_RING_MIN, PHONE_ROUTING_RING_MAX, type SofiaInitData, type PhoneRouting } from './services/phoneRouting.js';
+import { effectivePhoneMode, parsePhoneSlot, untilTonight, PHONE_SLOTS_MAX, type EffectivePhoneMode, type PhoneRoutingOverride } from './utils/phoneSchedule.js';
 import {
     ROOM_OCCUPANCY_CAPS_KEY,
     RoomOccupancyCap,
@@ -2441,7 +2442,11 @@ async function recordMissedPhoneCall(tenantId: number, callSid: string, fromNumb
     }
 }
 
-// --- Regola del giro: solo Sofia, o prima il cellulare del locale ---------
+// --- Regola del giro: solo Sofia, o prima il locale -----------------------
+// La regola di base, le fasce orarie e l'interruttore rapido stanno nella
+// stessa riga di app_settings; chi risponde adesso lo decide
+// effectivePhoneMode (utils/phoneSchedule.ts), la stessa funzione che usa
+// la testata del CRM per mostrarlo.
 const PHONE_ROUTING_KEY = 'phone_routing';
 
 async function getPhoneRouting(tenantId: number): Promise<PhoneRouting> {
@@ -2453,16 +2458,46 @@ async function getPhoneRouting(tenantId: number): Promise<PhoneRouting> {
         const raw = result.rows[0]?.text_value;
         if (typeof raw !== 'string' || !raw) return DEFAULT_PHONE_ROUTING;
         const parsed = JSON.parse(raw);
+        const o = parsed.override;
+        const override: PhoneRoutingOverride | null =
+            o && (o.mode === 'solo_sofia' || o.mode === 'prima_locale') && typeof o.until === 'string' && Date.parse(o.until) > Date.now()
+                ? { mode: o.mode, until: o.until }
+                : null;
         return {
             mode: parseRoutingMode(parsed.mode),
             mobiles: Array.isArray(parsed.mobiles) ? parsed.mobiles.filter((m: unknown) => typeof m === 'string' && e164OrEmpty(m)) : [],
             ring_seconds: Number.isInteger(parsed.ring_seconds) ? parsed.ring_seconds : DEFAULT_PHONE_ROUTING.ring_seconds,
+            slots: Array.isArray(parsed.slots) ? parsed.slots.map(parsePhoneSlot).filter(Boolean).slice(0, PHONE_SLOTS_MAX) as PhoneRouting['slots'] : [],
+            override,
         };
     } catch (err) {
         // Una regola illeggibile non deve lasciare il telefono muto: Sofia.
         console.error('[Telefono] regola del giro illeggibile, rispondo con Sofia:', err);
         return DEFAULT_PHONE_ROUTING;
     }
+}
+
+async function savePhoneRouting(tenantId: number, routing: PhoneRouting): Promise<void> {
+    await queryWithRetry(
+        `INSERT INTO app_settings (tenant_id, key, text_value, updated_at)
+         VALUES ($1, $2, $3, CURRENT_TIMESTAMP)
+         ON CONFLICT (tenant_id, key) DO UPDATE
+           SET text_value = EXCLUDED.text_value, updated_at = CURRENT_TIMESTAMP`,
+        [tenantId, PHONE_ROUTING_KEY, JSON.stringify(routing)]
+    );
+}
+
+async function phoneModeNow(tenantId: number, routing: PhoneRouting): Promise<EffectivePhoneMode> {
+    return effectivePhoneMode(routing, new Date(), (await getTenantLocale(tenantId)).timezone);
+}
+
+/** Quello che mostra la testata: chi risponde adesso e fino a quando. */
+async function phoneModePayload(tenantId: number, routing: PhoneRouting) {
+    return { effective: await phoneModeNow(tenantId, routing), base_mode: routing.mode, override: routing.override };
+}
+
+async function broadcastPhoneRoutingChanged(tenantId: number, routing: PhoneRouting): Promise<void> {
+    socketService?.broadcastToRolesRoom(tenantId, PHONE_BANNER_ROLES, 'phoneRouting:changed', await phoneModePayload(tenantId, routing));
 }
 
 // Gli URL dei passaggi successivi stanno sotto lo stesso path col token:
@@ -2519,10 +2554,12 @@ async function handleTwilioVoiceInbound(tenantId: number, req: express.Request, 
 
     const voiceOn = await isFeatureEnabledForTenant(tenantId, 'voice');
     const routing = voiceOn ? await getPhoneRouting(tenantId) : DEFAULT_PHONE_ROUTING;
+    // Chi risponde adesso: interruttore rapido, poi fascia oraria, poi base.
+    const mode = (await phoneModeNow(tenantId, routing)).mode;
     // I dispositivi del CRM squillano solo se il softphone è configurato e
     // se si sono fatti vivi di recente: uno spento da giorni non serve.
-    const clients = routing.mode === 'prima_locale' && softphoneConfig() ? await ringingDeviceIdentities(tenantId) : [];
-    const ringLocale = routing.mode === 'prima_locale' && (clients.length > 0 || routing.mobiles.length > 0) && !!to;
+    const clients = mode === 'prima_locale' && softphoneConfig() ? await ringingDeviceIdentities(tenantId) : [];
+    const ringLocale = mode === 'prima_locale' && (clients.length > 0 || routing.mobiles.length > 0) && !!to;
 
     // Il registro per primo: anche se Sofia fallisce, la chiamata resta.
     await queryWithRetry(
@@ -2916,7 +2953,43 @@ voiceRoute('status', handleTwilioVoiceStatus);
 
 // Regola del giro nelle Impostazioni (card «Chi risponde al telefono»).
 app.get('/settings/phone-routing', authenticate, requireFeature('voice'), async (req, res) => {
-    res.json(await getPhoneRouting(req.tenantId!));
+    const routing = await getPhoneRouting(req.tenantId!);
+    res.json({ ...routing, effective: await phoneModeNow(req.tenantId!, routing) });
+});
+
+// L'interruttore rapido nella testata: chi vede le chiamate in corso può
+// passare il telefono a Sofia (o al locale) per un po', senza toccare la
+// regola. Torna da solo alla regola allo scadere.
+app.get('/phone/mode', authenticate, requireFeature('voice'), authorize(...PHONE_BANNER_ROLES), async (req, res) => {
+    res.json(await phoneModePayload(req.tenantId!, await getPhoneRouting(req.tenantId!)));
+});
+
+const PHONE_OVERRIDE_MAX_MINUTES = 24 * 60;
+
+app.put('/phone/mode', authenticate, requireFeature('voice'), authorize(...PHONE_BANNER_ROLES), async (req, res) => {
+    const body = req.body ?? {};
+    const routing = await getPhoneRouting(req.tenantId!);
+    if (body.mode == null) {
+        routing.override = null;
+    } else {
+        if (body.mode !== 'solo_sofia' && body.mode !== 'prima_locale') {
+            return res.status(400).json({ error: 'invalid_value', message: 'mode deve essere solo_sofia, prima_locale o null' });
+        }
+        let until: string;
+        if (body.until === 'tonight') {
+            until = untilTonight(new Date(), (await getTenantLocale(req.tenantId!)).timezone);
+        } else {
+            const minutes = Number(body.minutes);
+            if (!Number.isInteger(minutes) || minutes < 5 || minutes > PHONE_OVERRIDE_MAX_MINUTES) {
+                return res.status(400).json({ error: 'invalid_value', message: 'minutes fra 5 e 1440, oppure until = tonight' });
+            }
+            until = new Date(Date.now() + minutes * 60_000).toISOString();
+        }
+        routing.override = { mode: body.mode, until };
+    }
+    await savePhoneRouting(req.tenantId!, routing);
+    void broadcastPhoneRoutingChanged(req.tenantId!, routing);
+    res.json(await phoneModePayload(req.tenantId!, routing));
 });
 
 app.put('/settings/phone-routing', authenticate, requireFeature('voice'), requirePermission('settings:full'), async (req, res) => {
@@ -2940,18 +3013,184 @@ app.put('/settings/phone-routing', authenticate, requireFeature('voice'), requir
     if (mobiles.length > PHONE_ROUTING_MAX_MOBILES) {
         return res.status(400).json({ error: 'invalid_value', message: `Al massimo ${PHONE_ROUTING_MAX_MOBILES} cellulari` });
     }
+    // Le fasce: un client vecchio (prima delle fasce) non le manda, e allora
+    // restano quelle salvate.
+    const current = await getPhoneRouting(req.tenantId!);
+    let slots = current.slots;
+    if (body.slots !== undefined) {
+        if (!Array.isArray(body.slots) || body.slots.length > PHONE_SLOTS_MAX) {
+            return res.status(400).json({ error: 'invalid_value', message: `Al massimo ${PHONE_SLOTS_MAX} fasce` });
+        }
+        slots = [];
+        for (const raw of body.slots) {
+            const slot = parsePhoneSlot(raw);
+            if (!slot) return res.status(400).json({ error: 'invalid_value', message: 'Fascia non valida: servono almeno un giorno e due orari diversi' });
+            slots.push(slot);
+        }
+    }
     // Senza cellulari squillano solo i dispositivi del CRM accesi; se non ce
     // n'è nessuno la chiamata va subito a Sofia, quindi nessun vincolo qui.
-    const routing: PhoneRouting = { mode, mobiles, ring_seconds: ring };
-    await queryWithRetry(
-        `INSERT INTO app_settings (tenant_id, key, text_value, updated_at)
-         VALUES ($1, $2, $3, CURRENT_TIMESTAMP)
-         ON CONFLICT (tenant_id, key) DO UPDATE
-           SET text_value = EXCLUDED.text_value, updated_at = CURRENT_TIMESTAMP`,
-        [req.tenantId!, PHONE_ROUTING_KEY, JSON.stringify(routing)]
-    );
-    res.json(routing);
+    // L'interruttore rapido acceso resta com'è: salvare la regola non lo spegne.
+    const routing: PhoneRouting = { mode, mobiles, ring_seconds: ring, slots, override: current.override };
+    await savePhoneRouting(req.tenantId!, routing);
+    void broadcastPhoneRoutingChanged(req.tenantId!, routing);
+    res.json({ ...routing, effective: await phoneModeNow(req.tenantId!, routing) });
 });
+
+// --- Registro delle chiamate (Chiamate › Registro) -------------------------
+// Tutte le chiamate del numero di Sofia, prese dal locale, da Sofia o perse,
+// e i «Richiama» dal CRM. Le conversazioni di Sofia restano nella vista
+// Sofia di Chiamate: qui c'è il loro voice_call_id per aprirle.
+const PHONE_CALLS_PAGE = 50;
+const PHONE_NOTE_MAX = 1000;
+
+const phoneCallRef = (ref: string): { column: 'id' | 'call_sid'; value: string | number } | null =>
+    /^\d{1,9}$/.test(ref) ? { column: 'id', value: Number(ref) }
+        : /^CA\w{4,60}$/.test(ref) ? { column: 'call_sid', value: ref }
+        : null;
+
+app.get('/phone/calls', authenticate, requireFeature('voice'), authorize(...PHONE_BANNER_ROLES), async (req, res) => {
+    const filter = String(req.query.filter || 'all');
+    const where: string[] = ['pc.tenant_id = $1'];
+    const params: unknown[] = [req.tenantId!];
+    if (filter === 'missed') where.push(`pc.status = 'missed'`);
+    else if (filter === 'staff') where.push(`pc.status = 'answered' AND pc.direction = 'inbound'`);
+    else if (filter === 'sofia') where.push(`pc.status = 'sofia'`);
+    else if (filter === 'outbound') where.push(`pc.direction = 'outbound'`);
+    else if (filter !== 'all') return res.status(400).json({ error: 'invalid_value', message: 'filter: all, missed, staff, sofia, outbound' });
+    const q = String(req.query.q || '').trim().slice(0, 80);
+    if (q) {
+        const digits = q.replace(/\D/g, '');
+        if (digits.length >= 3) {
+            params.push(`%${digits}%`);
+            where.push(`regexp_replace(COALESCE(CASE WHEN pc.direction = 'outbound' THEN pc.to_number ELSE pc.from_number END, ''), '\\D', '', 'g') LIKE $${params.length}`);
+        } else {
+            params.push(`%${q}%`);
+            where.push(`(c.name ILIKE $${params.length} OR pc.note ILIKE $${params.length})`);
+        }
+    }
+    const before = String(req.query.before || '');
+    if (before && !Number.isNaN(Date.parse(before))) {
+        params.push(new Date(before).toISOString());
+        where.push(`pc.started_at < $${params.length}`);
+    }
+    params.push(PHONE_CALLS_PAGE + 1);
+    try {
+        const result = await queryWithRetry(
+            `SELECT pc.id, pc.call_sid, pc.direction, pc.from_number, pc.to_number, pc.routing, pc.status, pc.missed_reason,
+                    pc.answered_by, pc.started_at, pc.answered_at, pc.duration_seconds, pc.note, pc.voice_call_id,
+                    c.id AS customer_id, c.name AS customer_name, c.phone AS customer_phone,
+                    u.full_name AS answered_by_name,
+                    vc.follow_up_status,
+                    r.id AS reservation_id, r.reservation_time, r.guests
+             FROM phone_calls pc
+             LEFT JOIN customers c ON c.id = pc.customer_id AND c.tenant_id = pc.tenant_id
+             LEFT JOIN users u ON u.id = substring(pc.answered_by from '^utente:(\\d+)$')::int
+             LEFT JOIN voice_calls vc ON vc.id = pc.voice_call_id AND vc.tenant_id = pc.tenant_id
+             LEFT JOIN reservations r ON r.id = COALESCE(pc.reservation_id, vc.reservation_id) AND r.tenant_id = pc.tenant_id
+             WHERE ${where.join(' AND ')}
+             ORDER BY pc.started_at DESC
+             LIMIT $${params.length}`,
+            params
+        );
+        const rows = result.rows.slice(0, PHONE_CALLS_PAGE);
+        res.json({
+            calls: rows.map(r => {
+                const by = String(r.answered_by || '');
+                return {
+                    id: r.id,
+                    call_sid: r.call_sid,
+                    direction: r.direction === 'outbound' ? 'outbound' : 'inbound',
+                    phone: (r.direction === 'outbound' ? r.to_number : r.from_number) || null,
+                    customer: r.customer_id ? { id: r.customer_id, name: (r.customer_name || '').trim(), phone: r.customer_phone ?? null } : null,
+                    status: r.status,
+                    missed_reason: r.missed_reason ?? null,
+                    routing: r.routing,
+                    answered_by: by.startsWith('utente:') ? { kind: 'user', name: r.answered_by_name ?? null }
+                        : by.startsWith('cellulare:') ? { kind: 'mobile', number: by.slice('cellulare:'.length) }
+                        : null,
+                    started_at: new Date(r.started_at).toISOString(),
+                    answered_at: r.answered_at ? new Date(r.answered_at).toISOString() : null,
+                    duration_seconds: r.duration_seconds ?? null,
+                    note: r.note ?? null,
+                    voice_call_id: r.voice_call_id ?? null,
+                    follow_up_status: r.follow_up_status ?? null,
+                    reservation: r.reservation_id
+                        ? { id: r.reservation_id, reservation_time: new Date(r.reservation_time).toISOString(), guests: r.guests }
+                        : null,
+                };
+            }),
+            next_before: result.rows.length > PHONE_CALLS_PAGE ? new Date(rows[rows.length - 1].started_at).toISOString() : null,
+        });
+    } catch (err) {
+        console.error('GET /phone/calls error:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+// La nota a fine chiamata: dalla card «chi chiama» (per CallSid) o dal
+// registro (per id). Torna nella card la volta dopo che lo stesso numero chiama.
+app.put('/phone/calls/:ref/note', authenticate, requireFeature('voice'), authorize(...PHONE_BANNER_ROLES), async (req, res) => {
+    const ref = phoneCallRef(String(req.params.ref));
+    if (!ref) return res.status(400).json({ error: 'invalid_value', message: 'Chiamata non valida' });
+    const note = String(req.body?.note ?? '').trim();
+    if (note.length > PHONE_NOTE_MAX) return res.status(400).json({ error: 'invalid_value', message: `Al massimo ${PHONE_NOTE_MAX} caratteri` });
+    const updated = await queryWithRetry(
+        `UPDATE phone_calls SET note = $3, note_updated_at = NOW()
+         WHERE tenant_id = $1 AND ${ref.column} = $2
+         RETURNING id, note, note_updated_at`,
+        [req.tenantId!, ref.value, note || null]
+    );
+    if (!updated.rows[0]) return res.status(404).json({ error: 'not_found' });
+    res.json({ id: updated.rows[0].id, note: updated.rows[0].note, note_updated_at: new Date(updated.rows[0].note_updated_at).toISOString() });
+});
+
+// «Nuova prenotazione» dalla card durante la chiamata: la prenotazione
+// appena creata si aggancia alla chiamata.
+app.post('/phone/calls/:ref/reservation', authenticate, requireFeature('voice'), authorize(...PHONE_BANNER_ROLES), async (req, res) => {
+    const ref = phoneCallRef(String(req.params.ref));
+    const reservationId = Number(req.body?.reservation_id);
+    if (!ref || !Number.isInteger(reservationId) || reservationId <= 0) {
+        return res.status(400).json({ error: 'invalid_value', message: 'Chiamata o prenotazione non valida' });
+    }
+    const updated = await queryWithRetry(
+        `UPDATE phone_calls pc SET reservation_id = r.id
+         FROM reservations r
+         WHERE pc.tenant_id = $1 AND pc.${ref.column} = $2 AND r.id = $3 AND r.tenant_id = pc.tenant_id
+         RETURNING pc.id`,
+        [req.tenantId!, ref.value, reservationId]
+    );
+    if (!updated.rows[0]) return res.status(404).json({ error: 'not_found' });
+    res.json({ ok: true, id: updated.rows[0].id });
+});
+
+/** Una prenotazione creata a mano subito dopo (o durante) una chiamata presa
+ *  dal locale con lo stesso numero si aggancia da sola: copre chi risponde
+ *  dal cellulare e prenota dal «+», e i «Richiama». Non sovrascrive un
+ *  collegamento già fatto. */
+const PHONE_CALL_LINK_WINDOW_MIN = 45;
+async function linkReservationToRecentPhoneCall(tenantId: number, reservationId: number, phone: unknown): Promise<void> {
+    const last10 = phoneLast10Variants(String(phone ?? ''));
+    if (last10.length === 0) return;
+    try {
+        await queryWithRetry(
+            `UPDATE phone_calls SET reservation_id = $3
+             WHERE id = (
+                 SELECT id FROM phone_calls
+                 WHERE tenant_id = $1 AND reservation_id IS NULL
+                   AND (status = 'answered' OR direction = 'outbound')
+                   AND started_at > NOW() - make_interval(mins => $4)
+                   AND right(regexp_replace(CASE WHEN direction = 'outbound' THEN COALESCE(to_number, '') ELSE COALESCE(from_number, '') END, '\\D', '', 'g'), 10) = ANY($2::text[])
+                 ORDER BY started_at DESC
+                 LIMIT 1
+             )
+             AND NOT EXISTS (SELECT 1 FROM phone_calls WHERE tenant_id = $1 AND reservation_id = $3)`,
+            [tenantId, last10, reservationId, PHONE_CALL_LINK_WINDOW_MIN]
+        );
+    } catch (err: any) {
+        console.warn('[Telefono] collegamento prenotazione–chiamata non riuscito:', err?.message || err);
+    }
+}
 
 // ============================================
 // PROTECTED ENDPOINTS
@@ -3561,6 +3800,8 @@ app.post('/reservations', authenticate, requirePermission('reservations:full'), 
             { excludeUserId: req.user?.userId ?? null }
         ).catch(err => console.error('Push (new reservation) failed:', err));
         void notifyVipReservation(req.tenantId!, { ...newReservation, customer_name, guests, phone }, reservationLabel, req.user?.userId ?? null);
+        // Prenotata al telefono col locale: si aggancia alla chiamata.
+        await linkReservationToRecentPhoneCall(req.tenantId!, newReservation.id, phone);
 
         res.status(201).json(newReservation);
     } catch (err: any) {

@@ -43,6 +43,8 @@ export interface CallerCard {
     last_visit: string | null;
     no_shows: number;
     upcoming: CallerCardBooking[];
+    /** L'ultima nota lasciata a fine chiamata per questo numero. */
+    last_note: { text: string; at: string } | null;
 }
 
 export type LiveCallChannel = 'sofia';
@@ -62,7 +64,7 @@ export interface LiveCall {
 }
 
 const emptyCard = (phone: string): CallerCard => ({
-    phone, customer: null, visits: 0, last_visit: null, no_shows: 0, upcoming: [],
+    phone, customer: null, visits: 0, last_visit: null, no_shows: 0, upcoming: [], last_note: null,
 });
 
 export async function buildCallerCard(tenantId: number, phone: string): Promise<CallerCard> {
@@ -71,7 +73,7 @@ export async function buildCallerCard(tenantId: number, phone: string): Promise<
 
     // Stesse chiavi delle ultime 10 cifre di findCustomerByPhone e della
     // rubrica, così la scheda trova lo stesso cliente che Sofia saluta per nome.
-    const [customerRes, statsRes, upcoming] = await Promise.all([
+    const [customerRes, statsRes, upcoming, noteRes] = await Promise.all([
         queryWithRetry(
             `SELECT id, name, phone, is_vip, is_blacklisted, dietary_notes, preferences_notes
              FROM customers
@@ -96,6 +98,16 @@ export async function buildCallerCard(tenantId: number, phone: string): Promise<
         // Un anno e non i 30 giorni di Sofia: chi chiama per il banchetto di
         // giugno deve comparire con quella prenotazione.
         findActiveReservationsByPhone(tenantId, phone, { horizonDays: 365 }),
+        // In entrata e in uscita: la nota di un «Richiama» vale uguale.
+        queryWithRetry(
+            `SELECT note, COALESCE(note_updated_at, started_at) AS at
+             FROM phone_calls
+             WHERE tenant_id = $2 AND note IS NOT NULL AND note <> ''
+               AND right(regexp_replace(CASE WHEN direction = 'outbound' THEN COALESCE(to_number, '') ELSE COALESCE(from_number, '') END, '\\D', '', 'g'), 10) = ANY($1::text[])
+             ORDER BY started_at DESC
+             LIMIT 1`,
+            [last10, tenantId]
+        ),
     ]);
 
     const c = customerRes.rows[0];
@@ -123,6 +135,9 @@ export async function buildCallerCard(tenantId: number, phone: string): Promise<
             children: r.children ?? null,
             reservation_status: r.reservation_status,
         })),
+        last_note: noteRes.rows[0]
+            ? { text: String(noteRes.rows[0].note), at: new Date(noteRes.rows[0].at).toISOString() }
+            : null,
     };
 }
 

@@ -11,6 +11,7 @@
 // system__caller_id = from_number. L'agente deve avere l'audio in μ-law 8000.
 
 import jwt from 'jsonwebtoken';
+import type { PhoneAnswerMode, PhoneRoutingOverride, PhoneRoutingSlot } from '../utils/phoneSchedule.js';
 
 const REGISTER_CALL_URL = 'https://api.elevenlabs.io/v1/convai/twilio/register-call';
 
@@ -96,19 +97,24 @@ export async function registerSofiaCall(args: {
 /** 'prima_locale' fa squillare i dispositivi del CRM e i cellulari; si
  *  chiamava 'prima_cellulare' prima del softphone (Fase 3) e il valore
  *  vecchio salvato si legge così. */
-export type PhoneRoutingMode = 'solo_sofia' | 'prima_locale';
+export type PhoneRoutingMode = PhoneAnswerMode;
 
 export interface PhoneRouting {
+    /** La regola di base: vale fuori dalle fasce e senza interruttore. */
     mode: PhoneRoutingMode;
     /** E.164, al massimo tre: squillano insieme, vince il primo che preme 1. */
     mobiles: string[];
     ring_seconds: number;
+    /** Fasce orarie con una regola diversa da quella di base. */
+    slots: PhoneRoutingSlot[];
+    /** «Risponde Sofia / il locale adesso», fino a un'ora data. */
+    override: PhoneRoutingOverride | null;
 }
 
 export const parseRoutingMode = (raw: unknown): PhoneRoutingMode =>
     raw === 'prima_locale' || raw === 'prima_cellulare' ? 'prima_locale' : 'solo_sofia';
 
-export const DEFAULT_PHONE_ROUTING: PhoneRouting = { mode: 'solo_sofia', mobiles: [], ring_seconds: 15 };
+export const DEFAULT_PHONE_ROUTING: PhoneRouting = { mode: 'solo_sofia', mobiles: [], ring_seconds: 15, slots: [], override: null };
 export const PHONE_ROUTING_MAX_MOBILES = 3;
 export const PHONE_ROUTING_RING_MIN = 5;
 export const PHONE_ROUTING_RING_MAX = 60;

@@ -369,6 +369,30 @@
       "ended": "Call ended",
       "missed": "Missed call",
       "answered": "Answered by the restaurant"
+    },
+    "lastNote": "Note from {{date}}: {{text}}",
+    "addNote": "Add a note",
+    "notePlaceholder": "What they asked, what is left to do",
+    "saveNote": "Save note",
+    "noteSaved": "Note saved: you will see it when they call again",
+    "noteError": "Note not saved, try again",
+    "mode": {
+      "sofia": "Sofia answers",
+      "locale": "Restaurant first, then Sofia",
+      "pillSofia": "Sofia",
+      "pillLocale": "Staff",
+      "aria": "Phone: {{who}}",
+      "title": "Who answers now",
+      "rule": "As per the rule",
+      "slotUntil": "Time slot, until {{time}}",
+      "byHandUntil": "Changed by hand, until {{time}}",
+      "backToRule": "Back to the rule",
+      "switchToSofia": "Hand over to Sofia",
+      "switchToLocale": "Let the staff answer",
+      "oneHour": "For 1 hour",
+      "twoHours": "For 2 hours",
+      "tonight": "Until tonight",
+      "error": "Did not work, try again"
     }
   }
 }
