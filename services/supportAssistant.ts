@@ -2,9 +2,10 @@
 //
 // Risponde ai «come si fa» leggendo i manuali dell'app: il catalogo delle
 // funzionalità (docs/funzionalita-app.md, senza il registro delle modifiche),
-// il manuale utente e quello operativo di comande e cucina. Niente RAG: i
-// tre testi stanno nel prompt di sistema, in cache (sono ~38k token stabili
-// fra una domanda e l'altra), e la domanda arriva dopo.
+// il manuale utente, quello operativo di comande e cucina e quello del food
+// cost. Niente RAG: i quattro testi stanno nel prompt di sistema, in cache
+// (sono ~70k token stabili fra una domanda e l'altra, a ottobre 2026), e la
+// domanda arriva dopo.
 //
 // Non fa niente da solo: non legge dati del ristorante, non cambia
 // impostazioni. Quando la domanda è un guasto o una cosa che i manuali non
@@ -31,6 +32,7 @@ const DOCS = [
     { file: 'funzionalita-app.md', title: 'Catalogo delle funzionalità', stripFrom: '## Registro aggiornamenti' },
     { file: 'Manuale_Utente_CRM.md', title: 'Manuale utente' },
     { file: 'manuale-operativo-comande-cucina-passe.md', title: 'Manuale operativo comande, cucina e passe' },
+    { file: 'manuale-food-cost.md', title: 'Manuale operativo food cost' },
 ] as const;
 
 export class SupportAssistantError extends Error {

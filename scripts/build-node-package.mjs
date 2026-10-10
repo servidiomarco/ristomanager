@@ -48,7 +48,7 @@ copy('package-lock.json');
 copy('scripts/print-agent.mjs');
 copy('sala-node/supervisor.mjs');
 copy('sala-node/README.md', 'LEGGIMI-nodo.md');
-for (const doc of ['docs/funzionalita-app.md', 'docs/Manuale_Utente_CRM.md', 'docs/manuale-operativo-comande-cucina-passe.md']) copy(doc);
+for (const doc of ['docs/funzionalita-app.md', 'docs/Manuale_Utente_CRM.md', 'docs/manuale-operativo-comande-cucina-passe.md', 'docs/manuale-food-cost.md']) copy(doc);
 
 run('npm', ['ci', '--omit=dev', '--ignore-scripts', '--no-audit', '--no-fund'], { cwd: out, shell: process.platform === 'win32' });
 
