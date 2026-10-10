@@ -5223,7 +5223,8 @@ app.get('/reports/riscontro-cassa', authenticate, requirePermission('payments:vi
 // services/apertiInCassaSql.ts; qui l'elenco per la sala e la scheda della
 // sezione.
 
-app.get('/passepartout/tavoli-aperti', authenticate, requireAnyPermission('reservations:view', 'floorplan:update_status'), async (req, res) => {
+// Anche per chi ha solo Comande (orders:view): la griglia dei tavoli li mostra.
+app.get('/passepartout/tavoli-aperti', authenticate, requireAnyPermission('reservations:view', 'floorplan:update_status', 'orders:view'), async (req, res) => {
     try {
         if (!(await isFeatureEnabledForTenant(req.tenantId!, 'passepartout'))) return res.json({ tavoli: [] });
         res.json({ tavoli: await elencoTavoliAperti(req.tenantId!) });

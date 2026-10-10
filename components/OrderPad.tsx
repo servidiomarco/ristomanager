@@ -22,6 +22,7 @@ import { PagamentoSheet } from './cassa/PagamentoSheet';
 import { useAuth } from '../contexts/AuthContext';
 import { useToast } from '../contexts/ToastContext';
 import { useSalaNodeStale } from '../hooks/useSalaNodeStale';
+import { useTavoliApertiInCassa } from '../hooks/useTavoliApertiInCassa';
 import { billsApiService, printBill } from '../services/billsApiService';
 
 import { socketClient } from '../services/socketClient';
@@ -289,8 +290,11 @@ export const OrderPad: React.FC<OrderPadProps> = ({ isInitialLoading = false, di
   // Chiusura con intento «Fattura»: il conto chiude con proforma e questo
   // apre subito l'emissione, precompilata col cliente della visita.
   const [invoiceFor, setInvoiceFor] = useState<(ServiceBill & { initialQuery?: string }) | null>(null);
-  const { user, hasPermission } = useAuth();
+  const { user, hasPermission, hasFeature } = useAuth();
   const canCassa = hasPermission('cash:operate');
+  // I tavoli aperti in cassa Passepartout: sono di adesso, quindi contano
+  // solo guardando il servizio di oggi (isTodayRome, più sotto).
+  const tavoliApertiInCassa = useTavoliApertiInCassa(hasFeature('passepartout'));
 
   // La comanda di qualcun altro: chi tocca un tavolo non suo lo legge in
   // testa prima di battere. La cassa si nomina come banco («dalla cassa»),
@@ -452,6 +456,7 @@ export const OrderPad: React.FC<OrderPadProps> = ({ isInitialLoading = false, di
     shift: globalShiftFilter === 'ALL' ? undefined : globalShiftFilter,
   }), [selectedDateRome, globalShiftFilter]);
   const isTodayRome = selectedDateRome === datePart(new Date());
+  const apertiInCassa = isTodayRome ? tavoliApertiInCassa : undefined;
 
   useEffect(() => {
     if (initialTableId == null) return;
@@ -1548,13 +1553,22 @@ export const OrderPad: React.FC<OrderPadProps> = ({ isInitialLoading = false, di
   // viva): in coda alla comanda, in sola lettura. Si rileggono quando la
   // cassa cambia il tavolo ('passepartout:righe-cassa'), e ogni 30 s per
   // sicurezza; il server le tiene 10 s, più palmari non pesano sulla cassa.
+  // Su un tavolo aperto dalla cassa o dal palmare si leggono da subito,
+  // prima che il CRM ci scriva: il cameriere vede cosa c'è già prima di
+  // aggiungere. Lì il segnale del cambio è il totale dei tavoli aperti.
   const [righeCassa, setRigheCassa] = useState<RigheDallaCassa | null>(null);
   const comandaInCassa = order?.comanda_viva?.pp_comanda_id != null && order.comanda_viva.stato !== 'CHIUSA'
     ? order.comanda_viva.pp_comanda_id
     : null;
+  const tavoloInCassa = order?.order.table_id != null && order.comanda_viva?.stato !== 'CHIUSA'
+    ? apertiInCassa?.get(order.order.table_id) ?? null
+    : null;
+  const leggiRigheCassa = comandaInCassa != null || tavoloInCassa != null;
+  const rileggiRigheCassa = useRef<(() => void) | null>(null);
   useEffect(() => {
     setRigheCassa(null);
-    if (openOrderId == null || comandaInCassa == null) return;
+    rileggiRigheCassa.current = null;
+    if (openOrderId == null || !leggiRigheCassa) return;
     let vivo = true;
     const leggi = () => {
       ordersApiService.getRigheCassa(openOrderId)
@@ -1562,16 +1576,25 @@ export const OrderPad: React.FC<OrderPadProps> = ({ isInitialLoading = false, di
         .catch(() => { /* senza righe della cassa il pad funziona lo stesso */ });
     };
     leggi();
+    rileggiRigheCassa.current = leggi;
     const timer = setInterval(leggi, 30_000);
     const socket = socketClient.getSocket();
     const onRighe = (p: { order_id?: number }) => { if (p?.order_id === openOrderId) leggi(); };
     socket?.on('passepartout:righe-cassa', onRighe);
     return () => {
       vivo = false;
+      rileggiRigheCassa.current = null;
       clearInterval(timer);
       socket?.off('passepartout:righe-cassa', onRighe);
     };
-  }, [openOrderId, comandaInCassa]);
+  }, [openOrderId, comandaInCassa, leggiRigheCassa]);
+  const totaleTavoloInCassa = tavoloInCassa?.totale_cents ?? null;
+  const totaleVisto = useRef(totaleTavoloInCassa);
+  useEffect(() => {
+    if (totaleVisto.current === totaleTavoloInCassa) return;
+    totaleVisto.current = totaleTavoloInCassa;
+    rileggiRigheCassa.current?.();
+  }, [totaleTavoloInCassa]);
 
   // Presenza sul tavolo: all'ingresso ci si annuncia e l'ack dice chi c'è
   // già; le variazioni arrivano via orderpad:presence. Sul reconnect ci si
@@ -1910,7 +1933,7 @@ export const OrderPad: React.FC<OrderPadProps> = ({ isInitialLoading = false, di
         <TableGrid
           rows={buildRows(
             tables, openTables, billTables, reservationForTable, mergeGroupByTable, globalShiftFilter,
-            openOrders, billResiduals,
+            openOrders, billResiduals, apertiInCassa,
           )}
           filter={gridFilter}
           onFilter={setGridFilter}

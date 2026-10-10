@@ -435,6 +435,29 @@ export interface RigheDallaCassa {
 const RIGHE_CASSA_TTL_MS = 10_000;
 const cacheRigheCassa = new Map<string, { at: number; comanda: PassepartoutComanda | null }>();
 
+/** La comanda aperta in cassa sul tavolo di un ordine che in cassa non ha
+ *  ancora scritto niente: il tavolo aperto dalla cassa o dal palmare, che il
+ *  CRM vede dalla lettura dei tavoli aperti (passepartoutTavoliAperti). Il
+ *  primo invio del CRM finirà proprio lì (getComandaTavolo), e il cameriere
+ *  deve vedere cosa c'è già prima di aggiungere. Con «Tavoli aperti in cassa»
+ *  spento non si guarda: la sala non vede i tavoli della cassa. Un ordine di
+ *  un servizio passato rimasto aperto non prende la comanda di oggi. */
+async function comandaApertaSulTavolo(tenantId: number, orderId: number): Promise<number | null> {
+    const rs = await queryWithRetry(
+        `SELECT ta.pp_comanda_id
+           FROM orders o
+           JOIN passepartout_tavoli_aperti ta ON ta.tenant_id = o.tenant_id AND ta.table_id = o.table_id
+           JOIN passepartout_config pc ON pc.tenant_id = o.tenant_id AND pc.tavoli_aperti_enabled
+          WHERE o.tenant_id = $1 AND o.id = $2 AND o.status = 'OPEN'
+            AND ta.visto_at > now() - interval '5 minutes'
+            AND o.opened_at > COALESCE(ta.aperta_da, now()) - interval '3 hours'
+          ORDER BY ta.aperta_da DESC NULLS LAST, ta.pp_comanda_id DESC
+          LIMIT 1`,
+        [tenantId, orderId]
+    );
+    return rs.rows[0] ? Number(rs.rows[0].pp_comanda_id) : null;
+}
+
 /** Le righe della comanda in cassa che non ha scritto il CRM, con il totale
  *  del tavolo in cassa. Una lettura ogni 10 s per comanda al massimo: più
  *  palmari sullo stesso tavolo non moltiplicano le chiamate alla cassa. */
@@ -443,8 +466,11 @@ export async function righeDallaCassa(tenantId: number, orderId: number): Promis
         `SELECT pp_comanda_id, stato FROM passepartout_comande_vive WHERE tenant_id = $1 AND order_id = $2`,
         [tenantId, orderId]
     );
-    const ppComandaId = v.rows[0]?.pp_comanda_id != null ? Number(v.rows[0].pp_comanda_id) : null;
-    if (ppComandaId == null || v.rows[0].stato === 'CHIUSA') return { disponibile: true, righe: [], totale_cents: null };
+    if (v.rows[0]?.stato === 'CHIUSA') return { disponibile: true, righe: [], totale_cents: null };
+    const ppComandaId = v.rows[0]?.pp_comanda_id != null
+        ? Number(v.rows[0].pp_comanda_id)
+        : await comandaApertaSulTavolo(tenantId, orderId);
+    if (ppComandaId == null) return { disponibile: true, righe: [], totale_cents: null };
     const chiave = `${tenantId}:${ppComandaId}`;
     let voce = cacheRigheCassa.get(chiave);
     if (!voce || Date.now() - voce.at > RIGHE_CASSA_TTL_MS) {
@@ -573,6 +599,8 @@ export async function lavoraComandeVive(tenantId: number, soloOrdine: number | n
         };
         try {
             const esito = await callPassepartout<EsitoComandaViva>(tenantId, 'comandaViva', params as unknown as Record<string, unknown>, 120_000);
+            // La comanda è cambiata: le sue righe lette per il pad non valgono più.
+            if (esito.idComanda != null) cacheRigheCassa.delete(`${tenantId}:${esito.idComanda}`);
             // Comanda chiusa in cassa: non si è scritto niente.
             const nonTrovate = esito.chiusa ? [] : await registra(tenantId, orderId, daScrivere, esito);
             if (!esito.chiusa && (esito.inviate?.length ?? 0) > 0) await segnaInviate(tenantId, orderId, desiderate, esito.inviate!);

@@ -37,6 +37,10 @@ export interface TableRow {
   order?: OpenOrderSummary;
   /** Il residuo del conto da incassare, per la stessa riga di stato. */
   billCents?: number;
+  /** Il tavolo aperto in cassa Passepartout (dalla cassa o dal palmare) senza
+   *  una comanda del CRM: sta fra le comande aperte, col totale della cassa.
+   *  Aprendolo, la comanda del CRM si aggiunge a quella in cassa. */
+  inCassa?: { totale_cents: number };
 }
 
 export type TableFilter = 'ALL' | TableState;
@@ -160,6 +164,10 @@ export const tableStatusLine = (row: TableRow, t?: TFunc): string => {
       ? dì('tile.toTakeAmount', `${euro(row.billCents)} · da incassare`, { importo: euro(row.billCents) })
       : dì('grid.bill.caption', 'da incassare');
   }
+  if (row.state === 'order' && row.inCassa) {
+    const label = dì('tile.inCassa', 'in cassa');
+    return dì('tile.withAmount', `${euro(row.inCassa.totale_cents)} · ${label}`, { importo: euro(row.inCassa.totale_cents), stato: label });
+  }
   if (row.state === 'order') {
     // Il campo può non esserci: frontend e backend si deployano separati, e
     // fra i due c'è sempre una finestra in cui il nuovo parla col vecchio.
@@ -255,6 +263,9 @@ export const buildRows = (
   // griglia di Cassa non li passa e resta quella di sempre.
   orderByTable?: Map<number, OpenOrderSummary>,
   billCentsByTable?: Map<number, number>,
+  // I tavoli aperti in cassa Passepartout (useTavoliApertiInCassa): solo
+  // Comande li passa, e solo per il servizio di oggi.
+  apertiInCassa?: ReadonlyMap<number, { totale_cents: number }>,
 ): TableRow[] => {
   const byId = new Map(tables.map(t => [t.id, t]));
   const groupFor = (id: number): number[] | null => {
@@ -276,20 +287,27 @@ export const buildRows = (
       const reservation = members.map(m => reservationForTable(m.id)).find(r => r != null) ?? null;
       const orderOn = members.find(m => openTables.has(m.id));
       const billOn = members.find(m => billTables.has(m.id));
+      // Il tavolo aperto in cassa conta solo se il CRM non ha né comanda né
+      // conto lì: è seduto e sta ordinando, quindi batte la prenotazione.
+      const cassaOn = members.find(m => apertiInCassa?.has(m.id));
       // Una comanda aperta batte il conto: se il tavolo ha ricominciato a
       // ordinare, il conto vecchio non è più la cosa da fare.
       const state: TableState =
         orderOn ? 'order'
         : billOn ? 'bill'
+        : cassaOn ? 'order'
         : reservation ? 'booked'
         : 'free';
       const row: TableRow = { table, state, reservation };
       // Il riassunto segue il tavolo che ha davvero la comanda (o il conto):
       // su un'unione è il capofila a portare la tessera, ma i soldi possono
       // stare sul gregario.
-      if (state === 'order' && orderByTable) {
-        const on = orderByTable.get((orderOn ?? table).id);
+      if (state === 'order' && orderOn && orderByTable) {
+        const on = orderByTable.get(orderOn.id);
         if (on) row.order = on;
+      }
+      if (state === 'order' && !orderOn && cassaOn) {
+        row.inCassa = { totale_cents: apertiInCassa!.get(cassaOn.id)!.totale_cents };
       }
       if (state === 'bill' && billCentsByTable) {
         const cents = billCentsByTable.get((billOn ?? table).id);
@@ -299,7 +317,9 @@ export const buildRows = (
         row.groupLabel = members.map(m => m.name).sort(compareTableNames).join('+');
         row.groupSeats = members.reduce((sum, m) => sum + m.seats, 0);
         // Si apre il tavolo che ha già la comanda o il conto, mai un doppione.
-        row.pickId = orderOn?.id ?? billOn?.id ?? table.id;
+        // Il tavolo della cassa, perché la comanda del CRM vada a finire
+        // nella stessa comanda in cassa.
+        row.pickId = orderOn?.id ?? billOn?.id ?? cassaOn?.id ?? table.id;
       }
       return [row];
     })
