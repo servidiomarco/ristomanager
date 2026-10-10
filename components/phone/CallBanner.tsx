@@ -253,7 +253,7 @@ export const CallBanner: React.FC<{
                 </button>
               ))}
 
-              {ended && (ended.outcome === 'callback' || ended.outcome === 'follow_up') && (
+              {ended && (ended.outcome === 'callback' || ended.outcome === 'follow_up' || ended.outcome === 'missed') && (
                 <button
                   type="button"
                   onClick={() => { dismiss(call.id); onOpenCalls(); }}

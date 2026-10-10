@@ -205,7 +205,8 @@ import {
     formatItalianDateReadback,
     spellItalianPhoneDigits,
 } from './services/elevenlabsService.js';
-import { buildCallerCard, addLiveCall, removeLiveCall, listLiveCalls, type LiveCall } from './services/liveCalls.js';
+import { buildCallerCard, addLiveCall, removeLiveCall, listLiveCalls, findRecentLiveCall, type LiveCall, type CallerCard } from './services/liveCalls.js';
+import { registerSofiaCall, unavailableTwiml, type SofiaInitData } from './services/phoneRouting.js';
 import {
     ROOM_OCCUPANCY_CAPS_KEY,
     RoomOccupancyCap,
@@ -1518,14 +1519,17 @@ function sofiaCallerIdRaw(body: any): string {
     ).trim();
 }
 
-async function announceSofiaCallStarted(tenantId: number, body: any): Promise<void> {
+async function announceSofiaCallStarted(tenantId: number, body: any): Promise<CallerCard | null> {
     try {
-        if (!(await isFeatureEnabledForTenant(tenantId, 'voice'))) return;
+        if (!(await isFeatureEnabledForTenant(tenantId, 'voice'))) return null;
         const callSid = String(body?.call_sid ?? body?.dynamic_variables?.system__call_sid ?? '').trim() || null;
         const raw = sofiaCallerIdRaw(body);
         // Senza sid né numero il post-call non avrebbe modo di chiuderla.
-        if (!callSid && !raw) return;
+        if (!callSid && !raw) return null;
         const phone = raw ? normalizeItalianPhone(raw) : '';
+        // Già aperta dal webhook voce (Sympotia davanti al numero): l'init di
+        // ElevenLabs senza sid non ne apre una seconda.
+        if (!callSid && findRecentLiveCall(tenantId, phone, 60_000)) return null;
         const call: LiveCall = {
             id: callSid || `sofia:${phone}:${Date.now()}`,
             channel: 'sofia',
@@ -1536,8 +1540,10 @@ async function announceSofiaCallStarted(tenantId: number, body: any): Promise<vo
         };
         addLiveCall(tenantId, call);
         socketService?.broadcastToRolesRoom(tenantId, PHONE_BANNER_ROLES, 'phoneCall:started', call);
+        return call.card;
     } catch (err: any) {
         console.warn('[Telefono] annuncio chiamata di Sofia fallito (non bloccante):', err?.message || err);
+        return null;
     }
 }
 
@@ -1593,13 +1599,11 @@ async function announceSofiaCallEnded(tenantId: number, conversationId: string, 
 // on errors instead of 5xx.
 // Corpo condiviso fra path storico (alias tenant 1) e gemello col token:
 // sospensione, saluto custom, entitlement e rubrica sono del tenant risolto.
-async function handleElevenLabsInitConversation(tenantId: number, req: express.Request, res: express.Response): Promise<void> {
-    if (!authorizeElevenLabs(req, res)) return;
-
-    // Il chiamante compare nel CRM mentre Sofia saluta: parte in parallelo e
-    // non ritarda mai la risposta, che ElevenLabs aspetta per pochi secondi.
-    void announceSofiaCallStarted(tenantId, req.body);
-
+/** Variabili e saluto per Sofia, dal numero del chiamante: li chiede
+ *  ElevenLabs al webhook di init (integrazione nativa) e li passa Sympotia a
+ *  register-call quando sta davanti al numero (docs/telefono-piano.md, Fase
+ *  2). Non lancia mai: un errore dà il saluto generico. */
+async function buildSofiaInitData(tenantId: number, callerIdRaw: string): Promise<SofiaInitData> {
     // "Prenotazioni sospese" mode: Sofia is still on the phone but she
     // announces the pause instead of running the booking flow. Suspension
     // can come from the manual toggle OR a scheduled window that covers
@@ -1655,8 +1659,7 @@ async function handleElevenLabsInitConversation(tenantId: number, req: express.R
         // raccoglie i dati). Fuori sospensione è vuoto → il prompt procede.
         booking_status_message: suspended ? effectiveFirstMessage : '',
     };
-    const fallbackResponse = {
-        type: 'conversation_initiation_client_data',
+    const fallbackResponse: SofiaInitData = {
         dynamic_variables: baseDynamicVars,
         conversation_config_override: {
             agent: { first_message: effectiveFirstMessage },
@@ -1666,28 +1669,22 @@ async function handleElevenLabsInitConversation(tenantId: number, req: express.R
     // When suspended we short-circuit even for known callers: no personalised
     // greeting, no customer lookup. The suspension message is what matters.
     if (suspended) {
-        res.json(fallbackResponse);
-        return;
+        return fallbackResponse;
     }
 
     // Entitlement voice (C1) sopra il flag operativo: canale non venduto =
     // stessa risposta del canale spento — saluto generico, nessun lookup.
     if (!(await isFeatureEnabledForTenant(tenantId, 'voice'))) {
-        res.json(fallbackResponse);
-        return;
+        return fallbackResponse;
     }
 
     if (!(await getFeatureFlag(tenantId, 'voice_agent_enabled', true))) {
-        res.json(fallbackResponse);
-        return;
+        return fallbackResponse;
     }
-
-    const callerIdRaw = sofiaCallerIdRaw(req.body);
 
     if (!callerIdRaw) {
         console.log('[ElevenLabs] init-conversation anonymous caller');
-        res.json(fallbackResponse);
-        return;
+        return fallbackResponse;
     }
 
     const normalized = normalizeItalianPhone(callerIdRaw);
@@ -1709,14 +1706,12 @@ async function handleElevenLabsInitConversation(tenantId: number, req: express.R
         const lookup = await findCustomerByPhone(tenantId, normalized);
         if (!lookup.exists) {
             console.log('[ElevenLabs] init-conversation miss', { phone: normalized });
-            res.json({
-                type: 'conversation_initiation_client_data',
+            return {
                 dynamic_variables: { ...baseDynamicVars, caller_id_spelled: callerIdSpelled, upcoming_bookings: await upcomingBookings },
                 conversation_config_override: {
                     agent: { first_message: genericGreeting },
                 },
-            });
-            return;
+            };
         }
 
         const firstName = (lookup.first_name || '').trim();
@@ -1738,8 +1733,7 @@ async function handleElevenLabsInitConversation(tenantId: number, req: express.R
             customer_id: lookup.customer_id,
             first_name: firstName,
         });
-        res.json({
-            type: 'conversation_initiation_client_data',
+        return {
             dynamic_variables: {
                 current_datetime_rome: nowRome,
                 customer_first_name: firstName,
@@ -1753,19 +1747,28 @@ async function handleElevenLabsInitConversation(tenantId: number, req: express.R
             conversation_config_override: {
                 agent: { first_message: personalisedFirstMessage },
             },
-        });
+        };
     } catch (err) {
         console.error('[ElevenLabs] init-conversation error', err);
         void recordAppError(tenantId, 'sofia', 'init-conversation', err);
         // Always 200 — see comment at top of handler.
-        res.json({
-            type: 'conversation_initiation_client_data',
+        return {
             dynamic_variables: { ...baseDynamicVars, caller_id_spelled: callerIdSpelled, upcoming_bookings: await upcomingBookings },
             conversation_config_override: {
                 agent: { first_message: genericGreeting },
             },
-        });
+        };
     }
+}
+
+async function handleElevenLabsInitConversation(tenantId: number, req: express.Request, res: express.Response): Promise<void> {
+    if (!authorizeElevenLabs(req, res)) return;
+
+    // Il chiamante compare nel CRM mentre Sofia saluta: parte in parallelo e
+    // non ritarda mai la risposta, che ElevenLabs aspetta per pochi secondi.
+    void announceSofiaCallStarted(tenantId, req.body);
+
+    res.json({ type: 'conversation_initiation_client_data', ...(await buildSofiaInitData(tenantId, sofiaCallerIdRaw(req.body))) });
 }
 
 // Alias tenant 1 finché i provider non sono riconfigurati sui path con token.
@@ -2168,6 +2171,35 @@ async function handleElevenLabsPostCall(tenantId: number, req: express.Request, 
         console.warn('[ElevenLabs] post-call recordVoiceCall failed:', err?.message || err);
     }
 
+    // Sympotia davanti al numero (Fase 2): la conversazione si aggancia alla
+    // riga del registro col CallSid. Se il controllo «Sofia muta» l'aveva già
+    // data per persa (post-call in ritardo), la riga provvisoria in Chiamate
+    // si chiude: la conversazione vera è appena arrivata.
+    if (callSid) {
+        try {
+            const linked = await queryWithRetry(
+                `UPDATE phone_calls pc
+                 SET conversation_id = $3, voice_call_id = vc.id,
+                     status = CASE WHEN pc.status IN ('ringing', 'missed') THEN 'sofia' ELSE pc.status END,
+                     missed_reason = CASE WHEN pc.status = 'missed' THEN NULL ELSE pc.missed_reason END
+                 FROM voice_calls vc
+                 WHERE vc.conversation_id = $3 AND vc.tenant_id = $1
+                   AND pc.call_sid = $2 AND pc.tenant_id = $1
+                 RETURNING pc.id`,
+                [tenantId, callSid, conversationId]
+            );
+            if (linked.rowCount) {
+                await queryWithRetry(
+                    `UPDATE voice_calls SET follow_up_status = 'CONTACTED', follow_up_updated_at = NOW()
+                     WHERE conversation_id = $2 AND tenant_id = $1 AND (follow_up_status IS NULL OR follow_up_status = 'PENDING')`,
+                    [tenantId, `twilio:${callSid}`]
+                );
+            }
+        } catch (err: any) {
+            console.warn('[Telefono] post-call: aggancio al registro fallito:', err?.message || err);
+        }
+    }
+
     // Minuti di Sofia: avvisi alle soglie dei minuti inclusi scelte dal
     // ristoratore e all'80%/100% del tetto extra, una volta per soglia per
     // mese. Dopo la risposta, mai bloccante.
@@ -2325,6 +2357,195 @@ app.post('/webhook/t/:tenantToken/elevenlabs/post-call', async (req, res) => {
     const tenantId = await resolveWebhookTenantOr404(req, res);
     if (tenantId == null) return;
     await runWithTenantContext(tenantId, () => handleElevenLabsPostCall(tenantId, req, res));
+});
+
+// ============================================
+// TELEFONO — Sympotia davanti al numero (docs/telefono-piano.md, Fase 2)
+// ============================================
+// Il numero Twilio di Sofia punta qui invece che all'integrazione nativa di
+// ElevenLabs: ogni chiamata lascia una riga in phone_calls e apre il banner
+// «chi chiama» prima ancora che risponda qualcuno, poi Sofia la prende con
+// register-call. Se Sofia non c'è, il cliente sente un messaggio di cortesia
+// e lo staff trova la chiamata in Chiamate › Da ricontattare, con la push:
+// ad agosto 2026 175 chiamate erano cadute nel silenzio senza che nessuno lo
+// sapesse. Il path va col token del tenant: Twilio firma l'URL completo.
+
+// Solo i numeri veri vanno a register-call e in rubrica: Twilio manda
+// «anonymous» o simili per i numeri nascosti, «client:…» per il browser.
+const e164OrEmpty = (raw: unknown): string => {
+    const v = String(raw ?? '').trim();
+    return /^\+\d{6,15}$/.test(v) ? v : '';
+};
+
+// Una chiamata agganciata a Sofia che si chiude senza post-call non ha avuto
+// una conversazione: è il segno delle chiamate mute (crediti finiti). Si
+// aspetta il post-call, che arriva pochi secondi dopo la fine, poi si
+// considera persa. Variabile d'ambiente solo per i test.
+const SOFIA_SILENT_CHECK_MS = Number(process.env.SOFIA_SILENT_CHECK_MS) || 3 * 60 * 1000;
+
+type MissedReason = 'sofia_non_disponibile' | 'sofia_muta' | 'voce_non_attiva';
+
+const MISSED_SUMMARY: Record<MissedReason, string> = {
+    sofia_non_disponibile: 'Sofia non era raggiungibile: il cliente ha sentito il messaggio di cortesia. Da richiamare.',
+    sofia_muta: 'Sofia non ha parlato con il cliente: la chiamata si è chiusa senza conversazione. Da richiamare.',
+    voce_non_attiva: 'Chiamata arrivata con Sofia non attiva: il cliente ha sentito il messaggio di cortesia. Da richiamare.',
+};
+
+/** Chiamata persa: registro, riga in Chiamate da ricontattare, push ai
+ *  responsabili e banner chiuso. Non lancia: è sempre dopo la risposta. */
+async function recordMissedPhoneCall(tenantId: number, callSid: string, fromNumber: string, reason: MissedReason): Promise<void> {
+    try {
+        const phone = fromNumber ? normalizeItalianPhone(fromNumber) : null;
+        const marked = await queryWithRetry(
+            `UPDATE phone_calls SET status = 'missed', missed_reason = $3
+             WHERE call_sid = $1 AND tenant_id = $2 AND status IN ('ringing', 'sofia') AND voice_call_id IS NULL
+             RETURNING id, duration_seconds`,
+            [callSid, tenantId, reason]
+        );
+        // Già collegata a una conversazione di Sofia (post-call arrivato) o
+        // presa dallo staff: non è persa.
+        if (!marked.rowCount) return;
+        // La riga in Chiamate usa lo stesso conversation_id finto per ogni
+        // CallSid: un secondo giro (retry di Twilio) non la duplica.
+        const vc = await queryWithRetry(
+            `INSERT INTO voice_calls (tenant_id, conversation_id, phone, summary, duration_seconds)
+             VALUES ($1, $2, $3, $4, $5)
+             ON CONFLICT (conversation_id) DO NOTHING
+             RETURNING id`,
+            [tenantId, `twilio:${callSid}`, phone, MISSED_SUMMARY[reason], marked.rows[0].duration_seconds ?? null]
+        );
+        if (vc.rows[0]) {
+            await queryWithRetry(`UPDATE phone_calls SET voice_call_id = $3 WHERE call_sid = $1 AND tenant_id = $2`, [callSid, tenantId, vc.rows[0].id]);
+        }
+        broadcastVoiceCallsChanged(tenantId);
+
+        const customer = phone ? await findCustomerByPhone(tenantId, phone) : { exists: false as const };
+        const name = customer.exists ? (customer.customer_name || '').trim() : '';
+        const label = name && phone ? `${name} · ${phone}` : (name || phone || 'Numero nascosto');
+        pushSendToRoles(
+            tenantId,
+            ['OWNER', 'GENERAL_MANAGER', 'MANAGER'],
+            { category: 'voice', title: 'Chiamata persa', body: label, url: '/?view=CONVERSAZIONI', tag: `phone-missed-${callSid}` },
+            { excludeUserId: null }
+        ).catch(err => console.error('Push (chiamata persa) failed:', err));
+
+        removeLiveCall(tenantId, { callSid, phone });
+        socketService?.broadcastToRolesRoom(tenantId, PHONE_BANNER_ROLES, 'phoneCall:ended', {
+            id: callSid, call_sid: callSid, phone, outcome: 'missed', voice_call_id: vc.rows[0]?.id ?? null, reservation: null,
+        });
+        console.warn('[Telefono] chiamata persa', { call_sid: callSid, reason, phone });
+    } catch (err: any) {
+        console.warn('[Telefono] registrazione chiamata persa fallita:', err?.message || err);
+    }
+}
+
+async function handleTwilioVoiceInbound(tenantId: number, req: express.Request, res: express.Response): Promise<void> {
+    if (!validateTwilioSignature(req)) {
+        console.warn('[Telefono] inbound: firma Twilio non valida');
+        res.status(403).send();
+        return;
+    }
+    const body = req.body || {};
+    const callSid = String(body.CallSid || '');
+    const fromRaw = String(body.From || '');
+    const to = e164OrEmpty(body.To || body.Called);
+    const caller = e164OrEmpty(fromRaw);
+    if (!callSid) {
+        res.status(400).send();
+        return;
+    }
+
+    // Il registro per primo: anche se Sofia fallisce, la chiamata resta.
+    await queryWithRetry(
+        `INSERT INTO phone_calls (tenant_id, call_sid, from_number, to_number, routing)
+         VALUES ($1, $2, $3, $4, 'solo_sofia')
+         ON CONFLICT (call_sid) DO NOTHING`,
+        [tenantId, callSid, caller || fromRaw || null, to || null]
+    );
+    // Il banner in parallelo: la scheda non deve rallentare la risposta. Una
+    // chiamata persa si chiude solo dopo che il banner è aperto, o la card
+    // resterebbe su «Sofia sta parlando» (ElevenLabs può fallire prima che
+    // la scheda sia pronta).
+    const announced = announceSofiaCallStarted(tenantId, { caller_id: caller, call_sid: callSid }).catch(() => null);
+    void announced.then(card => {
+        if (!card?.customer) return;
+        return queryWithRetry(
+            `UPDATE phone_calls SET customer_id = $3 WHERE call_sid = $1 AND tenant_id = $2`,
+            [callSid, tenantId, card.customer.id]
+        ).then(() => undefined);
+    }).catch(() => {});
+
+    const businessName = businessIdentity(tenantId).voiceName;
+    if (!(await isFeatureEnabledForTenant(tenantId, 'voice'))) {
+        res.type('text/xml').send(unavailableTwiml(businessName));
+        void announced.then(() => recordMissedPhoneCall(tenantId, callSid, caller, 'voce_non_attiva'));
+        return;
+    }
+
+    try {
+        const init = await buildSofiaInitData(tenantId, caller);
+        // from_number diventa system__caller_id, che gli strumenti di Sofia
+        // usano come telefono della prenotazione: va il numero vero.
+        const twiml = await registerSofiaCall({ from: caller || fromRaw, to: to || fromRaw, init });
+        await queryWithRetry(
+            `UPDATE phone_calls SET status = 'sofia', answered_at = NOW() WHERE call_sid = $1 AND tenant_id = $2`,
+            [callSid, tenantId]
+        );
+        res.type('text/xml').send(twiml);
+    } catch (err: any) {
+        console.error('[Telefono] Sofia non agganciata:', err?.message || err);
+        void recordAppError(tenantId, 'sofia', 'register-call', err);
+        res.type('text/xml').send(unavailableTwiml(businessName));
+        void announced.then(() => recordMissedPhoneCall(tenantId, callSid, caller, 'sofia_non_disponibile'));
+    }
+}
+
+// Fine chiamata (status callback del numero): durata, e il controllo delle
+// chiamate di Sofia rimaste senza conversazione.
+async function handleTwilioVoiceStatus(tenantId: number, req: express.Request, res: express.Response): Promise<void> {
+    if (!validateTwilioSignature(req)) {
+        res.status(403).send();
+        return;
+    }
+    const body = req.body || {};
+    const callSid = String(body.CallSid || '');
+    const duration = Number(body.CallDuration);
+    const updated = await queryWithRetry(
+        `UPDATE phone_calls SET ended_at = NOW(), duration_seconds = $3
+         WHERE call_sid = $1 AND tenant_id = $2
+         RETURNING status, from_number, voice_call_id`,
+        [callSid, tenantId, Number.isFinite(duration) ? Math.trunc(duration) : null]
+    );
+    res.status(204).send();
+
+    const row = updated.rows[0];
+    if (!row) return;
+    // Riattaccata prima che rispondesse qualcuno: resta nel registro, senza
+    // push (è il cliente che ha chiuso nel giro di un attimo).
+    if (row.status === 'ringing') {
+        await queryWithRetry(
+            `UPDATE phone_calls SET status = 'missed', missed_reason = 'riattaccata' WHERE call_sid = $1 AND tenant_id = $2 AND status = 'ringing'`,
+            [callSid, tenantId]
+        );
+        return;
+    }
+    if (row.status === 'sofia' && !row.voice_call_id) {
+        const timer = setTimeout(() => {
+            void runWithTenantContext(tenantId, () => recordMissedPhoneCall(tenantId, callSid, e164OrEmpty(row.from_number), 'sofia_muta'));
+        }, SOFIA_SILENT_CHECK_MS);
+        timer.unref?.();
+    }
+}
+
+app.post('/webhook/t/:tenantToken/voice/inbound', twilioUrlEncoded, async (req, res) => {
+    const tenantId = await resolveWebhookTenantOr404(req, res);
+    if (tenantId == null) return;
+    await runWithTenantContext(tenantId, () => handleTwilioVoiceInbound(tenantId, req, res));
+});
+app.post('/webhook/t/:tenantToken/voice/status', twilioUrlEncoded, async (req, res) => {
+    const tenantId = await resolveWebhookTenantOr404(req, res);
+    if (tenantId == null) return;
+    await runWithTenantContext(tenantId, () => handleTwilioVoiceStatus(tenantId, req, res));
 });
 
 // ============================================

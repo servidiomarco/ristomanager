@@ -158,6 +158,19 @@ export function removeLiveCall(tenantId: number, ref: { callSid?: string | null;
     return id;
 }
 
+/** Una chiamata dello stesso numero aperta da poco: con Sympotia davanti al
+ *  numero la apre il webhook voce, e il webhook di init di ElevenLabs, se
+ *  arriva senza call_sid, non deve aprirne una seconda. */
+export function findRecentLiveCall(tenantId: number, phone: string, withinMs: number): LiveCall | null {
+    const calls = liveByTenant.get(tenantId);
+    if (!calls || !phone) return null;
+    const cutoff = Date.now() - withinMs;
+    for (const { call } of calls.values()) {
+        if (call.phone === phone && Date.parse(call.started_at) >= cutoff) return call;
+    }
+    return null;
+}
+
 export function listLiveCalls(tenantId: number): LiveCall[] {
     const calls = liveByTenant.get(tenantId);
     if (!calls) return [];
