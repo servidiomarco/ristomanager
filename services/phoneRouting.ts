@@ -114,9 +114,11 @@ export const PHONE_ROUTING_RING_MIN = 5;
 export const PHONE_ROUTING_RING_MAX = 60;
 
 /** Squillo del locale: i dispositivi del CRM (<Client>) e i cellulari
- *  (<Number> con l'annuncio), tutti insieme. answerOnBridge: chi chiama sente
- *  squillare finché qualcuno non risponde davvero (annuncio compreso), non il
- *  silenzio. Il numero mostrato ai cellulari è il nostro: il passaggio del
+ *  (<Number> con l'annuncio), tutti insieme. Chi chiama sente lo squillo
+ *  italiano (ringTone) finché qualcuno non risponde, annuncio compreso. Niente
+ *  answerOnBridge: con la chiamata del cliente ancora senza risposta, a fine
+ *  squillo Twilio la chiudeva «no-answer» invece di passarla a Sofia (prova
+ *  del 10/10 18:52). Il numero mostrato ai cellulari è il nostro: il passaggio del
  *  numero del cliente va provato prima di usarlo. Il browser riceve il
  *  CallSid della chiamata del cliente e il suo numero come parametri, per
  *  agganciarsi al banner «chi chiama». */
@@ -126,7 +128,7 @@ export const dialLocaleTwiml = (args: {
     afterDialUrl: string; whisperUrl: string; clientAnsweredUrl: string;
 }): string =>
     twimlResponse(
-        `<Dial timeout="${args.ringSeconds}" answerOnBridge="true" callerId="${xmlEscape(args.callerId)}" action="${xmlEscape(args.afterDialUrl)}" method="POST">`
+        `<Dial timeout="${args.ringSeconds}" ringTone="it" callerId="${xmlEscape(args.callerId)}" action="${xmlEscape(args.afterDialUrl)}" method="POST">`
         + args.clients.map(identity =>
             `<Client statusCallbackEvent="answered" statusCallback="${xmlEscape(args.clientAnsweredUrl)}" statusCallbackMethod="POST">`
             + `<Identity>${xmlEscape(identity)}</Identity>`

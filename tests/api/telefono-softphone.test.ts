@@ -76,7 +76,7 @@ describe('telefono: softphone nel CRM', () => {
         expect((await api().put('/settings/phone-routing').set(bearer(token)).send({ mode: 'prima_locale', mobiles: [], ring_seconds: 20 })).status).toBe(200);
         const res = await signed(`${webhookPath}/voice/inbound`, { CallSid: 'CAsoft0001', From: CLIENTE, To: NOSTRO_NUMERO });
         expect(res.status).toBe(200);
-        expect(res.text).toContain('<Dial timeout="20" answerOnBridge="true"');
+        expect(res.text).toContain('<Dial timeout="20" ringTone="it"');
         expect(res.text).toContain(`<Identity>${identity}</Identity>`);
         expect(res.text).toContain('<Parameter name="parentCallSid" value="CAsoft0001"/>');
         expect(res.text).toContain(`<Parameter name="caller" value="${CLIENTE}"/>`);

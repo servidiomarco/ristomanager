@@ -877,6 +877,7 @@ Pagina unica a blocchi, con chip-àncora per saltare alla sezione e una **ricerc
 
 | Data | Sezione | Modifica |
 |---|---|---|
+| 2026-10-10 | Agente vocale "Sofia" | «Prima il locale»: se nessuno risponde dal CRM o dal cellulare entro i secondi scelti, ora la chiamata passa davvero a Sofia; prima, lasciata squillare, si chiudeva. |
 | 2026-10-10 | Agente vocale "Sofia", Impostazioni, Chiamate | **Il CRM squilla come un telefono.** In Impostazioni › AI si accende «Questo dispositivo squilla» e si sceglie «Prima il locale»: le chiamate al numero di Sofia squillano nel CRM (e sui cellulari indicati) prima di passare a lei. Dalla card «chi chiama» si risponde, si spegne il microfono, si apre una nuova prenotazione già compilata e si riaggancia; gli altri vedono chi ha risposto. «Chiama» e «Richiama» in Chiamate partono dal CRM col numero del locale. |
 | 2026-10-10 | Agente vocale "Sofia" | «Prima il cellulare»: l'annuncio sul cellulare è più corto («Vecchio Frantoio: chiama Giulia Ferraro. Premi 1»), e un cliente che riattacca mentre squilla il cellulare finisce in Chiamate › Da ricontattare con la push «Chiamata persa». |
 | 2026-10-10 | Agente vocale "Sofia", Impostazioni | Nuovo **Chi risponde al telefono** in Impostazioni › AI: prima di Sofia può squillare il cellulare del locale (fino a tre, per i secondi scelti). Chi risponde sente chi chiama e preme 1; se nessuno risponde, la chiamata passa a Sofia. La card «chi chiama» mostra se squilla il cellulare, se è in linea col locale o con Sofia. |
