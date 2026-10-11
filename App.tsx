@@ -3985,7 +3985,7 @@ const App: React.FC = () => {
                   <SettingsDisclosure
                     icon={Wand2}
                     title={t('settings.waAgent', 'Agente automatico')}
-                    description={t('settings.waAgentHint', 'Bozze o risposte da solo ai messaggi in arrivo')}
+                    description={t('settings.waAgentHint', 'Bozze, risposte o azioni da solo sui messaggi in arrivo')}
                   >
                     <CardErrorBoundary label={t('settings.waAgent', 'Agente automatico')}>
                       <WhatsAppAgentCard showToast={addToast} />

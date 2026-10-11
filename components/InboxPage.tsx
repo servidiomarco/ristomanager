@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { relativeTime } from '../utils/relativeTime';
 import { useTranslation } from 'react-i18next';
-import { MessageCircle, Send, Loader2, RefreshCw, AlertTriangle, CheckCircle2, Clock, ArrowRight, Check, CalendarPlus, Paperclip, X as XIcon, Wand2, FolderOpen } from 'lucide-react';
+import { MessageCircle, Send, Loader2, RefreshCw, AlertTriangle, CheckCircle2, Clock, ArrowRight, Check, CalendarPlus, Paperclip, X as XIcon, Wand2, FolderOpen, Undo2 } from 'lucide-react';
 import { Loader } from './Loader';
 import { SkeletonInboxList } from './SkeletonCards';
 import {
@@ -24,7 +24,7 @@ import { socketClient } from '../services/socketClient';
 import { runAgent, confirmProposal, discardProposal, extractBooking, type AgentProposal, type ExtractedBooking } from '../services/aiMessagesApiService';
 import { listMedia, attachFromLibrary, type MediaFile } from '../services/mediaApiService';
 import { getFeatureFlags } from '../services/apiService';
-import { getAgentThread, pauseAgentThread, markAgentDraft, type AgentThreadState } from '../services/whatsappApiService';
+import { getAgentThread, pauseAgentThread, markAgentDraft, undoAgentAction, type AgentThreadState } from '../services/whatsappApiService';
 import { toTitleCase, phoneMatchKey, isoDatesToEuropean } from '../utils/text';
 import { Shift, type Reservation } from '../types';
 import {
@@ -558,6 +558,29 @@ const InboxPage: React.FC<InboxPageProps> = ({ onCreateReservationFromContact, o
     }
   }, [selectedKey, loadAgentState]);
 
+  // «Annulla» su un'azione che l'agente ha fatto da solo: la prenotazione
+  // torna com'era, se nessuno l'ha toccata nel frattempo.
+  const [undoingId, setUndoingId] = useState<number | null>(null);
+  const handleUndo = useCallback(async (actionId: number) => {
+    if (!selectedKey) return;
+    setUndoingId(actionId);
+    try {
+      await undoAgentAction(actionId);
+    } catch (err: any) {
+      const code = err?.data?.error;
+      setSendError(
+        code === 'changed' ? tv('agentUndoChanged')
+        : code === 'no_table' ? tv('agentUndoNoTable')
+        : code === 'past' ? tv('agentUndoPast')
+        : code === 'already_undone' ? null
+        : (err?.message || tv('agentUndoFailed'))
+      );
+    } finally {
+      setUndoingId(null);
+      await loadAgentState(selectedKey);
+    }
+  }, [selectedKey, loadAgentState]);
+
   const handleDraft = useCallback(async (use: boolean) => {
     const d = agentState?.draft;
     if (!d) return;
@@ -901,7 +924,8 @@ const InboxPage: React.FC<InboxPageProps> = ({ onCreateReservationFromContact, o
                               : agentState.paused_until
                                 ? tv('agentPausedUntil', { ora: formatTime(agentState.paused_until) })
                                 : tv('agentPaused'))
-                            : (agentState.mode === 'reply' ? tv('agentChipReply') : tv('agentChipDraft'))}
+                            : (agentState.mode === 'actions' ? tv('agentChipActions')
+                              : agentState.mode === 'reply' ? tv('agentChipReply') : tv('agentChipDraft'))}
                         </span>
                       </button>
                       {pauseMenuOpen && (
@@ -1119,6 +1143,36 @@ const InboxPage: React.FC<InboxPageProps> = ({ onCreateReservationFromContact, o
                       </ul>
                     )}
                   </div>
+                )}
+
+                {/* Quello che l'agente ha fatto da solo (modalità Azioni)
+                    negli ultimi due giorni, ciascuna col suo «Annulla». Le
+                    azioni già annullate restano, spente, a fare da storia. */}
+                {(agentState?.actions ?? []).length > 0 && (
+                  <ul className="space-y-1.5">
+                    {(agentState?.actions ?? []).map(a => (
+                      <li key={a.id} className="flex items-center gap-2.5 rounded-[var(--ds-radius-sm)] bg-[var(--ds-arriving-tint)] px-3 py-2">
+                        <Wand2 className="h-4 w-4 flex-shrink-0 text-[var(--ds-arriving-text)]" aria-hidden />
+                        <div className="min-w-0 flex-1">
+                          <p className={`text-[13px] font-semibold ${a.undone_at ? 'text-[var(--ds-text-muted)] line-through' : 'text-[var(--ds-text-primary)]'}`}>
+                            {tv(`agentDid.${a.tool}`, { defaultValue: tv('agentDidOther') })} · {formatTime(a.at)}
+                          </p>
+                          <p className="truncate text-[12px] text-[var(--ds-text-secondary)]">{a.summary}</p>
+                        </div>
+                        {a.undoable && (
+                          <button
+                            type="button"
+                            onClick={() => handleUndo(a.id)}
+                            disabled={undoingId === a.id}
+                            className="inline-flex h-9 flex-shrink-0 items-center gap-1.5 rounded-[var(--ds-radius-control)] bg-[var(--ds-surface)] px-3 text-[13px] font-medium text-[var(--ds-text-primary)] ring-1 ring-[var(--ds-border)] transition-colors hover:bg-[var(--ds-surface-row)] disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+                          >
+                            {undoingId === a.id ? <Loader2 className="h-4 w-4 animate-spin" /> : <Undo2 className="h-4 w-4" />} {tv('agentUndo')}
+                          </button>
+                        )}
+                        {a.undone_at && <span className="flex-shrink-0 text-[12px] text-[var(--ds-text-muted)]">{tv('agentUndone')}</span>}
+                      </li>
+                    ))}
+                  </ul>
                 )}
 
                 {/* La bozza che l'agente ha preparato da solo (modalità

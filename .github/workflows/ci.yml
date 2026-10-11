@@ -183,6 +183,14 @@ jobs:
       - run: npm ci
       - name: Report AI nel tenant, assistente Aiuto, scheda cliente nei Messaggi, bolle HACCP e bozze delle schede food cost (build server + vitest sui file con lo stub)
         run: npm run build:server && npx vitest run tests/api/pannello-contesto.test.ts tests/api/assistente.test.ts tests/api/ai-scheda-cliente.test.ts tests/api/agente-whatsapp-ciclo.test.ts tests/api/agente-whatsapp-strumenti.test.ts tests/api/agente-whatsapp-coda.test.ts tests/api/haccp-bolle.test.ts tests/api/food-cost-bozza.test.ts tests/api/food-cost-bozze.test.ts
+      # Le azioni da sole partono solo se la risposta può partire: qui il
+      # tenant 1 ha un mittente WhatsApp (le API Twilio vanno allo stub che
+      # il test accende sulla porta del server + 12). In un passo a parte
+      # perché nel resto della suite il tenant 1 resta senza mittente.
+      - name: Agente WhatsApp in modalità Azioni (mittente WhatsApp e Twilio finti)
+        env:
+          TWILIO_WHATSAPP_FROM: '+393895916494'
+        run: npx vitest run tests/api/agente-whatsapp-azioni.test.ts
 
   api-tests:
     name: Test API

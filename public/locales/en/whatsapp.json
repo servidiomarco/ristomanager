@@ -88,6 +88,18 @@
     "simProposal": "To confirm",
     "simSkipped": "No reply ({{motivo}})",
     "simNothing": "The agent did not reply",
-    "simError": "Simulator error"
+    "simError": "Simulator error",
+    "modeActions": "Actions",
+    "modeActionsHint": "Replies and, where the rules allow, books, moves and cancels on its own. Every action reaches you as a notification and can be undone from the chat.",
+    "autoTitle": "What it does on its own",
+    "auto": {
+      "create": "Book",
+      "modify": "Move and change party size",
+      "cancel": "Cancel",
+      "notes": "Notes and allergies"
+    },
+    "confirmCancel": "Ask for confirmation before cancelling",
+    "autoRules": "What is off, it proposes. Always left to staff: deposits, banquets, large groups, room changes and bookings too close.",
+    "simAction": "Would do on its own"
   }
 }

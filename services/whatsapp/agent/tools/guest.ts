@@ -9,6 +9,7 @@ import {
 } from '../../../reservationGuestUpdates.js';
 import { getTenantLocale } from '../../../tenantLocale.js';
 import { getDatePartInTz, getTimePartInTz } from '../../../../utils/reservationTime.js';
+import { decideNote } from '../autonomy.js';
 import type { AgentContext } from '../types.js';
 import type { AgentTool, ToolRun } from './types.js';
 
@@ -87,6 +88,7 @@ export const lateArrivalTool: AgentTool = {
 export const reservationNoteTool: AgentTool = {
     name: 'add_reservation_note',
     kind: 'write',
+    decide: (args, ctx) => (ctx.autonomy ? decideNote(args, ctx) : { kind: 'propose' }),
     definition: (ctx: AgentContext) => {
         const presets = ctx.notePresets ?? [];
         const conQuantita = presets.filter(p => p.has_quantity);
@@ -149,9 +151,11 @@ export const allergyTool: AgentTool = {
     name: 'record_allergy',
     kind: 'write',
     // Dati sanitari: si scrivono solo col consenso esplicito del cliente.
-    decide: args => args.customer_consented === true
-        ? { kind: 'propose' }
-        : { kind: 'refuse', reason: 'Prima chiedi al cliente: «Posso annotarlo sulla prenotazione per la cucina?». Solo se risponde sì richiama record_allergy con customer_consented: true.' },
+    // Con il consenso, in modalità «Azioni» si registrano subito (lo staff
+    // riceve comunque «Allergia segnalata»), altrimenti si propongono.
+    decide: (args, ctx) => args.customer_consented !== true
+        ? { kind: 'refuse', reason: 'Prima chiedi al cliente: «Posso annotarlo sulla prenotazione per la cucina?». Solo se risponde sì richiama record_allergy con customer_consented: true.' }
+        : (ctx.autonomy ? decideNote(args, ctx) : { kind: 'propose' }),
     definition: (ctx: AgentContext) => {
         const presets = ctx.allergenPresets ?? [];
         const lista = presets.length ? { type: 'array', items: { type: 'string', enum: presets } } : { type: 'array', items: { type: 'string' } };

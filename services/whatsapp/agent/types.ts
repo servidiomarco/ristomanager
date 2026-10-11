@@ -49,6 +49,48 @@ export interface AgentContext {
      * dire ai clienti una soglia che il sistema non applica.
      */
     depositPolicy?: DepositPolicy;
+    /** Presente solo in modalità «Azioni» (coda automatica): cosa l'agente
+     *  esegue da solo invece di proporlo. Senza, ogni scrittura è proposta. */
+    autonomy?: AgentAutonomy;
+    /** Il simulatore delle Impostazioni: le letture si fanno, le scritture
+     *  no (né le prenotazioni né le richiamate), ma il modello le vede
+     *  riuscite come le vedrebbe sul numero vero. */
+    dryRun?: boolean;
+}
+
+export interface AgentAutonomy {
+    create: boolean;
+    modify: boolean;
+    cancel: boolean;
+    notes: boolean;
+    /** Prima di annullare chiede conferma al cliente. */
+    confirmCancel: boolean;
+}
+
+/** La prenotazione com'era prima e com'è dopo un'azione automatica: quello
+ *  che serve al tasto «Annulla». */
+export interface ReservationSnapshot {
+    id: number;
+    reservation_time: string;
+    shift: string | null;
+    guests: number;
+    children: number;
+    table_id: number | null;
+    reservation_status: string;
+    notes: string | null;
+}
+
+/** Un'azione che l'agente ha eseguito da solo in questo giro. */
+export interface AgentAction {
+    tool: string;
+    args: Record<string, any>;
+    summary: string;
+    result: Record<string, any>;
+    reservationId: number | null;
+    before: ReservationSnapshot | null;
+    after: ReservationSnapshot | null;
+    /** Dal simulatore: niente è stato scritto. */
+    simulated?: boolean;
 }
 
 export interface AgentProposal {
@@ -75,6 +117,8 @@ export interface AgentResult {
      *  una per giro: due scritture insieme (annulla e ricrea) le decide una
      *  persona, una alla volta. */
     proposals: AgentProposal[];
+    /** Scritture eseguite da sole (modalità «Azioni»), riuscite. */
+    actions: AgentAction[];
     /** Letture fatte davvero (disponibilità…), per trasparenza. */
     checks: Array<{ tool: string; args: Record<string, any>; result: any }>;
     /** Il messaggio del cliente non vuole risposta (un grazie, un ok, un

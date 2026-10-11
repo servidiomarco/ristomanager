@@ -162,7 +162,7 @@
     "waUsage": "This month's usage",
     "waUsageHint": "Messages received and sent, AI spend",
     "waAgent": "Automatic agent",
-    "waAgentHint": "Drafts or replies to incoming messages on its own"
+    "waAgentHint": "Drafts, replies or actions on its own for incoming messages"
   },
   "aria": {
     "openMenu": "Open menu",

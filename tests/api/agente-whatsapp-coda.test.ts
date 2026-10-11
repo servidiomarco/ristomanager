@@ -132,8 +132,8 @@ describe.runIf(AI_STUB_PORT > 0)('agente WhatsApp: la coda automatica', () => {
     it('lo staff ha appena scritto: l\'agente non si intromette', async () => {
         stub.load();
         await db.query(
-            `INSERT INTO outbound_messages (tenant_id, provider, channel, direction, to_phone, to_phone_digits, body, status)
-             VALUES (1, 'twilio', 'whatsapp', 'outbound', $1, $2, 'Ciao, ti rispondo io', 'delivered')`,
+            `INSERT INTO outbound_messages (tenant_id, provider, channel, direction, to_phone, to_phone_digits, body, status, kind)
+             VALUES (1, 'twilio', 'whatsapp', 'outbound', $1, $2, 'Ciao, ti rispondo io', 'delivered', 'staff')`,
             [`+39${N.staff}`, `39${N.staff}`]
         );
         await inbound(N.staff, 'Perfetto, siamo in 3');

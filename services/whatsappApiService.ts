@@ -86,7 +86,14 @@ export const getWhatsAppUsage = (): Promise<WhatsAppUsage> =>
 
 // ── L'agente che parte da solo ─────────────────────────────────────────
 
-export type AgentMode = 'off' | 'draft' | 'reply';
+export type AgentMode = 'off' | 'draft' | 'reply' | 'actions';
+
+export interface AgentAutoActions {
+  create: boolean;
+  modify: boolean;
+  cancel: boolean;
+  notes: boolean;
+}
 
 export interface AgentPolicy {
   mode: AgentMode;
@@ -96,6 +103,8 @@ export interface AgentPolicy {
   max_replies_per_thread_24h: number;
   max_runs_per_day: number;
   daily_budget_eur: number;
+  auto_actions: AgentAutoActions;
+  confirm_cancel: boolean;
 }
 
 export const getAgentPolicy = (): Promise<{ agent: AgentPolicy }> =>
@@ -115,7 +124,23 @@ export interface AgentThreadState {
     id: number; tool: string; args: Record<string, any>; summary: string;
     suggested_reply: string | null; status: string; expires_at: string; reservation_id: number | null;
   } | null;
+  /** Assente su un backend precedente alla Fase 7. */
+  actions?: AgentActionRow[];
 }
+
+/** Un'azione che l'agente ha fatto da solo, col suo «Annulla». */
+export interface AgentActionRow {
+  id: number;
+  tool: string;
+  summary: string;
+  reservation_id: number | null;
+  at: string;
+  undone_at: string | null;
+  undoable: boolean;
+}
+
+export const undoAgentAction = (actionId: number): Promise<{ ok: boolean; reservation_id: number }> =>
+  apiRequest(`${API_URL}/whatsapp/agent/actions/${actionId}/undo`, { method: 'POST', headers: getHeaders() });
 
 export const getAgentThread = (phoneDigits: string): Promise<AgentThreadState> =>
   apiRequest(`${API_URL}/whatsapp/agent/thread/${encodeURIComponent(phoneDigits)}`, { headers: getHeaders() });
@@ -135,11 +160,12 @@ export interface SimulationResult {
   status: string;
   reply: string | null;
   proposal: { tool: string; summary: string } | null;
+  actions?: Array<{ tool: string; summary: string }>;
   skipped: string | null;
   note: string | null;
 }
 
-export const simulateAgent = (text: string, mode: 'draft' | 'reply'): Promise<SimulationResult> =>
+export const simulateAgent = (text: string, mode: Exclude<AgentMode, 'off'>): Promise<SimulationResult> =>
   apiRequest(`${API_URL}/whatsapp/agent/simulate`, { method: 'POST', headers: getHeaders(), body: JSON.stringify({ text, mode }) });
 
 export const resetAgentSimulation = (): Promise<{ ok: boolean }> =>

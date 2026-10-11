@@ -88,6 +88,18 @@
     "simProposal": "Da confermare",
     "simSkipped": "Nessuna risposta ({{motivo}})",
     "simNothing": "L'agente non ha risposto",
-    "simError": "Errore del simulatore"
+    "simError": "Errore del simulatore",
+    "modeActions": "Azioni",
+    "modeActionsHint": "Risponde e, quando le regole lo permettono, prenota, sposta e annulla da solo. Ogni azione ti arriva come notifica e si annulla dalla chat.",
+    "autoTitle": "Cosa fa da solo",
+    "auto": {
+      "create": "Prenota",
+      "modify": "Sposta e cambia le persone",
+      "cancel": "Annulla",
+      "notes": "Note e allergie"
+    },
+    "confirmCancel": "Chiedi conferma prima di annullare",
+    "autoRules": "Quello che è spento lo propone. Sempre allo staff: caparre, banchetti, gruppi numerosi, cambi di sala e prenotazioni troppo vicine.",
+    "simAction": "Farebbe da solo"
   }
 }

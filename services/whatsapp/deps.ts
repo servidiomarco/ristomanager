@@ -6,6 +6,9 @@
 export interface WhatsAppDeps {
     /** Evento socket a tutti i client del ristorante (inbox, schede). */
     broadcastToAll: (tenantId: number, event: string, payload: unknown) => void;
+    /** Rimanda le prenotazioni cambiate ai client (l'«Annulla» di
+     *  un'azione dell'agente). */
+    broadcastReservationsUpdatedByIds: (ids: number[]) => Promise<unknown>;
 }
 
 let deps: WhatsAppDeps | null = null;
@@ -18,6 +21,7 @@ const NO_DEPS: WhatsAppDeps = {
             console.warn('[whatsapp] modulo non configurato: eventi socket non inviati');
         }
     },
+    broadcastReservationsUpdatedByIds: async () => undefined,
 };
 
 export function configureWhatsApp(d: WhatsAppDeps): void {

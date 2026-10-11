@@ -8,7 +8,12 @@
 // automatici — e solo dopo chiama il modello. Poi, secondo la modalità:
 // - draft: la risposta resta in bozza nell'inbox, la invia lo staff;
 // - reply: la risposta parte da sola; le modifiche alle prenotazioni restano
-//   proposte da confermare, con la push «Da confermare».
+//   proposte da confermare, con la push «Da confermare»;
+// - actions: come reply, ma prenota, sposta e annulla da solo dove
+//   l'idoneità passa (autonomy.ts); ogni azione finisce nel registro col
+//   tasto «Annulla». Un locale che scende a bozze (budget, blacklist,
+//   WhatsApp scollegato) non esegue niente: un'azione senza poterla dire al
+//   cliente è peggio di una proposta.
 // Prima di spedire si ricontrolla: se nel frattempo il cliente ha scritto
 // ancora o lo staff ha risposto, il giro non spedisce (ci pensa il giro dopo).
 
@@ -25,7 +30,8 @@ import { isWhatsAppReady } from '../config.js';
 import { isWindowOpen } from '../window.js';
 import { getAgentPolicy, type AgentMode, type WhatsAppAgentPolicy } from '../settings.js';
 import { runAgent } from './run.js';
-import { AgentError, type AgentContext, type AgentProposal, type AgentResult, type AgentUsage } from './types.js';
+import { recordAutoAction } from './autonomy.js';
+import { AgentError, type AgentAction, type AgentContext, type AgentProposal, type AgentResult, type AgentUsage } from './types.js';
 
 /** Quello che sta in server.ts. */
 export interface AgentQueueDeps {
@@ -37,6 +43,9 @@ export interface AgentQueueDeps {
     /** Salva la proposta (le vecchie in attesa decadono) e ne dà l'id. */
     saveProposal: (tenantId: number, phoneKey: string, proposal: AgentProposal, reply: string | null, reservationId: number | null) => Promise<number | null>;
     isBlacklisted: (tenantId: number, phone: string) => Promise<boolean>;
+    /** La riga «Per cambiarla: <link>» nella lingua dell'ospite, se il
+     *  locale ha acceso «La tua prenotazione»; null altrimenti. */
+    manageSuffix?: (tenantId: number, reservationId: number) => Promise<string | null>;
 }
 let deps: AgentQueueDeps | null = null;
 
@@ -137,6 +146,8 @@ export interface RunOutcome {
     skip_reason?: string;
     reply?: string | null;
     proposals?: AgentProposal[];
+    /** Le azioni eseguite da sole (o, nel simulatore, che eseguirebbe). */
+    actions?: Array<Pick<AgentAction, 'tool' | 'summary' | 'simulated'> & { id?: number | null }>;
     skipped?: string | null;
 }
 
@@ -204,7 +215,7 @@ async function preflight(run: any, policy: WhatsAppAgentPolicy, simulate: boolea
     if (!simulate) {
         const staff = await queryWithRetry(
             `SELECT 1 FROM outbound_messages
-              WHERE tenant_id = $1 AND direction = 'outbound' AND kind IS NULL
+              WHERE tenant_id = $1 AND direction = 'outbound' AND kind = 'staff'
                 AND to_phone_digits = ANY($2::text[])
                 AND sent_at > LEAST(NOW() - ($3::int * interval '1 minute'), $4::timestamptz)
               LIMIT 1`,
@@ -233,7 +244,7 @@ async function preflight(run: any, policy: WhatsAppAgentPolicy, simulate: boolea
               WHERE tenant_id = $1 AND feature = $2 AND created_at >= ${giorno}`,
             [tenantId, AGENT_AUTO_FEATURE]
         );
-        if (Number(spesa.rows[0].usd) * USD_EUR >= policy.daily_budget_eur && mode === 'reply') {
+        if (Number(spesa.rows[0].usd) * USD_EUR >= policy.daily_budget_eur && mode !== 'draft') {
             mode = 'draft';
             note = 'budget del giorno superato: solo bozze';
         }
@@ -256,11 +267,11 @@ async function preflight(run: any, policy: WhatsAppAgentPolicy, simulate: boolea
         if (!prima || !String(prima.body || '').trim().endsWith('?')) return { skip: 'non serve una risposta', mode, phone };
     }
 
-    if (mode === 'reply' && deps && await deps.isBlacklisted(tenantId, phone).catch(() => false)) {
+    if (mode !== 'draft' && deps && await deps.isBlacklisted(tenantId, phone).catch(() => false)) {
         mode = 'draft';
         note = 'cliente in blacklist: solo bozza';
     }
-    if (mode === 'reply' && !simulate && !(await isWhatsAppReady(tenantId))) {
+    if (mode !== 'draft' && !simulate && !(await isWhatsAppReady(tenantId))) {
         mode = 'draft';
         note = 'WhatsApp non collegato: solo bozza';
     }
@@ -275,7 +286,7 @@ async function superseded(run: any): Promise<boolean> {
         `SELECT 1 FROM outbound_messages
           WHERE tenant_id = $1 AND (
                 (direction = 'inbound' AND from_phone_digits = ANY($2::text[]) AND id > COALESCE($3::int, 0))
-             OR (direction = 'outbound' AND kind IS NULL AND to_phone_digits = ANY($2::text[]) AND sent_at > $4::timestamptz))
+             OR (direction = 'outbound' AND kind = 'staff' AND to_phone_digits = ANY($2::text[]) AND sent_at > $4::timestamptz))
           LIMIT 1`,
         [run.tenant_id, variants, run.last_inbound_id, run.claimed_at ?? new Date().toISOString()]
     );
@@ -324,6 +335,13 @@ export async function processRun(run: any, opts: { simulate?: boolean } = {}): P
 
     const ctx = await deps.buildContext(tenantId, key);
     if (!ctx) return done({ status: 'skipped', skip_reason: 'nessun messaggio del cliente' });
+    // L'autonomia vale solo se la modalità effettiva, dopo i controlli, è
+    // ancora «Azioni».
+    if (pre.mode === 'actions') {
+        const a = policy.auto_actions;
+        ctx.autonomy = { create: a.create, modify: a.modify, cancel: a.cancel, notes: a.notes, confirmCancel: policy.confirm_cancel };
+    }
+    if (simulate) ctx.dryRun = true;
 
     let result: AgentResult;
     try {
@@ -336,14 +354,33 @@ export async function processRun(run: any, opts: { simulate?: boolean } = {}): P
     }
     if (!simulate) await recordUsage(tenantId, result.usage);
 
-    if (result.skipped) return done({ status: 'done', outcome: 'no_reply', skipped: result.skipped, proposals: [] }, { usage: result.usage });
-    if (!simulate && await superseded(run)) return done({ status: 'superseded', reply: result.reply }, { usage: result.usage });
+    // Le azioni eseguite vanno nel registro subito, qualunque cosa succeda
+    // alla risposta: la prenotazione è già cambiata.
+    const acted = result.actions.filter(a => !a.simulated);
+    const actionRows: NonNullable<RunOutcome['actions']> = [];
+    for (const a of result.actions) {
+        const id = a.simulated ? null : await recordAutoAction(tenantId, key, Number(run.id) || null, a, result.reply).catch(err => {
+            console.error('[agent-queue] registro azione fallito:', err?.message || err);
+            return null;
+        });
+        actionRows.push({ tool: a.tool, summary: a.summary, simulated: a.simulated, id });
+        // Note: gli strumenti di prenotazione e le allergie avvisano da sé;
+        // una nota aggiunta da sola lo staff la deve sapere.
+        if (!a.simulated && a.tool === 'add_reservation_note') {
+            pushToStaff(tenantId, key, "Nota dall'agente WhatsApp", `${ctx.phone}: ${a.summary}`);
+        }
+    }
+
+    if (result.skipped) return done({ status: 'done', outcome: 'no_reply', skipped: result.skipped, proposals: [], actions: actionRows }, { usage: result.usage });
+    // Superato da un messaggio nuovo: non si spedisce, ci pensa il giro dopo.
+    // Ma se una prenotazione è già cambiata il cliente lo deve sapere adesso.
+    if (!simulate && acted.length === 0 && await superseded(run)) return done({ status: 'superseded', reply: result.reply }, { usage: result.usage });
 
     let mode = pre.mode;
     let note = pre.note;
     // Conferma fantasma: il testo dà per fatta una modifica che nessuno
     // strumento ha eseguito. Non parte: diventa bozza, e lo staff lo sa.
-    if (mode === 'reply' && result.reply && CLAIMS_DONE_RE.test(result.reply)) {
+    if (mode !== 'draft' && result.reply && result.actions.length === 0 && CLAIMS_DONE_RE.test(result.reply)) {
         mode = 'draft';
         note = 'la risposta dava per fatta una modifica non eseguita';
         if (!simulate) pushToStaff(tenantId, key, 'Bozza da controllare', `${ctx.phone}: ${result.reply.slice(0, 120)}`);
@@ -355,28 +392,40 @@ export async function processRun(run: any, opts: { simulate?: boolean } = {}): P
         pushToStaff(tenantId, key, 'Da confermare', `${ctx.phone}: ${result.proposals[0].summary}`);
     }
 
-    if (mode === 'draft' || !result.reply) {
+    // Dopo una prenotazione creata o spostata da solo, il link per gestirla:
+    // la risposta dell'agente è la conferma che il cliente si tiene.
+    let reply = result.reply;
+    const gestibile = acted.find(a => a.tool === 'create_reservation' || a.tool === 'modify_reservation');
+    if (reply && gestibile?.after && deps.manageSuffix) {
+        const suffix = await deps.manageSuffix(tenantId, gestibile.after.id).catch(() => null);
+        if (suffix && !reply.includes(suffix)) reply = `${reply}\n${suffix}`;
+    }
+
+    if (mode === 'draft' || !reply) {
+        if (acted.length > 0 && reply) pushToStaff(tenantId, key, 'Risposta da inviare', `${ctx.phone}: l'agente ha agito, la risposta è in bozza`);
         return done(
-            { status: 'done', outcome: 'drafted', reply: result.reply, proposals: result.proposals, skip_reason: note },
-            { draft: result.reply, proposalId, usage: result.usage }
+            { status: 'done', outcome: 'drafted', reply, proposals: result.proposals, actions: actionRows, skip_reason: note },
+            { draft: reply, proposalId, usage: result.usage }
         );
     }
     if (simulate) {
-        return done({ status: 'done', outcome: 'would_reply', reply: result.reply, proposals: result.proposals, skip_reason: note }, { usage: result.usage });
+        return done({ status: 'done', outcome: 'would_reply', reply, proposals: result.proposals, actions: actionRows, skip_reason: note }, { usage: result.usage });
     }
     try {
-        const sent = await sendWhatsAppText(tenantId, pre.phone!, result.reply, ctx.reservation?.id ?? null, undefined, undefined, 'agent');
+        const reservationRef = acted[0]?.after?.id ?? ctx.reservation?.id ?? null;
+        const sent = await sendWhatsAppText(tenantId, pre.phone!, reply, reservationRef, undefined, undefined, 'agent');
         let replyMessageId: number | null = null;
         if (sent.sid) {
             const m = await queryWithRetry(`SELECT id FROM outbound_messages WHERE tenant_id = $1 AND provider_sid = $2 LIMIT 1`, [tenantId, sent.sid]);
             replyMessageId = m.rows[0]?.id ?? null;
         }
-        return done({ status: 'done', outcome: 'replied', reply: result.reply, proposals: result.proposals }, { proposalId, usage: result.usage, replyMessageId });
+        return done({ status: 'done', outcome: 'replied', reply, proposals: result.proposals, actions: actionRows }, { proposalId, usage: result.usage, replyMessageId });
     } catch (err: any) {
         // L'invio non è riuscito: la risposta resta in bozza, non si perde.
+        if (acted.length > 0) pushToStaff(tenantId, key, 'Risposta da inviare', `${ctx.phone}: l'agente ha agito ma la risposta non è partita`);
         return done(
-            { status: 'done', outcome: 'drafted', reply: result.reply, proposals: result.proposals, skip_reason: 'invio non riuscito: resta in bozza' },
-            { draft: result.reply, proposalId, usage: result.usage, error: String(err?.message || err).slice(0, 500) }
+            { status: 'done', outcome: 'drafted', reply, proposals: result.proposals, actions: actionRows, skip_reason: 'invio non riuscito: resta in bozza' },
+            { draft: reply, proposalId, usage: result.usage, error: String(err?.message || err).slice(0, 500) }
         );
     }
 }

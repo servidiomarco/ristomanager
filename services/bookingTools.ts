@@ -105,6 +105,19 @@ export const WHATSAPP_CHANNEL: ToolChannel = {
     },
 };
 
+// Le scritture che l'agente WhatsApp fa da solo (modalità «Azioni»): stesso
+// canale, ma lo staff deve capire dalla notifica che non le ha confermate
+// nessuno — e che nella chat c'è il tasto «Annulla».
+export const WHATSAPP_AUTO_CHANNEL: ToolChannel = {
+    ...WHATSAPP_CHANNEL,
+    actorName: 'Agente WhatsApp (da solo)',
+    pushTitles: {
+        created: "Prenotata dall'agente WhatsApp",
+        cancelled: "Annullata dall'agente WhatsApp",
+        modified: "Modificata dall'agente WhatsApp",
+    },
+};
+
 /** Tutto ciò che gli strumenti prendono da server.ts. */
 export interface BookingToolsDeps {
     parseFlexibleDate: (v: any, tz?: string) => string | null;
@@ -189,6 +202,13 @@ function deps(): BookingToolsDeps {
     if (!D) throw new Error('bookingTools non configurato: chiamare configureBookingTools() all\'avvio');
     return D;
 }
+
+/** Le regole del locale che l'idoneità delle azioni automatiche
+ *  dell'agente WhatsApp deve leggere uguali a quelle degli strumenti. */
+export const autoDepositRequired = (tenantId: number, guests: number): Promise<boolean> =>
+    deps().isAutoDepositRequired(tenantId, guests);
+export const largeGroupThreshold = (tenantId: number): Promise<number> =>
+    deps().getLargeGroupThreshold(tenantId);
 
 // ---------------------------------------------------------------------------
 // Messaggi di errore condivisi — stessa frase su ogni canale, così il cliente

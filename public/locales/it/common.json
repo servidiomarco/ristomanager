@@ -162,7 +162,7 @@
     "waUsage": "Consumi del mese",
     "waUsageHint": "Messaggi ricevuti e inviati, spesa dell'AI",
     "waAgent": "Agente automatico",
-    "waAgentHint": "Bozze o risposte da solo ai messaggi in arrivo"
+    "waAgentHint": "Bozze, risposte o azioni da solo sui messaggi in arrivo"
   },
   "aria": {
     "openMenu": "Apri menu",

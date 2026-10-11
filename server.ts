@@ -14741,9 +14741,13 @@ app.post('/messages/send', authenticate, requireFeature('whatsapp'), requirePerm
         }
 
         const body = hasText ? text.trim() : '';
+        // kind 'staff': scritto a mano dalla chat. L'agente automatico lo
+        // legge come «lo staff sta già rispondendo» e tace; prima contava
+        // ogni kind vuoto, comprese le conferme automatiche che non lo
+        // passano, e dopo una conferma l'agente restava muto mezz'ora.
         const result = desiredChannel === 'whatsapp'
-            ? await sendWhatsAppText(req.tenantId!, phone, body, null, undefined, mediaUrls)
-            : await sendTwilioSms(req.tenantId!, phone, body);
+            ? await sendWhatsAppText(req.tenantId!, phone, body, null, undefined, mediaUrls, 'staff')
+            : await sendTwilioSms(req.tenantId!, phone, body, null, 'staff');
 
         let row: any = null;
         if (result.sid) {
@@ -45750,6 +45754,7 @@ app.delete('/sala/profiles/:id', authenticate, requirePermission('settings:full'
 // momento dell'invio.
 configureWhatsApp({
     broadcastToAll: (tenantId, event, payload) => { socketService?.broadcastToAll(tenantId, event, payload); },
+    broadcastReservationsUpdatedByIds: ids => broadcastReservationsUpdatedByIds(ids),
 });
 
 // L'agente WhatsApp che parte da solo: la coda chiede a server.ts il
@@ -45762,6 +45767,15 @@ whatsappAgent.configureAgentQueue({
     saveProposal: async (tenantId, key, proposal, reply, reservationId) =>
         (await saveAgentProposal(tenantId, key, proposal, reply, reservationId))?.id ?? null,
     isBlacklisted: (tenantId, phone) => isPhoneBlacklisted(tenantId, phone),
+    // Modalità «Azioni»: dopo una prenotazione creata o spostata dall'agente,
+    // il link «La tua prenotazione» in coda alla risposta, se il locale l'ha
+    // acceso.
+    manageSuffix: async (tenantId, reservationId) => {
+        const manage = await guestManageLink(tenantId, reservationId);
+        if (!manage?.url) return null;
+        const r = (await queryWithRetry(`SELECT language, phone FROM reservations WHERE id = $1 AND tenant_id = $2`, [reservationId, tenantId])).rows[0];
+        return r && isEnglishGuest(resolveGuestLanguage(r)) ? `To change it: ${manage.url}` : `Per cambiarla: ${manage.url}`;
+    },
 });
 
 // Quello che l'ospite dice della sua prenotazione (ritardo, note, allergie,
