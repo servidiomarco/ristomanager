@@ -37616,6 +37616,10 @@ const handlePublicContact = async (tenantId: number, _req: express.Request, res:
             // testo generico — il link è la cosa che serve davvero.
             address: identity.address,
             maps_url: identity.mapsUrl,
+            // Il telefono pubblico del locale (Impostazioni › dati del
+            // locale): è l'uscita «chiamaci» quando un orario non ha più
+            // posto e il numero di Sofia (`voice`) non è configurato.
+            phone: identity.phone || null,
             // La pagina prenota nasconde l'immagine se manca: nessun logo
             // rotto per i tenant che non l'hanno caricato.
             logo_url: identity.logoUrl || null,

@@ -75,7 +75,17 @@
     "loading": "Carico gli orari…",
     "noneForDate": "Per questa data non prendiamo prenotazioni dal sito.",
     "chooseShift": "Scegli pranzo o cena.",
-    "past": "passato"
+    "past": "passato",
+    "full": "al completo"
+  },
+  "instant": {
+    "noTableTitle": "Nessun tavolo per {{guests}} {{day}}",
+    "alternativesHint": "Questi orari si confermano subito:",
+    "noAlternatives": "Nei prossimi giorni online non c'è posto.",
+    "contactHint": "Oppure scrivici o chiamaci.",
+    "whatsapp": "Scrivici su WhatsApp",
+    "call": "Chiama {{phone}}",
+    "takenMeanwhile": "Nel frattempo l'ultimo tavolo è stato preso: scegli un altro orario."
   },
   "actions": {
     "continue": "Continua",

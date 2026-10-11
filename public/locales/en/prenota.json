@@ -75,7 +75,17 @@
     "loading": "Loading times…",
     "noneForDate": "We're not taking online bookings for this date.",
     "chooseShift": "Choose lunch or dinner.",
-    "past": "past"
+    "past": "past",
+    "full": "fully booked"
+  },
+  "instant": {
+    "noTableTitle": "No table for {{guests}} on {{day}}",
+    "alternativesHint": "These times are confirmed straight away:",
+    "noAlternatives": "No online availability in the next few days.",
+    "contactHint": "Or message or call us.",
+    "whatsapp": "Message us on WhatsApp",
+    "call": "Call {{phone}}",
+    "takenMeanwhile": "The last table was just taken: please choose another time."
   },
   "actions": {
     "continue": "Continue",

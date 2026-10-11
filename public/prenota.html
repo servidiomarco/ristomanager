@@ -472,6 +472,23 @@ button:disabled { cursor: not-allowed; }
 
 .empty { font-size: 14px; color: var(--ds-text-muted); text-align: center; padding: 14px 0; margin: 0; }
 
+/* Nessun tavolo («solo prenotazioni confermabili subito»): al posto del
+   vicolo cieco, gli orari che si confermano davvero e le due uscite umane. */
+.nofit { display: flex; flex-direction: column; gap: 12px; }
+.nofit__title { font-size: 15px; font-weight: 600; margin: 0; }
+.nofit__hint { font-size: 13px; color: var(--ds-text-muted); margin: 0; }
+.alt { display: flex; flex-direction: column; gap: 6px; }
+.alt__label { font-size: 13px; font-weight: 600; color: var(--ds-text-secondary); margin: 0; }
+.exits { display: flex; flex-wrap: wrap; gap: 8px; }
+.exit {
+    flex: 1 1 auto; min-height: 48px; padding: 0 18px;
+    border-radius: var(--radius-xl); border: 1px solid var(--ds-border); background: var(--ds-surface);
+    display: inline-flex; align-items: center; justify-content: center;
+    font-size: 15px; font-weight: 600; color: var(--ds-text-primary); text-decoration: none;
+    transition: border-color 0.15s ease;
+}
+.exit:hover { border-color: var(--ds-border-strong); }
+
 /* --- Campi -------------------------------------------------------------- */
 
 .field { margin-bottom: 22px; }
@@ -1058,6 +1075,24 @@ a { color: var(--ds-pending-text); }
     openTermsFromHash();
     window.addEventListener('hashchange', openTermsFromHash);
 
+    // ---- Link precompilati --------------------------------------------------
+    // Il sito, Google, Instagram o un partner aprono la pagina già sulla data,
+    // le persone e la lingua giuste (?date=&guests=&lang=&shift=&time=). UTM e
+    // ref restano per la sessione: li manderà la prenotazione.
+    const params = new URLSearchParams(location.search);
+    const paramLang = (params.get('lang') || '').toLowerCase();
+    try {
+        const attribution = {};
+        for (const key of ['utm_source', 'utm_medium', 'utm_campaign', 'ref']) {
+            const value = (params.get(key) || '').trim();
+            if (value) attribution[key] = value.slice(0, 64);
+        }
+        if (Object.keys(attribution).length) sessionStorage.setItem('prenota_attribution', JSON.stringify(attribution));
+    } catch (err) {
+        // Senza sessionStorage (alcune navigazioni private) si perde solo da
+        // dove arriva il cliente, non la prenotazione.
+    }
+
     // ---- Stato -------------------------------------------------------------
     // Dichiarato qui, prima del fetch: t() e le funzioni sopra chiudono su
     // `state.language`, valorizzato subito con la lingua del browser (il
@@ -1075,7 +1110,9 @@ a { color: var(--ds-pending-text); }
         calendar: new Map(),   // 'YYYY-MM-DD' → 'open' | 'busy' | 'closed'
         monthCursor: null,     // primo giorno del mese mostrato
         openPanel: null,
-        language: (navigator.language || '').slice(0, 2).toLowerCase() === 'en' ? 'en' : 'it',
+        language: paramLang === 'it' || paramLang === 'en'
+            ? paramLang
+            : ((navigator.language || '').slice(0, 2).toLowerCase() === 'en' ? 'en' : 'it'),
         bookingConfirmed: false,
     };
 
@@ -1231,8 +1268,12 @@ a { color: var(--ds-pending-text); }
         return d.toISOString().slice(0, 10);
     };
     // Fin dove si prenota lo sceglie il locale: 7 o 14 giorni, oppure libera
-    // (null), che il server chiude a un anno. Il server rifiuta comunque le
-    // date fuori: qui serve solo a non offrirle.
+    // (null), che la pagina chiude a un anno perché al calendario serve una
+    // fine. Con un limite il server rifiuta comunque le date fuori: qui serve
+    // solo a non offrirle.
+    // «Solo prenotazioni confermabili subito»: gli orari dipendono anche da
+    // quante persone siamo, e dove non c'è posto si propongono alternative.
+    const isInstant = !!contact?.instantOnly;
     const HORIZON_LIMIT = Number.isInteger(contact?.bookingHorizonDays) ? contact.bookingHorizonDays : null;
     const HORIZON_DAYS = HORIZON_LIMIT
         ?? (Number.isInteger(contact?.bookingHorizonFreeDays) ? contact.bookingHorizonFreeDays : 365);
@@ -1293,10 +1334,20 @@ a { color: var(--ds-pending-text); }
         // I bambini sono un sottoinsieme: se scendono le persone, scendono loro.
         if (key === 'guests' && state.children > state.guests) state.children = state.guests;
         renderGuests();
-        // La sala dipende da quante persone siamo; l'orario no.
+        // La sala dipende da quante persone siamo; l'orario no, tranne con
+        // «solo confermabili subito», dove un turno può riempirsi per 6 e non
+        // per 2. Lì si ricaricano gli orari (che ricaricano le sale), con un
+        // attimo di attesa mentre si preme + più volte.
         state.roomId = null;
-        if (state.date) loadRooms();
+        if (!state.date) return;
+        if (isInstant) {
+            clearTimeout(availabilityTimer);
+            availabilityTimer = setTimeout(loadAvailability, 300);
+        } else {
+            loadRooms();
+        }
     }
+    let availabilityTimer = null;
     const step = (key, delta) => () => setCount(key, state[key] + delta);
     $('guestsInc').addEventListener('click', step('guests', 1));
     $('guestsDec').addEventListener('click', step('guests', -1));
@@ -1446,32 +1497,55 @@ a { color: var(--ds-pending-text); }
         loadCalendar();
     });
 
-    async function pickDate(iso) {
+    // Un punto solo per fissare il giorno: dal calendario, da un link
+    // precompilato o da un'alternativa proposta. Turno e orario chiesti
+    // restano solo se quel giorno ci sono davvero (lo verifica loadAvailability).
+    async function selectDay(iso, want = {}) {
         state.date = iso;
-        state.time = null;
-        state.shift = null;
+        state.shift = want.shift || null;
+        state.time = want.time || null;
         state.roomId = null;
         $('quandoValue').textContent = fmtDayShort(iso);
         renderWeek();
         renderMonth();
-        closeMonth();
-        togglePanel('quando');   // scelta la data, il pannello si chiude
         await loadAvailability();
         updateContinue();
     }
 
+    async function pickDate(iso) {
+        closeMonth();
+        togglePanel('quando');   // scelta la data, il pannello si chiude
+        await selectDay(iso);
+    }
+
     // ---- Disponibilità del giorno ------------------------------------------
+    let availabilitySeq = 0;
     async function loadAvailability() {
         if (!state.date) return;
+        // Più richieste in volo (persone cambiate in fretta, un'altra data):
+        // vale solo l'ultima.
+        const seq = ++availabilitySeq;
         $('slots').innerHTML = '<p class="empty">' + t('shifts.loading') + '</p>';
+        let data;
         try {
-            const r = await fetch(publicBase + '/availability?date=' + encodeURIComponent(state.date));
+            const url = publicBase + '/availability?date=' + encodeURIComponent(state.date)
+                + (isInstant ? '&guests=' + encodeURIComponent(state.guests) : '');
+            const r = await fetch(url);
             if (!r.ok) throw new Error('availability ' + r.status);
-            state.availability = await r.json();
+            data = await r.json();
         } catch (err) {
             console.error(err);
-            state.availability = { lunch: { slots: [] }, dinner: { slots: [] } };
+            data = { lunch: { slots: [] }, dinner: { slots: [] } };
         }
+        if (seq !== availabilitySeq) return;
+        state.availability = data;
+        // Un orario arrivato da un link senza turno: il turno è quello che lo ha.
+        if (state.time && !state.shift) {
+            state.shift = ['LUNCH', 'DINNER'].find(s => slotsFor(s).includes(state.time)) || null;
+        }
+        // L'orario scelto (da un link, da un'alternativa o prima di cambiare le
+        // persone) vale solo se c'è ancora.
+        if (state.time && (!state.shift || !slotsFor(state.shift).includes(state.time))) state.time = null;
         renderShifts();
         renderSlots();
         // Le sale stanno sopra l'orario e si popolano appena c'è una data:
@@ -1480,6 +1554,8 @@ a { color: var(--ds-pending-text); }
     }
 
     const slotsFor = shift => (state.availability?.[shift === 'LUNCH' ? 'lunch' : 'dinner']?.slots) || [];
+    // Pieno per quante persone siamo (solo con «confermabili subito»), non chiuso.
+    const shiftFull = shift => !!state.availability?.[shift === 'LUNCH' ? 'lunch' : 'dinner']?.full;
 
     function renderShifts() {
         // Senza data i turni non sono "vuoti", sono non ancora richiedibili:
@@ -1507,7 +1583,7 @@ a { color: var(--ds-pending-text); }
             btn.disabled = n === 0;
             btn.setAttribute('aria-pressed', String(state.shift === s));
             $(s === 'LUNCH' ? 'lunchMeta' : 'dinnerMeta').textContent =
-                n === 0 ? t('shifts.unavailable') : t('shifts.slot', { count: n });
+                n === 0 ? t(shiftFull(s) ? 'shifts.full' : 'shifts.unavailable') : t('shifts.slot', { count: n });
         });
     }
 
@@ -1515,7 +1591,11 @@ a { color: var(--ds-pending-text); }
         const host = $('slots');
         if (!state.date) { host.innerHTML = '<p class="empty">' + t('shifts.chooseDateFirst') + '</p>'; return; }
         const lunch = slotsFor('LUNCH').length, dinner = slotsFor('DINNER').length;
-        if (!lunch && !dinner) { host.innerHTML = '<p class="empty">' + t('shifts.noneForDate') + '</p>'; return; }
+        if (!lunch && !dinner) {
+            if (state.availability?.instant && (shiftFull('LUNCH') || shiftFull('DINNER'))) renderNoFit(host);
+            else host.innerHTML = '<p class="empty">' + t('shifts.noneForDate') + '</p>';
+            return;
+        }
         if (!state.shift) { host.innerHTML = '<p class="empty">' + t('shifts.chooseShift') + '</p>'; return; }
 
         const slots = slotsFor(state.shift);
@@ -1543,6 +1623,68 @@ a { color: var(--ds-pending-text); }
             grid.appendChild(b);
         });
         host.appendChild(grid);
+    }
+
+    // Il giorno è pieno per queste persone: gli orari che si confermano subito
+    // (l'altro turno, i giorni dopo, dal server) e, sotto, WhatsApp e telefono.
+    // Mai un vicolo cieco: è il motivo per cui il web era stato spento.
+    function renderNoFit(host) {
+        const alternatives = Array.isArray(state.availability?.alternatives) ? state.availability.alternatives : [];
+        const box = document.createElement('div');
+        box.className = 'nofit';
+        const line = (cls, text) => {
+            const p = document.createElement('p');
+            p.className = cls;
+            p.textContent = text;
+            box.appendChild(p);
+        };
+        line('nofit__title', t('instant.noTableTitle', { guests: guestsPhrase(state.guests), day: fmtDayLong(state.date) }));
+        if (alternatives.length) {
+            line('nofit__hint', t('instant.alternativesHint'));
+            alternatives.forEach(alt => {
+                const row = document.createElement('div');
+                row.className = 'alt';
+                const label = document.createElement('p');
+                label.className = 'alt__label';
+                label.textContent = fmtDayShort(alt.date) + ' · ' + t(alt.shift === 'LUNCH' ? 'shifts.lunch' : 'shifts.dinner');
+                row.appendChild(label);
+                const grid = document.createElement('div');
+                grid.className = 'slots';
+                (alt.slots || []).slice(0, 4).forEach(time => {
+                    const b = document.createElement('button');
+                    b.type = 'button';
+                    b.className = 'slot';
+                    b.innerHTML = '<span class="slot__time">' + time + '</span>';
+                    b.addEventListener('click', () => selectDay(alt.date, { shift: alt.shift, time }));
+                    grid.appendChild(b);
+                });
+                row.appendChild(grid);
+                box.appendChild(row);
+            });
+        } else {
+            line('nofit__hint', t('instant.noAlternatives'));
+        }
+        const phone = contact?.voice?.phone || branding.phone || '';
+        const phoneLabel = contact?.voice?.display || branding.phone || '';
+        const waUrl = contact?.whatsapp?.url || '';
+        if (phone || waUrl) {
+            line('nofit__hint', t('instant.contactHint'));
+            const exits = document.createElement('div');
+            exits.className = 'exits';
+            const exit = (href, text, external) => {
+                const a = document.createElement('a');
+                a.className = 'exit';
+                a.href = href;
+                if (external) { a.target = '_blank'; a.rel = 'noopener'; }
+                a.textContent = text;
+                exits.appendChild(a);
+            };
+            if (waUrl) exit(waUrl, t('instant.whatsapp'), true);
+            if (phone) exit('tel:' + phone.replace(/[^\d+]/g, ''), t('instant.call', { phone: phoneLabel }), false);
+            box.appendChild(exits);
+        }
+        host.innerHTML = '';
+        host.appendChild(box);
     }
 
     document.querySelectorAll('.shift').forEach(btn => btn.addEventListener('click', () => {
@@ -1573,6 +1715,13 @@ a { color: var(--ds-pending-text); }
 
     async function loadRooms() {
         if (!state.date) return;
+        // Giorno senza posto per queste persone: la scheda «nessun tavolo»
+        // dice già cosa fare, una sala da scegliere non avrebbe senso.
+        if (state.availability?.instant && !slotsFor('LUNCH').length && !slotsFor('DINNER').length) {
+            $('roomCard').hidden = true;
+            state.rooms = [];
+            return;
+        }
         $('roomCard').hidden = false;
         if (!Array.isArray(state.rooms)) $('rooms').innerHTML = '<p class="empty">' + t('rooms.loading') + '</p>';
         try {
@@ -1779,6 +1928,18 @@ a { color: var(--ds-pending-text); }
                 }),
             });
             const data = await r.json().catch(() => ({}));
+            // Fra la scelta e l'invio qualcuno ha preso l'ultimo tavolo: si
+            // torna agli orari, che ora propongono le alternative.
+            if (r.status === 409 && data.error === 'not_confirmable') {
+                btn.disabled = false;
+                btn.textContent = t('actions.submit');
+                state.time = null;
+                goToStep(1);
+                await loadAvailability();
+                updateContinue();
+                showError(t('instant.takenMeanwhile'));
+                return;
+            }
             if (!r.ok) {
                 // data.message arriva dal server ed è in italiano: gli errori
                 // di validazione lato server restano fuori dallo scopo di
@@ -1835,10 +1996,22 @@ a { color: var(--ds-pending-text); }
     }
 
     // ---- Avvio -------------------------------------------------------------
+    const linkGuests = parseInt(params.get('guests') || '', 10);
+    if (linkGuests >= 1 && linkGuests <= 20) state.guests = linkGuests;
     renderGuests();
     renderDiet();
     renderShifts();
     updateContinue();
+    // Link precompilato: la data solo se è prenotabile, turno e orario solo
+    // se quel giorno ci sono (altrimenti resta la data, e si sceglie da lì).
+    const linkDate = params.get('date') || '';
+    if (/^\d{4}-\d{2}-\d{2}$/.test(linkDate) && linkDate >= today && linkDate <= lastBookable) {
+        const rawShift = (params.get('shift') || '').toLowerCase();
+        const linkShift = rawShift === 'lunch' || rawShift === 'pranzo' ? 'LUNCH'
+            : rawShift === 'dinner' || rawShift === 'cena' ? 'DINNER' : null;
+        const rawTime = params.get('time') || '';
+        await selectDay(linkDate, { shift: linkShift, time: /^([01]\d|2[0-3]):[0-5]\d$/.test(rawTime) ? rawTime : null });
+    }
     // Nessun pannello aperto all'arrivo: la pagina si presenta chiusa e
     // leggibile, e la prima mossa la sceglie chi legge.
 })();
