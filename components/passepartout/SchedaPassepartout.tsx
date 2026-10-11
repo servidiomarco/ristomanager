@@ -1,13 +1,14 @@
 import React from 'react';
-import { ChevronDown, Loader2 } from 'lucide-react';
+import { Loader2 } from 'lucide-react';
 import { StatusPill } from '../ds';
+import { SettingsSummary, settingsCardClass } from '../SettingsCard';
 
-/* Una scheda della sezione Impostazioni → Passepartout. Stessa anatomia di
-   SettingsDisclosure (App.tsx), che le schede vicine usano: icona, titolo,
-   riga di spiegazione, freccia. Vive qui perché ogni integrazione con la
-   cassa ha la sua scheda, e in più c'è lo stato a destra («Attivo», la
-   rotella mentre lavora). Resta un <details>: l'apertura non è stato
-   applicativo e non passa per React. */
+/* Una scheda della sezione Impostazioni → Passepartout: la card di
+   Impostazioni (components/SettingsCard.tsx) con lo stato a destra — la
+   pastiglia «Attivo», la rotella mentre lavora. Quando è attiva anche
+   l'icona prende la tinta verde, come le card vicine con l'interruttore.
+   Resta un <details>: l'apertura non è stato applicativo e non passa per
+   React. */
 export const SchedaPassepartout: React.FC<{
   icon: React.ComponentType<{ className?: string }>;
   title: string;
@@ -16,30 +17,21 @@ export const SchedaPassepartout: React.FC<{
   badge?: string | null;
   busy?: boolean;
   children: React.ReactNode;
-}> = ({ icon: Icon, title, subtitle, badge, busy, children }) => (
-  <details className="group overflow-hidden rounded-[var(--ds-radius)] bg-[var(--ds-surface)] shadow-[var(--ds-shadow-card)]">
-    <summary className="flex min-h-[64px] cursor-pointer select-none list-none items-center justify-between gap-3 p-3 transition-colors hover:bg-[var(--ds-surface-row)] [&::-webkit-details-marker]:hidden">
-      <span className="flex min-w-0 items-center gap-3">
-        <span className="inline-flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-[var(--ds-radius)] bg-[var(--ds-surface-row)] text-[var(--ds-text-primary)]">
-          <Icon className="h-5 w-5" />
-        </span>
-        <span className="min-w-0">
-          <span className="block text-[15px] font-semibold text-[var(--ds-text-primary)]">{title}</span>
-          <span className="block text-[13px] leading-snug text-[var(--ds-text-muted)]">{subtitle}</span>
-        </span>
-      </span>
-      <span className="flex flex-shrink-0 items-center gap-2">
-        {busy && <Loader2 className="h-4 w-4 animate-spin text-[var(--ds-text-muted)]" aria-hidden />}
-        {badge && <StatusPill tone="positive">{badge}</StatusPill>}
-        <span
-          className="inline-flex h-9 w-9 items-center justify-center rounded-[var(--ds-radius-control)] text-[var(--ds-text-muted)] transition-transform group-open:rotate-180"
-          aria-hidden
-        >
-          <ChevronDown className="h-4 w-4" />
-        </span>
-      </span>
-    </summary>
-    <div className="space-y-5 border-t border-[var(--ds-border)] px-3 pb-4 pt-3 sm:px-4">{children}</div>
+}> = ({ icon, title, subtitle, badge, busy, children }) => (
+  <details className={settingsCardClass}>
+    <SettingsSummary
+      icon={icon}
+      tone={badge ? 'positive' : 'neutral'}
+      title={title}
+      description={subtitle}
+      trailing={(busy || badge) ? (
+        <>
+          {busy && <Loader2 className="h-4 w-4 animate-spin text-[var(--ds-text-muted)]" aria-hidden />}
+          {badge && <StatusPill tone="positive">{badge}</StatusPill>}
+        </>
+      ) : undefined}
+    />
+    <div className="space-y-5 border-t border-[var(--ds-border)] px-4 pb-4 pt-3">{children}</div>
   </details>
 );
 

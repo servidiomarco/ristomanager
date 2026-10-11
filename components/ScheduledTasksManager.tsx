@@ -18,6 +18,7 @@ import { categoryLabel, priorityLabel } from './AttivitaPage';
 import { TodoCategory, TodoPriority } from '../types';
 import { weekdays } from './RemindersManager';
 import { displayLocale } from '../utils/formatLocale';
+import { SettingsSummary, settingsCardClass } from './SettingsCard';
 
 /* Attività programmate: le attività che compaiono da sole in Attività, per
    una squadra. Erano tre righe fisse nel codice per ogni banchetto e il
@@ -307,21 +308,27 @@ export const ScheduledTasksManager: React.FC<Props> = ({ showToast }) => {
 
   const kindIcon = (k: ScheduledTaskKind) => (k === 'BANQUET' ? Utensils : k === 'RECURRING' ? Repeat : Calendar);
 
+  const activeCount = items.filter(task => task.active).length;
+
+  // Una card chiusa come le altre di Impostazioni: da chiusa dice quante
+  // attività sono accese, la lista e «Nuova» stanno dentro. Il corpo resta
+  // nel DOM anche chiuso, così la ricerca trova le attività per nome.
   return (
-    <div className="rounded-[var(--ds-radius)] bg-[var(--ds-surface)] shadow-[var(--ds-shadow-card)]">
-      <div className="flex items-start justify-between gap-3 border-b border-[var(--ds-border)] p-3 sm:p-4">
-        <div className="flex min-w-0 items-center gap-3">
-          <span className="inline-flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-[var(--ds-radius)] bg-[var(--ds-surface-row)] text-[var(--ds-text-primary)]">
-            <CalendarClock className="h-5 w-5" />
+    <details className={settingsCardClass}>
+      <SettingsSummary
+        icon={CalendarClock}
+        tone={activeCount > 0 ? 'positive' : 'neutral'}
+        title={t('attp.title', 'Attività programmate')}
+        description={t('attp.subtitle', 'Compaiono da sole in Attività, al giorno e all\'ora stabiliti, e avvisano la squadra.')}
+        trailing={!loading && activeCount > 0 ? (
+          <span className="text-[12px] font-medium text-[var(--ds-seated-text)]">
+            {t('attp.activeCount', '{{count}} accese', { count: activeCount })}
           </span>
-          <div className="min-w-0">
-            <h2 className="text-[15px] font-semibold text-[var(--ds-text-primary)]">{t('attp.title', 'Attività programmate')}</h2>
-            <p className="text-[13px] leading-snug text-[var(--ds-text-muted)]">
-              {t('attp.subtitle', 'Compaiono da sole in Attività, al giorno e all\'ora stabiliti, e avvisano la squadra.')}
-            </p>
-          </div>
-        </div>
-        {canEdit && (
+        ) : undefined}
+      />
+      <div className="border-t border-[var(--ds-border)]">
+      {canEdit && (
+        <div className="flex justify-end px-3 pt-3 sm:px-4">
           <button
             type="button"
             onClick={openNew}
@@ -330,8 +337,8 @@ export const ScheduledTasksManager: React.FC<Props> = ({ showToast }) => {
             <Plus className="h-4 w-4" />
             {t('attp.new', 'Nuova')}
           </button>
-        )}
-      </div>
+        </div>
+      )}
 
       {error && (
         <div className="mx-4 mt-3 flex items-start gap-1.5 rounded-[var(--ds-radius-sm)] bg-[var(--ds-critical-tint)] p-3 text-[13px] text-[var(--ds-critical-text)]">
@@ -422,6 +429,7 @@ export const ScheduledTasksManager: React.FC<Props> = ({ showToast }) => {
           })}
         </ul>
       )}
+      </div>
 
       {form && (
         <ModalShell
@@ -721,7 +729,7 @@ export const ScheduledTasksManager: React.FC<Props> = ({ showToast }) => {
         onConfirm={handleDelete}
         onCancel={() => setToDelete(null)}
       />
-    </div>
+    </details>
   );
 };
 

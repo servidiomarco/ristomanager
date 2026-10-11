@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { ChevronDown, Loader2, Mail, Save, Eye, EyeOff, Send } from 'lucide-react';
+import { Loader2, Mail, Save, Eye, EyeOff, Send } from 'lucide-react';
 import { Loader } from './Loader';
 import {
     getSmtpIntegration,
@@ -12,6 +12,7 @@ import {
 } from '../services/apiService';
 import { useAuth } from '../contexts/AuthContext';
 import { displayLocale } from '../utils/formatLocale';
+import { SettingsSummaryButton, settingsCardClass } from './SettingsCard';
 
 interface Props {
     showToast: (msg: string, kind?: 'success' | 'error' | 'info') => void;
@@ -183,29 +184,16 @@ export const SmtpIntegrationCard: React.FC<Props> = ({ showToast }) => {
     if (!status) return null;
 
     return (
-        <div className="bg-[var(--ds-surface)] rounded-[var(--ds-radius)] shadow-[var(--ds-shadow-card)] overflow-hidden">
-            <button
-                type="button"
-                onClick={() => setExpanded((v) => !v)}
-                aria-expanded={expanded}
-                className="w-full flex items-center justify-between gap-3 p-4 text-left hover:bg-[var(--ds-surface-row)] transition-colors"
-            >
-                <div className="flex items-center gap-3 min-w-0">
-                    <div className="w-10 h-10 rounded-[var(--ds-radius)] bg-[var(--ds-surface-row)] flex items-center justify-center flex-shrink-0">
-                        <Mail className="w-5 h-5 text-[var(--ds-text-primary)]" />
-                    </div>
-                    <div className="min-w-0">
-                        <h4 className="font-medium text-[14px] text-[var(--ds-text-primary)]">{t('smtp.title', 'Server Email')}</h4>
-                        <p className="text-[13px] text-[var(--ds-text-muted)] truncate">{t('smtp.subtitle', 'Invio conferme email ai clienti')}</p>
-                    </div>
-                </div>
-                <div className="flex items-center gap-2 flex-shrink-0">
-                    {statusPill}
-                    <ChevronDown
-                        className={`w-4 h-4 text-[var(--ds-text-subtle)] transition-transform ${expanded ? 'rotate-180' : ''}`}
-                    />
-                </div>
-            </button>
+        <div className={settingsCardClass}>
+            <SettingsSummaryButton
+                icon={Mail}
+                tone={Boolean(status?.configured) ? 'positive' : 'neutral'}
+                title={t('smtp.title', 'Server Email')}
+                description={t('smtp.subtitle', 'Invio conferme email ai clienti')}
+                trailing={statusPill}
+                expanded={expanded}
+                onToggle={() => setExpanded((v) => !v)}
+            />
 
             {expanded && (
                 <div className="border-t border-[var(--ds-border)] p-4 space-y-4">
