@@ -44,6 +44,7 @@ const PERMISSION_LABELS: Record<string, { key: string; it: string }> = {
   'reservations:full':       { key: 'perm.p.edit', it: 'Modifica' },
   'staff:view':              { key: 'perm.p.view', it: 'Visualizza' },
   'staff:full':              { key: 'perm.p.edit', it: 'Modifica' },
+  'staff:leave':             { key: 'perm.p.staffLeave', it: 'Ferie e assenze di tutti' },
   'staff:payments':          { key: 'perm.p.staffPayments', it: 'Compensi e acconti' },
   'settings:view':           { key: 'perm.p.view', it: 'Visualizza' },
   'settings:full':           { key: 'perm.p.edit', it: 'Modifica' },

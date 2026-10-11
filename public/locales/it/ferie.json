@@ -74,6 +74,9 @@
     "pending": "In attesa",
     "remaining": "Residue"
   },
+  "edit": "Modifica",
+  "editTitle": "Modifica ferie",
+  "editedToast": "Ferie aggiornate",
   "decidedTitle": "Decise",
   "revoke": "Revoca",
   "rejectTitle": "Rifiuta richiesta",
