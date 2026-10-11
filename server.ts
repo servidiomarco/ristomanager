@@ -3472,9 +3472,18 @@ async function findTableConflicts(
          */
         reservationStart?: string;
         reservationDurationMin?: number;
+        /**
+         * Client di una transazione aperta: la prenotazione web «solo
+         * confermabili subito» controlla dentro la propria transazione, che
+         * tiene già una connessione e un lock — chiedere al pool un'altra
+         * connessione mentre altre richieste aspettano quel lock potrebbe
+         * non arrivare mai (pool da 10).
+         */
+        db?: { query: (text: string, params?: any[]) => Promise<{ rows: any[] }> };
     }
 ): Promise<TableConflict[]> {
     if (!eventDate || !shift || !Array.isArray(tableIds) || tableIds.length === 0) return [];
+    const q = options?.db ? options.db.query.bind(options.db) : queryWithRetry;
 
     // Tavoli uniti: un tavolo occupato occupa l'intera unione. I tavoli
     // richiesti vengono espansi al loro gruppo di unione per la stessa
@@ -3483,7 +3492,7 @@ async function findTableConflicts(
     // timeline arrivi si poteva sedere un secondo gruppo sul tavolo unito,
     // perché qui si guardava solo l'id esatto richiesto).
     let effectiveTableIds = [...new Set(tableIds.map(Number))].filter(Number.isFinite);
-    const mergeRows = await queryWithRetry(
+    const mergeRows = await q(
         `SELECT primary_id, merged_ids FROM table_merges
          WHERE tenant_id = $1 AND date = $2::date AND shift = $3
            AND (primary_id = ANY($4::int[]) OR merged_ids && $4::int[])`,
@@ -3519,7 +3528,7 @@ async function findTableConflicts(
         resParams.push(options.excludeReservationId);
         resWhere += ` AND r.id <> $${resParams.length}`;
     }
-    const resResult = await queryWithRetry(
+    const resResult = await q(
         `SELECT r.id, r.customer_name, r.table_id, t.name AS table_name
          FROM reservations r
          JOIN tables t ON t.id = r.table_id
@@ -3542,14 +3551,14 @@ async function findTableConflicts(
         banParams.push(options.excludeBanquetId);
         banWhere += ` AND b.id <> $${banParams.length}`;
     }
-    const banResult = await queryWithRetry(
+    const banResult = await q(
         `SELECT b.id, b.name, b.table_ids FROM banquet_menus b WHERE ${banWhere}`,
         banParams
     );
     for (const row of banResult.rows) {
         const overlap: number[] = (row.table_ids || []).filter((tid: number) => effectiveTableIds.includes(tid));
         if (overlap.length === 0) continue;
-        const tableNames = await queryWithRetry(
+        const tableNames = await q(
             'SELECT id, name FROM tables WHERE id = ANY($1::int[]) AND tenant_id = $2',
             [overlap, tenantId]
         );
@@ -30968,8 +30977,8 @@ app.post('/voice-calls/sync', authenticate, requireFeature('voice'), voiceCallsA
 // non è un interruttore qualunque — si muove solo da POST /sala-node/
 // authority, che verifica i cancelli (nodo online, allineato, drenato).
 // Fuori dalla lista, il PUT generico non può fliparlo per sbaglio.
-type FeatureFlagKey = 'public_bookings_enabled' | 'voice_agent_enabled' | 'voice_bookings_suspended' | 'voice_double_seating_enabled' | 'pay_at_table_enabled' | 'table_orders_enabled' | 'ai_messages_enabled' | 'ai_wine_pairing_enabled' | 'digital_menu_enabled' | 'passe_enabled' | 'review_requests_enabled' | 'takeaway_online_enabled' | 'takeaway_voice_enabled' | 'sala_node_enabled' | 'sala_node_authority_enabled';
-const FEATURE_FLAG_KEYS: FeatureFlagKey[] = ['public_bookings_enabled', 'voice_agent_enabled', 'voice_bookings_suspended', 'voice_double_seating_enabled', 'pay_at_table_enabled', 'table_orders_enabled', 'ai_messages_enabled', 'ai_wine_pairing_enabled', 'digital_menu_enabled', 'passe_enabled', 'review_requests_enabled', 'takeaway_online_enabled', 'takeaway_voice_enabled', 'sala_node_enabled'];
+type FeatureFlagKey = 'public_bookings_enabled' | 'public_bookings_instant_only' | 'voice_agent_enabled' | 'voice_bookings_suspended' | 'voice_double_seating_enabled' | 'pay_at_table_enabled' | 'table_orders_enabled' | 'ai_messages_enabled' | 'ai_wine_pairing_enabled' | 'digital_menu_enabled' | 'passe_enabled' | 'review_requests_enabled' | 'takeaway_online_enabled' | 'takeaway_voice_enabled' | 'sala_node_enabled' | 'sala_node_authority_enabled';
+const FEATURE_FLAG_KEYS: FeatureFlagKey[] = ['public_bookings_enabled', 'public_bookings_instant_only', 'voice_agent_enabled', 'voice_bookings_suspended', 'voice_double_seating_enabled', 'pay_at_table_enabled', 'table_orders_enabled', 'ai_messages_enabled', 'ai_wine_pairing_enabled', 'digital_menu_enabled', 'passe_enabled', 'review_requests_enabled', 'takeaway_online_enabled', 'takeaway_voice_enabled', 'sala_node_enabled'];
 
 async function getFeatureFlag(tenantId: number, key: FeatureFlagKey, fallback: boolean): Promise<boolean> {
     try {
@@ -30986,6 +30995,13 @@ async function getFeatureFlag(tenantId: number, key: FeatureFlagKey, fallback: b
 // generico dei flag — vive nelle route /sala-node/authority coi suoi cancelli.
 const FEATURE_FLAG_DEFAULTS: Record<Exclude<FeatureFlagKey, 'sala_node_authority_enabled'>, boolean> = {
     public_bookings_enabled: false,
+    // Spento di default: è il comportamento di sempre (dove non c'è un
+    // tavolo la prenotazione web diventa una richiesta che conferma lo
+    // staff). Acceso, /prenota offre solo i turni dove un tavolo c'è ADESSO
+    // e non crea più richieste da confermare: al Frantoio il web era stato
+    // spento il 21/08/2026 perché i gestori si stancavano di confermarle
+    // (82 su 191 ad agosto).
+    public_bookings_instant_only: false,
     voice_agent_enabled: true,
     voice_bookings_suspended: false,
     // Spento di default: il doppio turno (secondo giro sullo stesso tavolo
@@ -37661,10 +37677,16 @@ async function buildPublicCalendar(
              GROUP BY 1`,
             [tenantId, from, to]
         ),
+        // I posti stanno in tables.seats: la query leggeva colonne che la
+        // tabella non ha (capacity, is_hidden) e dal 22/08/2026 l'intero
+        // calendario rispondeva 500 — col web spento nessuno lo vedeva. Le
+        // sale chiuse non contano; i tavoli nascosti per un turno sì, il
+        // pallino resta indicativo.
         queryWithRetry(
-            `SELECT COALESCE(SUM(capacity), 0)::int AS seats
-             FROM tables
-             WHERE tenant_id = $1 AND COALESCE(is_hidden, false) = false`,
+            `SELECT COALESCE(SUM(t.seats), 0)::int AS seats
+             FROM tables t
+             JOIN rooms r ON r.id = t.room_id AND r.tenant_id = t.tenant_id
+             WHERE t.tenant_id = $1 AND COALESCE(r.is_closed, false) = false`,
             [tenantId]
         ),
     ]);
@@ -37715,6 +37737,169 @@ async function buildPublicCalendar(
     return days;
 }
 
+// ── Prenotazioni web «solo confermabili subito» ────────────────────────
+// Con public_bookings_instant_only acceso il canale web non crea più
+// richieste da confermare: la pagina offre solo i turni dove
+// pickSelfServiceTable trova un tavolo ADESSO per quel numero di persone, e
+// dove non c'è propone l'altro turno o altri giorni. Quello che dice la
+// disponibilità è un'anticipazione: decide sempre la POST, che rifà la
+// scelta sotto lock (handlePublicReservationCreate).
+
+type InstantShiftOptions = { slots: string[]; full: boolean };
+type InstantDayOptions = { lunch: InstantShiftOptions; dinner: InstantShiftOptions };
+type InstantAlternative = { date: string; shift: 'LUNCH' | 'DINNER'; slots: string[] };
+
+// Fin dove si cercano le alternative e quante se ne danno. Ogni giorno
+// controllato costa una scelta del tavolo per turno, su un GET pubblico:
+// il calendario di 14 giorni (5 query fisse) sceglie i giorni aperti, poi
+// se ne provano al massimo 6.
+const INSTANT_ALT_LOOKAHEAD_DAYS = 14;
+const INSTANT_ALT_MAX_DAYS_CHECKED = 6;
+const INSTANT_ALT_MAX_DAYS = 3;
+
+// Cache di 20 s per (tenant, giorno, persone): la pagina chiede la
+// disponibilità a ogni cambio di data o di persone, e ogni calcolo sono
+// due scelte del tavolo. La POST non la usa mai e la svuota per il giorno
+// che ha appena preso: lì si decide sempre sul fresco.
+const INSTANT_CACHE_TTL_MS = 20_000;
+const INSTANT_CACHE_MAX = 500;
+const instantDayCache = new Map<string, { at: number; value: InstantDayOptions }>();
+
+function forgetInstantDay(tenantId: number, date: string): void {
+    const prefix = `${tenantId}|${date}|`;
+    for (const key of [...instantDayCache.keys()]) {
+        if (key.startsWith(prefix)) instantDayCache.delete(key);
+    }
+}
+
+async function isInstantOnlyBooking(tenantId: number): Promise<boolean> {
+    return getFeatureFlag(tenantId, 'public_bookings_instant_only', false);
+}
+
+/**
+ * Per un giorno e un numero di persone: gli orari della griglia self-service
+ * nei turni dove un tavolo c'è adesso. `full` = c'erano orari ma non un
+ * tavolo (stessa forma di guestModifyOptions). Il tavolo si cerca per turno
+ * intero, come fa la POST: il doppio turno è solo della voce.
+ * `computed` = calcolato ora e non preso dalla cache (serve a contare la
+ * domanda dirottata una volta sola per finestra di cache).
+ */
+async function instantDayOptions(
+    tenantId: number, date: string, guests: number, blocks: PublicBookingBlock[]
+): Promise<{ value: InstantDayOptions; computed: boolean }> {
+    const key = `${tenantId}|${date}|${guests}`;
+    const now = Date.now();
+    const hit = instantDayCache.get(key);
+    if (hit && now - hit.at < INSTANT_CACHE_TTL_MS) return { value: hit.value, computed: false };
+    const forShift = async (shift: Shift): Promise<InstantShiftOptions> => {
+        const slots = await selfServiceSlots(tenantId, date, shift, blocks);
+        if (slots.length === 0) return { slots, full: false };
+        const table = await pickSelfServiceTable(tenantId, date, shift, guests);
+        return table ? { slots, full: false } : { slots: [], full: true };
+    };
+    const [lunch, dinner] = await Promise.all([forShift(Shift.LUNCH), forShift(Shift.DINNER)]);
+    const value = { lunch, dinner };
+    if (instantDayCache.size >= INSTANT_CACHE_MAX) {
+        for (const [k, v] of [...instantDayCache.entries()]) {
+            if (now - v.at >= INSTANT_CACHE_TTL_MS) instantDayCache.delete(k);
+        }
+        // Tutte fresche e ancora troppe: si riparte da zero, la cache è
+        // solo un risparmio.
+        if (instantDayCache.size >= INSTANT_CACHE_MAX) instantDayCache.clear();
+    }
+    instantDayCache.set(key, { at: now, value });
+    return { value, computed: true };
+}
+
+// Gli orari di un turno ancora prenotabili OGGI (Roma): fuori da oggi la
+// lista resta intera.
+function futureSlotsOnly(slots: string[], date: string, oggiLocale: string): string[] {
+    if (date !== oggiLocale) return slots;
+    const romeNow = getItalianDateParts(new Date());
+    const currentMinutes = Number(romeNow.hour) * 60 + Number(romeNow.minute);
+    return slots.filter(s => {
+        const [h, m] = s.split(':').map(Number);
+        return h * 60 + m > currentMinutes;
+    });
+}
+
+/**
+ * Dove mandare chi non trova posto: prima l'altro turno dello stesso
+ * giorno, poi al massimo tre giorni aperti dopo, preferendo il turno
+ * chiesto. Con un orario (la POST lo ha sempre) gli orari di ogni
+ * alternativa sono i due più vicini (nearestSlots, la stessa regola di
+ * Sofia); senza, tutti.
+ */
+async function instantAlternatives(
+    tenantId: number,
+    date: string,
+    guests: number,
+    wanted: Shift[],
+    ctx: { time: string | null; oggiLocale: string; blocks: PublicBookingBlock[] }
+): Promise<InstantAlternative[]> {
+    const pick = (slots: string[]) => (ctx.time ? bookingTools.nearestSlots(ctx.time, slots) : slots);
+    const out: InstantAlternative[] = [];
+    const sameDay = (await instantDayOptions(tenantId, date, guests, ctx.blocks)).value;
+    for (const shift of [Shift.LUNCH, Shift.DINNER]) {
+        if (wanted.includes(shift)) continue;
+        const opt = shift === Shift.LUNCH ? sameDay.lunch : sameDay.dinner;
+        const slots = futureSlotsOnly(opt.slots, date, ctx.oggiLocale);
+        if (!opt.full && slots.length > 0) out.push({ date, shift: shift as 'LUNCH' | 'DINNER', slots: pick(slots) });
+    }
+    const from = addDaysIso(date, 1);
+    const calendar = await buildPublicCalendar(tenantId, from, addDaysIso(date, INSTANT_ALT_LOOKAHEAD_DAYS), ctx.oggiLocale);
+    const order = [...wanted, ...[Shift.LUNCH, Shift.DINNER].filter(s => !wanted.includes(s))];
+    let found = 0;
+    let checked = 0;
+    for (const day of calendar) {
+        if (found >= INSTANT_ALT_MAX_DAYS || checked >= INSTANT_ALT_MAX_DAYS_CHECKED) break;
+        if (day.status === 'closed') continue;
+        checked++;
+        const opts = (await instantDayOptions(tenantId, day.date, guests, ctx.blocks)).value;
+        for (const shift of order) {
+            const opt = shift === Shift.LUNCH ? opts.lunch : opts.dinner;
+            if (!opt.full && opt.slots.length > 0) {
+                out.push({ date: day.date, shift: shift as 'LUNCH' | 'DINNER', slots: pick(opt.slots) });
+                found++;
+                break;
+            }
+        }
+    }
+    return out;
+}
+
+// La domanda che il web non ha preso: una riga per (giorno del servizio,
+// turno, persone, motivo, giorno in cui è successo) col contatore. Niente
+// dati personali. Serve a decidere dopo la riaccensione se i gruppi dirottati
+// sono tanti (accorpamenti di tavoli predefiniti). Mai bloccante.
+function recordBookingMiss(tenantId: number, date: string, shift: Shift, guests: number, reason: 'full' | 'not_confirmable'): void {
+    queryWithRetry(
+        `INSERT INTO public_booking_misses (tenant_id, service_date, shift, guests, reason, seen_on)
+         VALUES ($1, $2::date, $3, $4, $5, CURRENT_DATE)
+         ON CONFLICT (tenant_id, service_date, shift, guests, reason, seen_on)
+         DO UPDATE SET count = public_booking_misses.count + 1, last_seen_at = NOW()`,
+        [tenantId, date, shift, guests, reason]
+    ).catch(err => console.warn('[public-booking] miss non registrato:', (err as any)?.message || err));
+}
+
+// Un turno senza tavolo dentro la transazione della POST: la transazione si
+// annulla e la risposta è un 409 con le alternative, mai una richiesta
+// PENDING.
+class NotConfirmableError extends Error {}
+
+// Letture pubbliche (contatti, disponibilità, sale): ogni disponibilità in
+// modalità «solo confermabili» sono due scelte del tavolo, e il calcolo
+// delle alternative qualcuna di più. 120 al minuto per IP bastano a chi
+// sfoglia il calendario (anche da un Wi-Fi d'albergo condiviso) e fermano
+// chi la martella. Configurabile per i test, che girano da un IP solo.
+const publicReadLimiter = rateLimit({
+    windowMs: 60 * 1000,
+    limit: Number(process.env.PUBLIC_READ_RATE_LIMIT) || 120,
+    standardHeaders: 'draft-7',
+    legacyHeaders: false,
+    message: { error: 'rate_limited', message: 'Troppe richieste, riprova tra qualche secondo.' },
+});
+
 // Handler condivisi fra i path storici (/public/*, tenant dal dominio o
 // fallback tenant 1) e i gemelli /public/:slug/* (Fase C3): stesso schema
 // dei webhook C2 — la logica riceve il tenant già risolto, le route in
@@ -37764,6 +37949,34 @@ const handlePublicAvailability = async (tenantId: number, req: express.Request, 
         // A blocked shift comes back empty — the public form treats "no
         // slots" as "not bookable", so nothing else needs to know about blocks.
         const blocks = await getPublicBookingBlocks(tenantId);
+
+        // «Solo confermabili subito»: con il numero di persone la risposta
+        // dice anche dove un tavolo c'è adesso. Senza `guests` (la pagina di
+        // oggi non lo manda) resta la griglia di sempre: decide la POST.
+        if (req.query.guests !== undefined && await isInstantOnlyBooking(tenantId)) {
+            const guests = Number(req.query.guests);
+            if (!Number.isInteger(guests) || guests < 1 || guests > 20) {
+                return res.status(400).json({ error: 'invalid_guests', message: 'guests deve essere 1-20' });
+            }
+            const time = typeof req.query.time === 'string' && /^([01]\d|2[0-3]):[0-5]\d$/.test(req.query.time)
+                ? req.query.time
+                : null;
+            const { value: day, computed } = await instantDayOptions(tenantId, date, guests, blocks);
+            const lunch = { slots: futureSlotsOnly(day.lunch.slots, date, oggiLocale), full: day.lunch.full };
+            const dinner = { slots: futureSlotsOnly(day.dinner.slots, date, oggiLocale), full: day.dinner.full };
+            const fullShifts = [
+                ...(lunch.full ? [Shift.LUNCH] : []),
+                ...(dinner.full ? [Shift.DINNER] : []),
+            ];
+            if (computed) {
+                for (const shift of fullShifts) recordBookingMiss(tenantId, date, shift, guests, 'full');
+            }
+            const alternatives = fullShifts.length > 0
+                ? await instantAlternatives(tenantId, date, guests, fullShifts, { time, oggiLocale, blocks })
+                : [];
+            return res.json({ date, guests, instant: true, lunch, dinner, alternatives });
+        }
+
         const [lunchSlots, dinnerSlots] = await Promise.all([
             selfServiceSlots(tenantId, date, Shift.LUNCH, blocks),
             selfServiceSlots(tenantId, date, Shift.DINNER, blocks),
@@ -37821,6 +38034,13 @@ const handlePublicRooms = async (tenantId: number, req: express.Request, res: ex
         // da pickSelfServiceTable per decidere confermato vs richiesta, quindi
         // l'etichetta sul form combacia sempre con l'esito reale del submit.
         const cappedIds = new Set(await getCappedRoomIds(tenantId, date, shift as Shift));
+        // «Solo confermabili subito»: una sala oltre soglia non si propone
+        // più come «richiesta» — la POST lì risponderebbe 409, quindi sparisce.
+        // Il campo resta (sempre false) per la pagina che lo legge già.
+        if (await isInstantOnlyBooking(tenantId)) {
+            res.json({ rooms: rooms.filter(r => !cappedIds.has(r.id)).map(r => ({ ...r, over_threshold: false })) });
+            return;
+        }
         const roomsWithFlag = rooms.map(r => ({ ...r, over_threshold: cappedIds.has(r.id) }));
         res.json({ rooms: roomsWithFlag });
     } catch (err: any) {
@@ -37864,6 +38084,9 @@ const handlePublicContact = async (tenantId: number, _req: express.Request, res:
     res.json({
         voice,
         bookingsEnabled,
+        // La pagina offre solo orari che si confermano subito e, dove non c'è
+        // posto, le uscite qui sotto (telefono e WhatsApp del locale).
+        instantOnly: bookingsEnabled && await isInstantOnlyBooking(tenantId),
         timezone: (await getTenantLocale(tenantId)).timezone,
         currency: (await getTenantLocale(tenantId)).currency,
         deposit: {
@@ -37885,6 +38108,11 @@ const handlePublicContact = async (tenantId: number, _req: express.Request, res:
             // rotto per i tenant che non l'hanno caricato.
             logo_url: identity.logoUrl || null,
             logo_dark_url: identity.logoDarkUrl || null,
+            // Telefono e WhatsApp pubblici dell'anagrafe (Impostazioni ›
+            // Dati legali): le uscite quando il web non ha posto. Diversi da
+            // `voice`, che è il numero di Sofia.
+            phone: identity.phone || null,
+            whatsapp: identity.whatsapp || null,
         },
         voice_agent_id: (process.env.ELEVENLABS_AGENT_ID || '').trim(),
     });
@@ -38097,6 +38325,36 @@ const handlePublicReservationCreate = async (tenantId: number, req: express.Requ
         // Stessa policy condivisa col canale vocale (isAutoDepositRequired).
         const depositRequired = await isAutoDepositRequired(tenantId, Math.trunc(guestsNum));
 
+        // «Solo confermabili subito» (public_bookings_instant_only): dal web
+        // non nasce più una richiesta da confermare. O il tavolo c'è e la
+        // prenotazione si conferma, o la risposta è un 409 con le
+        // alternative (l'altro turno, i giorni dopo). La caparra resta il
+        // flusso di sempre — PENDING finché l'ospite non paga — ma solo
+        // dove un tavolo c'è.
+        const instantOnly = await isInstantOnlyBooking(tenantId);
+        const guestsInt = Math.trunc(guestsNum);
+        const roomFilter = requestedRoomId && Number.isFinite(requestedRoomId) ? Math.trunc(requestedRoomId) : null;
+        const replyNotConfirmable = async () => {
+            recordBookingMiss(tenantId, date, shift as Shift, guestsInt, 'not_confirmable');
+            const oggiLocale = getItalianTodayIso(new Date(), fusoMsg);
+            const alternatives = await instantAlternatives(tenantId, date, guestsInt, [shift as Shift], { time, oggiLocale, blocks })
+                .catch(err => {
+                    console.error('[public-booking] alternative non calcolate:', err?.message || err);
+                    return [] as InstantAlternative[];
+                });
+            return res.status(409).json({
+                error: 'not_confirmable',
+                // La pagina di oggi mostra questo testo così com'è: deve dire
+                // anche cosa fare.
+                message: 'Per questo turno non c\'è più un tavolo libero: scegli un altro orario o un altro giorno.',
+                alternatives,
+            });
+        };
+        if (instantOnly && depositRequired
+            && !(await pickSelfServiceTable(tenantId, date, shift as Shift, guestsInt, { roomId: roomFilter }))) {
+            return replyNotConfirmable();
+        }
+
         // Conferma automatica: se la sala è ancora sotto il proprio limite di
         // occupazione assegniamo il tavolo e confermiamo subito; se il limite
         // è già stato superato (o non c'è un tavolo libero) la richiesta resta
@@ -38104,10 +38362,10 @@ const handlePublicReservationCreate = async (tenantId: number, req: express.Requ
         // cerchiamo solo lì — dirottare il cliente in un'altra sala senza
         // dirglielo sarebbe peggio di farlo confermare a mano.
         let autoTable: Awaited<ReturnType<typeof pickSelfServiceTable>> = null;
-        if (!depositRequired) {
+        if (!depositRequired && !instantOnly) {
             try {
-                autoTable = await pickSelfServiceTable(tenantId, date, shift as Shift, Math.trunc(guestsNum), {
-                    roomId: requestedRoomId && Number.isFinite(requestedRoomId) ? Math.trunc(requestedRoomId) : null,
+                autoTable = await pickSelfServiceTable(tenantId, date, shift as Shift, guestsInt, {
+                    roomId: roomFilter,
                 });
             } catch (err) {
                 // Un errore qui non deve far perdere la prenotazione: si
@@ -38115,10 +38373,8 @@ const handlePublicReservationCreate = async (tenantId: number, req: express.Requ
                 console.error('[public-booking] auto-assign lookup failed:', (err as any)?.message || err);
             }
         }
-        const autoConfirmed = autoTable !== null;
 
-        const result = await runWithOutboxTx(async (txClient) => {
-            const insRes = await txClient.query(
+        const insertReservation = (txClient: any, tableId: number | null, confirmed: boolean) => txClient.query(
             `INSERT INTO reservations (
                 customer_name, reservation_time, shift, guests, children,
                 table_id, notes, email, phone, payment_status, arrival_status,
@@ -38127,43 +38383,100 @@ const handlePublicReservationCreate = async (tenantId: number, req: express.Requ
             )
             VALUES ($1, $2, $3, $4, $14, $10, $5, $6, $7, 'PENDING', 'WAITING', $11, 'GOOGLE', $12, $8, $9, $13, $15)
             RETURNING *`,
-            [customer_name, reservation_time, shift, Math.trunc(guestsNum), notes, emailNormalized, phoneE164,
+            [customer_name, reservation_time, shift, guestsInt, notes, emailNormalized, phoneE164,
              consentHealth, consentUpdatedAt,
-             autoTable?.id ?? null,
-             autoConfirmed ? 'CONFIRMED' : 'PENDING',
-             !autoConfirmed,
+             tableId,
+             confirmed ? 'CONFIRMED' : 'PENDING',
+             !confirmed,
              tenantId,
              childrenNum,
              language]
-            );
-            if (insRes.rows[0]) {
-                await outboxEnqueueInTx(txClient, tenantId, 'reservation:created', `reservation:${insRes.rows[0].id}`,
-                    { reservation_id: insRes.rows[0].id }, { actor: { channel: 'web' } });
-            }
-            return insRes;
-        });
-        const created = result.rows[0];
+        );
 
-        // Guardia anti-doppia-assegnazione: pick e INSERT non sono atomici,
-        // quindi due richieste simultanee possono scegliere lo stesso tavolo.
-        // Se succede molliamo il tavolo e torniamo al flusso manuale: meglio
-        // una conferma in meno che due clienti sullo stesso tavolo.
-        if (autoConfirmed && autoTable) {
-            const clash = await findTableConflicts(tenantId, date, shift as string, [autoTable.id], {
-                excludeReservationId: created.id,
-            });
-            if (clash.length > 0) {
-                console.warn('[public-booking] auto-assign race, reverting to manual review', {
-                    reservation_id: created.id, table_id: autoTable.id,
+        let created: any;
+        if (instantOnly && !depositRequired) {
+            try {
+                const out = await runWithOutboxTx(async (txClient) => {
+                    // Due ospiti che prenotano lo stesso turno insieme si
+                    // mettono in fila qui: il secondo sceglie il tavolo dopo
+                    // il COMMIT del primo e non lo prende due volte. Il lock
+                    // muore col COMMIT/ROLLBACK (schema di
+                    // allocateTakeawayDailyNumber).
+                    await txClient.query(
+                        `SELECT pg_advisory_xact_lock(hashtextextended('public_booking:' || $1 || ':' || $2 || ':' || $3, 0))`,
+                        [String(tenantId), date, String(shift)]
+                    );
+                    let table = await pickSelfServiceTable(tenantId, date, shift as Shift, guestsInt, { roomId: roomFilter, db: txClient });
+                    if (!table) throw new NotConfirmableError();
+                    const row = (await insertReservation(txClient, table.id, true)).rows[0];
+                    // Staff e Sofia non passano da questo lock: se uno di loro
+                    // ha appena preso lo stesso tavolo, si prova UN altro
+                    // tavolo (la nostra riga, già scritta, tiene occupato
+                    // quello di prima), poi si rinuncia. Meglio un 409 con le
+                    // alternative che due clienti sullo stesso tavolo.
+                    for (let attempt = 0; ; attempt++) {
+                        const clash = await findTableConflicts(tenantId, date, shift as string, [table.id], {
+                            excludeReservationId: row.id,
+                            db: txClient,
+                        });
+                        if (clash.length === 0) break;
+                        if (attempt >= 1) throw new NotConfirmableError();
+                        console.warn('[public-booking] tavolo preso da un altro canale, ne provo un altro', {
+                            reservation_id: row.id, table_id: table.id,
+                        });
+                        table = await pickSelfServiceTable(tenantId, date, shift as Shift, guestsInt, { roomId: roomFilter, db: txClient });
+                        if (!table) throw new NotConfirmableError();
+                        const moved = await txClient.query(
+                            `UPDATE reservations SET table_id = $1 WHERE id = $2 AND tenant_id = $3 RETURNING *`,
+                            [table.id, row.id, tenantId]
+                        );
+                        Object.assign(row, moved.rows[0]);
+                    }
+                    await outboxEnqueueInTx(txClient, tenantId, 'reservation:created', `reservation:${row.id}`,
+                        { reservation_id: row.id }, { actor: { channel: 'web' } });
+                    return { row, table };
                 });
-                const reverted = await queryWithRetry(
-                    `UPDATE reservations
-                     SET table_id = NULL, reservation_status = 'PENDING', requires_review = true
-                     WHERE id = $1 AND tenant_id = $2 RETURNING *`,
-                    [created.id, tenantId]
-                );
-                Object.assign(created, reverted.rows[0]);
-                autoTable = null;
+                created = out.row;
+                autoTable = out.table;
+            } catch (err) {
+                if (err instanceof NotConfirmableError) return replyNotConfirmable();
+                throw err;
+            }
+            // Il giorno è cambiato: la prossima disponibilità si ricalcola.
+            forgetInstantDay(tenantId, date);
+        } else {
+            const autoConfirmed = autoTable !== null;
+            const result = await runWithOutboxTx(async (txClient) => {
+                const insRes = await insertReservation(txClient, autoTable?.id ?? null, autoConfirmed);
+                if (insRes.rows[0]) {
+                    await outboxEnqueueInTx(txClient, tenantId, 'reservation:created', `reservation:${insRes.rows[0].id}`,
+                        { reservation_id: insRes.rows[0].id }, { actor: { channel: 'web' } });
+                }
+                return insRes;
+            });
+            created = result.rows[0];
+
+            // Guardia anti-doppia-assegnazione: pick e INSERT non sono atomici,
+            // quindi due richieste simultanee possono scegliere lo stesso tavolo.
+            // Se succede molliamo il tavolo e torniamo al flusso manuale: meglio
+            // una conferma in meno che due clienti sullo stesso tavolo.
+            if (autoConfirmed && autoTable) {
+                const clash = await findTableConflicts(tenantId, date, shift as string, [autoTable.id], {
+                    excludeReservationId: created.id,
+                });
+                if (clash.length > 0) {
+                    console.warn('[public-booking] auto-assign race, reverting to manual review', {
+                        reservation_id: created.id, table_id: autoTable.id,
+                    });
+                    const reverted = await queryWithRetry(
+                        `UPDATE reservations
+                         SET table_id = NULL, reservation_status = 'PENDING', requires_review = true
+                         WHERE id = $1 AND tenant_id = $2 RETURNING *`,
+                        [created.id, tenantId]
+                    );
+                    Object.assign(created, reverted.rows[0]);
+                    autoTable = null;
+                }
             }
         }
         // Da qui in poi conta lo stato effettivamente salvato.
@@ -38399,9 +38712,9 @@ const handlePublicReservationCreate = async (tenantId: number, req: express.Requ
 // storici il resolver non ritorna mai null (fallback tenant 1, o il tenant
 // del dominio custom chiamato); con uno slug ignoto la risposta è 404, mai
 // il fallback. Il rate limiter resta per-IP su entrambe le forme.
-app.get(['/public/availability', '/public/:slug/availability'], withPublicTenant(handlePublicAvailability));
-app.get(['/public/rooms', '/public/:slug/rooms'], withPublicTenant(handlePublicRooms));
-app.get(['/public/contact', '/public/:slug/contact'], withPublicTenant(handlePublicContact));
+app.get(['/public/availability', '/public/:slug/availability'], publicReadLimiter, withPublicTenant(handlePublicAvailability));
+app.get(['/public/rooms', '/public/:slug/rooms'], publicReadLimiter, withPublicTenant(handlePublicRooms));
+app.get(['/public/contact', '/public/:slug/contact'], publicReadLimiter, withPublicTenant(handlePublicContact));
 app.post(['/public/reservations', '/public/:slug/reservations'], publicBookingLimiter, withPublicTenant(handlePublicReservationCreate));
 
 // Serve la pagina con la testa SEO di QUESTO ristorante. Vedi

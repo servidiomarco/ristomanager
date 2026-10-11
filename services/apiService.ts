@@ -1350,6 +1350,8 @@ export const deleteClosure = async (id: number): Promise<void> => {
 
 export interface FeatureFlags {
   public_bookings_enabled: boolean;
+  /** Prenotazioni web solo dove un tavolo c'è adesso: niente richieste da confermare. */
+  public_bookings_instant_only: boolean;
   voice_agent_enabled: boolean;
   voice_bookings_suspended: boolean;
   /** Doppio turno voce: secondo giro sullo stesso tavolo nello stesso shift. */

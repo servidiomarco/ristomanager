@@ -143,6 +143,13 @@ Pagina di prenotazione self-service, leggerissima (un solo file statico, si apre
 - Se la sala è oltre la soglia di occupazione impostata (o non c'è tavolo), diventa una **richiesta** che lo staff conferma a mano: "Vi ricontattiamo a breve".
 - In entrambi i casi il cliente riceve subito un messaggio di riscontro (WhatsApp / SMS / email secondo la configurazione) e lo staff una notifica push.
 
+**Solo prenotazioni confermabili subito** (interruttore in Impostazioni › Prenotazioni › Prenotazioni web, spento di serie)
+- La pagina offre solo i turni in cui, per quel numero di persone, un tavolo è libero **adesso**; le sale oltre la soglia di occupazione non compaiono.
+- Dove non c'è posto propone l'altro turno dello stesso giorno o i primi giorni liberi dopo, e la prenotazione non diventa mai una richiesta da confermare: allo staff non arriva più niente da approvare.
+- Due clienti che prenotano l'ultimo tavolo nello stesso istante non lo prendono entrambi: il primo è confermato, il secondo riceve le alternative.
+- Le prenotazioni con caparra restano in attesa del pagamento, ma solo dove un tavolo c'è.
+- Il CRM conta la domanda che il web non ha potuto prendere (giorno, turno, numero di persone), per capire se servono più tavoli per i gruppi.
+
 **Caparra automatica**
 - Sopra una soglia di coperti configurabile (default 9), la pagina mostra in tempo reale l'importo della caparra (default €10 a persona) e le condizioni (si scala dal conto, rimborso integrale se si annulla con almeno 24 ore di anticipo — caparra confirmatoria art. 1385 c.c.).
 - Al termine il cliente riceve il **link di pagamento** (Revolut o SumUp): finché la caparra non è pagata il tavolo non è garantito. I link non pagati **scadono da soli** dopo un numero di ore configurabile.
@@ -887,6 +894,7 @@ Pagina unica a blocchi, con chip-àncora per saltare alla sezione e una **ricerc
 
 | Data | Sezione | Modifica |
 |---|---|---|
+| 2026-10-11 | Prenotazione online | **Prenotazioni web senza nulla da confermare.** Nuovo interruttore «Solo prenotazioni confermabili subito» in Impostazioni › Prenotazioni › Prenotazioni web: dal sito si prenota solo dove un tavolo è libero adesso, la prenotazione si conferma da sola e, dove non c'è posto, al cliente si propongono l'altro turno o un altro giorno. Corretto anche il calendario della pagina /prenota, che non mostrava più i pallini dei giorni liberi, quasi pieni e chiusi. |
 | 2026-10-11 | Agente vocale "Sofia" | **Se il cliente chiede per oggi, Sofia continua a dire «oggi».** Orari non disponibili, sala al completo, riepilogo e conferma usano «oggi» (o «domani») invece di «quel giorno» o della data per esteso. |
 | 2026-10-11 | Agente vocale "Sofia" | **La card della telefonata si vede di più.** Bordo più spesso e luminoso, con un alone che si nota anche di lato; nome più grande; colore dello stato anche su icona e riga di stato (oro squilla, verde col locale, viola Sofia) e cornetta che vibra mentre squilla. La chiamata che squilla sta in cima e resta in vista anche sopra i pannelli aperti. |
 | 2026-10-11 | Agente vocale "Sofia" | Nella card della telefonata il bordo gira finché la chiamata è in corso: viola mentre parla Sofia, oro mentre squilla, verde mentre si parla col locale. Così si vede subito se la linea è occupata. |

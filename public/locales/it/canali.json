@@ -107,6 +107,11 @@
       "on": "attive",
       "off": "sospese"
     },
+    "public_bookings_instant_only": {
+      "title": "Solo prenotazioni confermabili subito",
+      "on": "attivo",
+      "off": "disattivato"
+    },
     "voice_bookings_suspended": {
       "title": "Prenotazioni telefoniche",
       "on": "sospese",
@@ -187,6 +192,10 @@
   "operatorOnlyDaysHintB": "questi giorni (o turni), qualunque sia il momento della chiamata: utile quando c'è un menù fisso o un evento che vuoi gestire a mano. Al cliente che chiede una data bloccata Sofia dice che se ne occupa lo staff e lo invita a richiamare negli orari indicati. Le altre date restano prenotabili normalmente. I blocchi già passati spariscono da soli.",
   "doubleSeatingToggleOff": "Disattiva doppio turno",
   "doubleSeatingToggleOn": "Attiva doppio turno",
+  "instantOnlyLabel": "Solo prenotazioni confermabili subito",
+  "instantOnlyHint": "La pagina offre solo gli orari in cui un tavolo è libero adesso e conferma la prenotazione da sola. Dove non c'è posto propone l'altro turno o un altro giorno, oppure di chiamare o scrivere su WhatsApp: non arrivano più richieste da confermare. Le prenotazioni con caparra restano in attesa del pagamento.",
+  "instantOnlyToggleOff": "Disattiva solo prenotazioni confermabili subito",
+  "instantOnlyToggleOn": "Attiva solo prenotazioni confermabili subito",
   "rev": {
     "timing": {
       "nextMorning": "La mattina dopo (10:30)",
