@@ -147,7 +147,7 @@ export interface BookingToolsDeps {
 
     getVoiceDateBlocks: (tenantId: number) => Promise<any>;
     findVoiceDateBlock: (date: string, shift: 'LUNCH' | 'DINNER', blocks: any) => any;
-    buildVoiceDateBlockMessage: (date: string, shift: 'LUNCH' | 'DINNER', block: any, language?: string | null) => string;
+    buildVoiceDateBlockMessage: (date: string, shift: 'LUNCH' | 'DINNER', block: any, language?: string | null, dayLabel?: string) => string;
     getLargeGroupThreshold: (tenantId: number) => Promise<number>;
 
     isAutoDepositRequired: (tenantId: number, guests: number) => Promise<boolean>;
@@ -259,6 +259,23 @@ function spokenDay(date: string, tz: string, english: boolean): string {
     return deps().formatItalianDateReadback(date, english ? 'en' : null);
 }
 
+/** Il giorno con la preposizione inglese: "today", "tomorrow", "on Sunday 27 September". */
+function spokenDayEn(date: string, tz: string): string {
+    const day = spokenDay(date, tz, true);
+    return day === 'today' || day === 'tomorrow' ? day : `on ${day}`;
+}
+
+const capitalize = (s: string): string => s.charAt(0).toUpperCase() + s.slice(1);
+
+/** date_readback: "oggi" se il cliente prenota per oggi, così il riepilogo
+ *  dice "oggi alle 14:00" e non la data per esteso (chiamata dell'11/10/2026).
+ *  Domani resta col giorno della settimana: è lì che il cliente sbaglia
+ *  l'accoppiata giorno/data e il readback deve farlo notare. */
+function readbackDay(date: string, tz: string, english: boolean): string {
+    if (date === todayInTz(tz)) return english ? 'today' : 'oggi';
+    return deps().formatItalianDateReadback(date, english ? 'en' : null);
+}
+
 const guestsLabel = (n: number, english: boolean): string =>
     english ? `${n} ${n === 1 ? 'guest' : 'guests'}` : `${n} ${n === 1 ? 'persona' : 'persone'}`;
 
@@ -347,7 +364,8 @@ export async function checkAvailability(
         ? (rawLocation as 'INDOOR' | 'OUTDOOR')
         : undefined;
 
-    const normalizedDate = d.parseFlexibleDate(p.date, await d.getTenantTimeZone(tenantId));
+    const tz = await d.getTenantTimeZone(tenantId);
+    const normalizedDate = d.parseFlexibleDate(p.date, tz);
     if (!normalizedDate) {
         console.warn(`${channel.logPrefix} check-availability rejected: unparseable date`, { received: p.date });
         return fail('invalid_date', msg(english).invalidDate);
@@ -360,8 +378,9 @@ export async function checkAvailability(
     const dateBlock = d.findVoiceDateBlock(normalizedDate, rawShift, await d.getVoiceDateBlocks(tenantId));
     if (dateBlock) {
         console.log(`${channel.logPrefix} check-availability blocked date`, { date: normalizedDate, shift: rawShift, block: dateBlock });
-        return fail('date_blocked', d.buildVoiceDateBlockMessage(normalizedDate, rawShift, dateBlock, language), {
-            date_readback: d.formatItalianDateReadback(normalizedDate, language),
+        const day = readbackDay(normalizedDate, tz, english);
+        return fail('date_blocked', d.buildVoiceDateBlockMessage(normalizedDate, rawShift, dateBlock, language, day), {
+            date_readback: day,
         });
     }
 
@@ -400,6 +419,8 @@ export async function checkAvailability(
                 const proposal = english
                     ? (near.length === 2 ? `${near[0]} or ${near[1]}` : near.length === 1 ? `${near[0]}` : '')
                     : (near.length === 2 ? `alle ${near[0]} o alle ${near[1]}` : near.length === 1 ? `alle ${near[0]}` : '');
+                const day = spokenDay(normalizedDate, tz, english);
+                const shiftAt = rawShift === 'LUNCH' ? (english ? 'lunch' : 'a pranzo') : (english ? 'dinner' : 'a cena');
                 console.warn(`${channel.logPrefix} check-availability: requested time off grid`, {
                     date: normalizedDate, shift: rawShift, requested_time: requestedTime, available_slots: validSlots,
                 });
@@ -410,11 +431,11 @@ export async function checkAvailability(
                     nearest_slots: near,
                     message: proposal
                         ? (english
-                            ? `We do not take bookings at ${requestedTime} that day. The closest times are ${proposal}: which one do you prefer?`
-                            : `Alle ${requestedTime} quel giorno non prendiamo prenotazioni. Gli orari più vicini sono ${proposal}: quale preferisce?`)
+                            ? `We do not take bookings at ${requestedTime} ${spokenDayEn(normalizedDate, tz)}. The closest times are ${proposal}: which one do you prefer?`
+                            : `${capitalize(day)} alle ${requestedTime} non prendiamo prenotazioni. Gli orari più vicini sono ${proposal}: quale preferisce?`)
                         : (english
-                            ? 'There are no bookable times for that shift on that day. Shall we try another day?'
-                            : 'Per quel turno non ci sono orari prenotabili quel giorno. Possiamo provare un altro giorno?'),
+                            ? `There are no bookable times for ${shiftAt} ${spokenDayEn(normalizedDate, tz)}. Shall we try another day?`
+                            : `${capitalize(day)} ${shiftAt} non ci sono orari prenotabili. Possiamo provare un altro giorno?`),
                 };
             }
         }
@@ -493,7 +514,6 @@ export async function checkAvailability(
             try {
                 const active = await d.findActiveReservationsByPhone(tenantId, callerId, { horizonDays: EXISTING_BOOKING_HORIZON_DAYS });
                 if (active.length > 0) {
-                    const tz = await d.getTenantTimeZone(tenantId);
                     const sameDay = active.filter(r => r.date === normalizedDate);
                     const focus = sameDay.find(r => r.shift === rawShift) ?? sameDay[0] ?? active[0];
                     const e = describeExisting(focus, tz, english);
@@ -522,8 +542,8 @@ export async function checkAvailability(
         console.log(`${channel.logPrefix} check-availability`, { date: normalizedDate, raw_date: p.date, shift: rawShift, guests, location_preference: locationPreference, result });
         // date_readback è la stringa "venerdì 10 luglio" che il modello DEVE
         // ripetere alla lettera: da solo sbaglia regolarmente l'accoppiata
-        // giorno della settimana / giorno del mese.
-        return { body: { ...result, ...zoneFields, ...nameFields, ...existingFields, ...timeFields, date_readback: d.formatItalianDateReadback(normalizedDate, language) } };
+        // giorno della settimana / giorno del mese. Per oggi è "oggi".
+        return { body: { ...result, ...zoneFields, ...nameFields, ...existingFields, ...timeFields, date_readback: readbackDay(normalizedDate, tz, english) } };
     } catch (err) {
         console.error(`${channel.logPrefix} check-availability error`, err);
         return {
@@ -726,7 +746,7 @@ export async function createReservation(
                     already_registered: true,
                     reservation_id: replay.id,
                     confirmation_phrase: d.formatItalianConfirmation(replay, detectedLanguage, await d.getTenantTimeZone(tenantId)),
-                    date_readback: d.formatItalianDateReadback(normalizedDate, detectedLanguage),
+                    date_readback: readbackDay(normalizedDate, await d.getTenantTimeZone(tenantId), english),
                 },
             };
         }
@@ -754,7 +774,8 @@ export async function createReservation(
     const dateBlock = d.findVoiceDateBlock(normalizedDate, rawShift, await d.getVoiceDateBlocks(tenantId));
     if (dateBlock) {
         console.log(`${channel.logPrefix} create-reservation blocked date`, { date: normalizedDate, shift: rawShift, block: dateBlock, conversation_id: conversationId });
-        return fail('date_blocked', d.buildVoiceDateBlockMessage(normalizedDate, rawShift, dateBlock, english ? 'en' : null));
+        return fail('date_blocked', d.buildVoiceDateBlockMessage(normalizedDate, rawShift, dateBlock, english ? 'en' : null,
+            readbackDay(normalizedDate, await d.getTenantTimeZone(tenantId), english)));
     }
 
     // L'orario deve stare sulla griglia degli slot, altrimenti la prenotazione
@@ -772,14 +793,15 @@ export async function createReservation(
         // telefono sono il punto esatto in cui i clienti dell'estate 2026
         // riattaccavano ("Non ho capito gli orari").
         const near = nearestSlots(normalizedTime, validSlots);
+        const tz = await d.getTenantTimeZone(tenantId);
         const message = english
             ? (validSlots.length === 0
-                ? `I am sorry, ${shiftLabel} is not available that day. Shall we try another day?`
+                ? `I am sorry, ${shiftLabel} is not available ${spokenDayEn(normalizedDate, tz)}. Shall we try another day?`
                 : near.length === 2
                     ? `We do not take bookings at ${normalizedTime}: the closest times are ${near[0]} or ${near[1]}. Which one do you prefer?`
                     : `For ${shiftLabel} we can only book at ${d.formatSlotListItalian(validSlots, 'en')}. Which time do you prefer?`)
             : (validSlots.length === 0
-                ? `Mi dispiace, ${shiftLabel} di quel giorno non è disponibile. Possiamo provare un altro giorno?`
+                ? `Mi dispiace, ${shiftLabel} di ${spokenDay(normalizedDate, tz, false)} non è disponibile. Possiamo provare un altro giorno?`
                 : near.length === 2
                     ? `Alle ${normalizedTime} non prendiamo prenotazioni: gli orari più vicini sono le ${near[0]} o le ${near[1]}. Quale preferisce?`
                     : `Per ${shiftLabel} possiamo prenotare solo alle ${d.formatSlotListItalian(validSlots)}. Quale orario preferisce?`);
@@ -990,7 +1012,7 @@ export async function createReservation(
                 reservation_id: created.id,
                 requires_review: created.requires_review,
                 confirmation_phrase: confirmationPhrase,
-                date_readback: d.formatItalianDateReadback(normalizedDate, detectedLanguage),
+                date_readback: readbackDay(normalizedDate, await d.getTenantTimeZone(tenantId), english),
                 table_id: created.table_id,
                 table_name: created.table_name,
                 room_name: created.room_name,
@@ -1128,8 +1150,8 @@ export async function cancelReservation(
                     status: 'ambiguous',
                     candidates: outcome.candidates,
                     message: english
-                        ? `I found more than one booking for that day (${list}). Could you confirm the time of the one to cancel?`
-                        : `Ho trovato più prenotazioni per quel giorno (${list}). Mi conferma l'orario di quella da annullare?`,
+                        ? `I found more than one booking for ${spokenDay(normalizedDate, await d.getTenantTimeZone(tenantId), true)} (${list}). Could you confirm the time of the one to cancel?`
+                        : `Ho trovato più prenotazioni per ${spokenDay(normalizedDate, await d.getTenantTimeZone(tenantId), false)} (${list}). Mi conferma l'orario di quella da annullare?`,
                 },
             };
         }
@@ -1357,8 +1379,8 @@ export async function modifyReservation(
                 body: {
                     success: false, status: 'ambiguous', candidates: outcome.candidates,
                     message: english
-                        ? `I found more than one booking for that day (${list}). Could you confirm the time of the one to modify?`
-                        : `Ho trovato più prenotazioni per quel giorno (${list}). Mi conferma l'orario di quella da modificare?`,
+                        ? `I found more than one booking for ${spokenDay(normalizedDate, await d.getTenantTimeZone(tenantId), true)} (${list}). Could you confirm the time of the one to modify?`
+                        : `Ho trovato più prenotazioni per ${spokenDay(normalizedDate, await d.getTenantTimeZone(tenantId), false)} (${list}). Mi conferma l'orario di quella da modificare?`,
                 },
             };
         }
