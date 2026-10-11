@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Globe, Phone, Loader2, Users, PauseCircle, Clock, CalendarClock, Plus, Trash2, Percent, MessageSquare, Repeat } from 'lucide-react';
+import { Globe, Phone, Loader2, Users, PauseCircle, Clock, CalendarClock, Plus, Trash2, Percent, MessageSquare, Repeat, BadgeCheck } from 'lucide-react';
 import { Loader } from './Loader';
 import {
     getFeatureFlags,
@@ -185,6 +185,7 @@ export const FeatureTogglesManager: React.FC<Props> = ({ showToast, only }) => {
     const FLAG_LABELS: Record<FlagKey, { title: string; on: string; off: string }> = {
         voice_agent_enabled: { title: 'Agente vocale', on: 'attivo', off: 'sospeso' },
         public_bookings_enabled: { title: 'Prenotazioni web', on: 'attive', off: 'sospese' },
+        public_bookings_instant_only: { title: 'Solo prenotazioni confermabili subito', on: 'attivo', off: 'disattivato' },
         voice_bookings_suspended: { title: 'Prenotazioni telefoniche', on: 'sospese', off: 'riattivate' },
         voice_double_seating_enabled: { title: 'Doppio turno', on: 'attivo', off: 'disattivato' },
         // Managed from its own settings section (PayAtTableSettingsManager),
@@ -494,6 +495,9 @@ export const FeatureTogglesManager: React.FC<Props> = ({ showToast, only }) => {
     const suspensionSaving = savingKey === 'voice_bookings_suspended';
     const doubleSeating = flags.voice_double_seating_enabled;
     const doubleSeatingSaving = savingKey === 'voice_double_seating_enabled';
+    // Il backend di prima non manda la chiave: assente = spento.
+    const instantOnly = flags.public_bookings_instant_only === true;
+    const instantOnlySaving = savingKey === 'public_bookings_instant_only';
     const scheduleDirty = JSON.stringify(channels.voice_bookings_suspension_schedule ?? []) !== JSON.stringify(scheduleDraft);
     const blocksDirty = JSON.stringify(channels.public_bookings_blocks ?? []) !== JSON.stringify(blocksDraft);
     const voiceBlocksDirty = JSON.stringify(channels.voice_bookings_date_blocks ?? []) !== JSON.stringify(voiceBlocksDraft);
@@ -904,6 +908,40 @@ export const FeatureTogglesManager: React.FC<Props> = ({ showToast, only }) => {
                                         </div>
                                     </div>
                                 </>
+                            )}
+
+                            {isWeb && (
+                                <div className="rounded-[var(--ds-radius)] bg-[var(--ds-surface-row)] border border-[var(--ds-border)] p-3">
+                                    <div className="flex items-start justify-between gap-3">
+                                        <div className="min-w-0">
+                                            <label className="flex items-start gap-2 text-[13px] text-[var(--ds-text-primary)] font-medium">
+                                                <BadgeCheck className="h-4 w-4 mt-0.5 text-[var(--ds-text-muted)] flex-shrink-0" />
+                                                <span>{t('instantOnlyLabel')}</span>
+                                            </label>
+                                            <p className="text-[12px] text-[var(--ds-text-muted)] mt-1 leading-relaxed">
+                                                {t('instantOnlyHint')}
+                                            </p>
+                                        </div>
+                                        <button
+                                            type="button"
+                                            role="switch"
+                                            aria-checked={instantOnly}
+                                            aria-label={t(instantOnly ? 'instantOnlyToggleOff' : 'instantOnlyToggleOn')}
+                                            onClick={() => toggle('public_bookings_instant_only')}
+                                            disabled={!canEdit || instantOnlySaving}
+                                            className={`relative inline-flex h-6 w-11 flex-shrink-0 rounded-full transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--ds-surface)] disabled:opacity-50 disabled:cursor-not-allowed ${
+                                                instantOnly ? 'bg-[var(--ds-seated-solid)]' : 'bg-[var(--ds-surface-row)] border border-[var(--ds-border)]'
+                                            }`}
+                                        >
+                                            <span
+                                                aria-hidden="true"
+                                                className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition-transform ${
+                                                    instantOnly ? 'translate-x-5' : 'translate-x-0.5'
+                                                } translate-y-0.5`}
+                                            />
+                                        </button>
+                                    </div>
+                                </div>
                             )}
 
                             {isWeb && (

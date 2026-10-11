@@ -18,6 +18,18 @@ import { nonApertoInCassaSql } from './apertiInCassaSql.js';
 
 export const ROOM_OCCUPANCY_CAPS_KEY = 'room_occupancy_caps';
 
+/**
+ * Chi esegue le query di questo modulo: di serie il pool (queryWithRetry).
+ * La prenotazione web «solo confermabili subito» passa invece il client
+ * della propria transazione: la scelta del tavolo gira dopo il lock della
+ * transazione e sulla stessa connessione, così non aspetta un'altra
+ * connessione del pool mentre ne tiene già una (con il pool pieno di
+ * richieste in coda sul lock sarebbe uno stallo) e vede quello che la
+ * transazione ha già scritto.
+ */
+export type OccupancyDb = { query: (text: string, params?: any[]) => Promise<{ rows: any[]; rowCount?: number | null }> };
+const POOL_DB: OccupancyDb = { query: queryWithRetry };
+
 // Su cosa si misura la percentuale:
 //   TABLES → tavoli occupati / tavoli della sala
 //   SEATS  → coperti prenotati / coperti della sala
@@ -39,9 +51,9 @@ export function isValidRoomOccupancyCap(entry: any): entry is RoomOccupancyCap {
     return true;
 }
 
-export async function getRoomOccupancyCaps(tenantId: number): Promise<RoomOccupancyCap[]> {
+export async function getRoomOccupancyCaps(tenantId: number, db: OccupancyDb = POOL_DB): Promise<RoomOccupancyCap[]> {
     try {
-        const result = await queryWithRetry(
+        const result = await db.query(
             'SELECT text_value FROM app_settings WHERE tenant_id = $1 AND key = $2',
             [tenantId, ROOM_OCCUPANCY_CAPS_KEY]
         );
@@ -84,13 +96,13 @@ export interface RoomOccupancy {
  * tavolo + i suoi ospiti: altrimenti il canale web potrebbe riempire una
  * sala con decine di richieste PENDING senza mai toccare il cap.
  */
-export async function computeRoomOccupancy(tenantId: number, date: string, shift: Shift): Promise<RoomOccupancy[]> {
-    const caps = await getRoomOccupancyCaps(tenantId);
+export async function computeRoomOccupancy(tenantId: number, date: string, shift: Shift, db: OccupancyDb = POOL_DB): Promise<RoomOccupancy[]> {
+    const caps = await getRoomOccupancyCaps(tenantId, db);
     const capByRoom = new Map<number, RoomOccupancyCap>(caps.map(c => [c.room_id, c]));
 
     // $3 = tenant su ogni tabella coinvolta: senza, i tavoli e i banchetti
     // di un ristorante peserebbero sull'occupazione delle sale dell'altro.
-    const result = await queryWithRetry(`
+    const result = await db.query(`
         WITH active AS (
             SELECT t.id, t.room_id, t.seats
             FROM tables t
@@ -225,13 +237,13 @@ export async function computeRoomOccupancy(tenantId: number, date: string, shift
  * Restituisce sempre un array (mai null) così può essere passato dritto a
  * un `= ANY($n::int[])` senza guardie extra.
  */
-export async function getCappedRoomIds(tenantId: number, date: string, shift: Shift): Promise<number[]> {
+export async function getCappedRoomIds(tenantId: number, date: string, shift: Shift, db: OccupancyDb = POOL_DB): Promise<number[]> {
     try {
-        const caps = await getRoomOccupancyCaps(tenantId);
+        const caps = await getRoomOccupancyCaps(tenantId, db);
         // Nessun cap configurato: evita la query di occupazione sul percorso
         // caldo (ogni check-availability dell'agente vocale ci passa).
         if (caps.length === 0) return [];
-        const occupancy = await computeRoomOccupancy(tenantId, date, shift);
+        const occupancy = await computeRoomOccupancy(tenantId, date, shift, db);
         return occupancy.filter(o => o.at_cap).map(o => o.room_id);
     } catch (err) {
         // Fail-open: un errore di lettura non deve far sparire la disponibilità.
@@ -365,8 +377,9 @@ export async function pickSelfServiceTable(
     date: string,
     shift: Shift,
     guests: number,
-    opts: { roomId?: number | null; location?: 'INDOOR' | 'OUTDOOR' | null; overlapTime?: string | null } = {}
+    opts: { roomId?: number | null; location?: 'INDOOR' | 'OUTDOOR' | null; overlapTime?: string | null; db?: OccupancyDb } = {}
 ): Promise<SelfServiceTablePick | null> {
+    const db = opts.db ?? POOL_DB;
     const params: any[] = [guests, date, shift, tenantId];
     let extraFilters = '';
     if (opts.location) {
@@ -377,7 +390,7 @@ export async function pickSelfServiceTable(
         params.push(Math.trunc(opts.roomId));
         extraFilters += ` AND r.id = $${params.length}`;
     }
-    params.push(await getCappedRoomIds(tenantId, date, shift));
+    params.push(await getCappedRoomIds(tenantId, date, shift, db));
     extraFilters += ` AND NOT (r.id = ANY($${params.length}::int[]))`;
     // overlapTime ('HH:MM'): occupazione per sovrapposizione di finestre
     // invece che per intero turno — vedi assignableTableSql. Lo passano solo
@@ -388,7 +401,7 @@ export async function pickSelfServiceTable(
         overlapStartParam = params.length;
     }
 
-    const result = await queryWithRetry(`
+    const result = await db.query(`
         SELECT t.id, t.name, r.id AS room_id, r.name AS room_name, r.location
         FROM tables t
         JOIN rooms r ON t.room_id = r.id AND r.tenant_id = t.tenant_id

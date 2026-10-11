@@ -115,6 +115,8 @@ export default async function globalSetup(): Promise<() => Promise<void>> {
             // quanti il limiter di produzione ne conceda (5).
             PUBLIC_BOOKING_RATE_LIMIT: '1000',
             PUBLIC_ORDER_RATE_LIMIT: '1000',
+            // Idem per le letture pubbliche di /prenota (120 al minuto).
+            PUBLIC_READ_RATE_LIMIT: '10000',
             // Avviso «cambio turno»: in produzione aspetta che la griglia
             // smetta di scrivere (20 s); nei test basta un attimo.
             SHIFT_CHANGE_NOTIFY_DELAY_MS: '300',

@@ -144,6 +144,13 @@ Pagina di prenotazione self-service, leggerissima (un solo file statico, si apre
 - Se la sala è oltre la soglia di occupazione impostata (o non c'è tavolo), diventa una **richiesta** che lo staff conferma a mano: "Vi ricontattiamo a breve".
 - In entrambi i casi il cliente riceve subito un messaggio di riscontro (WhatsApp / SMS / email secondo la configurazione) e lo staff una notifica push.
 
+**Solo prenotazioni confermabili subito** (interruttore in Impostazioni › Prenotazioni › Prenotazioni web, spento di serie)
+- La pagina offre solo i turni in cui, per quel numero di persone, un tavolo è libero **adesso**; le sale oltre la soglia di occupazione non compaiono.
+- Dove non c'è posto propone l'altro turno dello stesso giorno o i primi giorni liberi dopo, e la prenotazione non diventa mai una richiesta da confermare: allo staff non arriva più niente da approvare.
+- Due clienti che prenotano l'ultimo tavolo nello stesso istante non lo prendono entrambi: il primo è confermato, il secondo riceve le alternative.
+- Le prenotazioni con caparra restano in attesa del pagamento, ma solo dove un tavolo c'è.
+- Il CRM conta la domanda che il web non ha potuto prendere (giorno, turno, numero di persone), per capire se servono più tavoli per i gruppi.
+
 **Caparra automatica**
 - Sopra una soglia di coperti configurabile (default 9), la pagina mostra in tempo reale l'importo della caparra (default €10 a persona) e le condizioni (si scala dal conto, rimborso integrale se si annulla con almeno 24 ore di anticipo — caparra confirmatoria art. 1385 c.c.).
 - Al termine il cliente riceve il **link di pagamento** (Revolut o SumUp): finché la caparra non è pagata il tavolo non è garantito. I link non pagati **scadono da soli** dopo un numero di ore configurabile.
@@ -943,6 +950,7 @@ La **ricerca** sta accanto alle schede (sopra, sul telefono) e resta visibile me
 
 | Data | Sezione | Modifica |
 |---|---|---|
+| 2026-10-11 | Prenotazione online | **Prenotazioni web senza nulla da confermare.** Nuovo interruttore «Solo prenotazioni confermabili subito» in Impostazioni › Prenotazioni › Prenotazioni web: dal sito si prenota solo dove un tavolo è libero adesso, la prenotazione si conferma da sola e, dove non c'è posto, al cliente si propongono l'altro turno o un altro giorno. Corretto anche il calendario della pagina /prenota, che non mostrava più i pallini dei giorni liberi, quasi pieni e chiusi. |
 | 2026-10-11 | Messaggi: WhatsApp e SMS, Prenotazioni | **WhatsApp in testata.** Accanto al telefono di Sofia e al globo del web c'è l'icona WhatsApp, quando il numero è collegato: la «a» dice che l'agente prenota da solo, la «m» che le prenotazioni in chat le fa lo staff. Si cambia in Impostazioni › WhatsApp › Agente automatico. |
 | 2026-10-11 | Impostazioni | **Impostazioni a schede, card su due colonne.** In cima sette schede (Profilo, Locale, Prenotazioni, Cassa, Comunicazioni, AI, Amministrazione) con la ricerca accanto, che continua a cercare in tutte. Ogni blocco ha una riga che dice a cosa serve; le card stanno su due colonne sullo schermo largo, con l'interruttore a destra, la rotella per aprire le regolazioni e l'icona verde quando la funzione è accesa. Anche Attività programmate e Promemoria sono card che si aprono, e da chiuse dicono quante voci sono accese. |
 | 2026-10-11 | Prenotazioni, Amministrazione | **Chi ha fatto cosa, senza cercare.** Il log attività ora si legge come frasi, con i nomi delle persone e dei tavoli («Roberto Donato ha unito i tavoli 26 + 27»), il prima e il dopo delle modifiche e i periodi Oggi / Ieri / 7 giorni. Cercando un cliente escono anche le unioni dei suoi tavoli, e nella scheda prenotazione c'è il nuovo passo **Cronologia**: dalla creazione all'ultimo spostamento, chi ha fatto cosa e quando. |
