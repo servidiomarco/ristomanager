@@ -35,6 +35,7 @@ const CHANNEL_LABELS: Record<string, string> = {
   WHATSAPP: 'WhatsApp',
   VOICE: 'Sofia (telefono)',
   GOOGLE: 'Pagina di prenotazione',
+  WEB: 'Pagina di prenotazione',
 };
 const METHOD_LABELS: Record<string, string> = {
   CONTANTI: 'Contanti', POS_FISICO: 'Pos', SATISPAY: 'Satispay', BUONO_PASTO: 'Buoni pasto',

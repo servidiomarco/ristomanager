@@ -50,7 +50,8 @@
   "src": {
     "MANUAL": "Entered by the staff",
     "VOICE": "Sofia (phone)",
-    "GOOGLE": "Booking page"
+    "GOOGLE": "Booking page",
+    "WEB": "Booking page"
   },
   "met": {
     "CONTANTI": "Cash",

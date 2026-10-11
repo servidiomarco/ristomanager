@@ -50,7 +50,8 @@
   "src": {
     "MANUAL": "Inserite dallo staff",
     "VOICE": "Sofia (telefono)",
-    "GOOGLE": "Pagina di prenotazione"
+    "GOOGLE": "Pagina di prenotazione",
+    "WEB": "Pagina di prenotazione"
   },
   "met": {
     "CONTANTI": "Contanti",

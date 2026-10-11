@@ -13,8 +13,9 @@ import { BillSheet } from './pagamenti/BillSheet';
 import { BillFigures, billStateLabel } from './prenotazione/BillFigures';
 import { PaymentRequestRow } from './prenotazione/PaymentRequestRow';
 import { MessaggiPanel } from './prenotazione/MessaggiPanel';
+import { ReservationHistory } from './registro/LogList';
 import { Reservation, PaymentStatus, BanquetMenu, Table, TableStatus, Shift, Room, TableShape, ArrivalStatus, ReservationStatus, ReservationSource, TableMerge, TableHiddenOverride, RoomClosedOverride, Customer, PaymentRequest, TableBillWithSplits, TableBill, NoteSelection, TableAssignmentSuggestion } from '../types';
-import { Banknote, Calendar, CreditCard, Clock, AlertCircle, Plus, Users, X, Trash2, Edit2, Wand2, Sun, Moon, Sunset, MapPin, ListFilter, Map as MapIcon, List, MessageCircle, Mail, Armchair, BellRing, CheckSquare, Square, UserCheck, UserX, Combine, Scissors, Check, CheckCheck, ChevronDown, ChevronLeft, ChevronRight, AlertTriangle, AlertOctagon, StickyNote, Mic, Loader2, Info, RotateCcw, Printer, Eye, EyeOff, BookUser, BookOpen, MoreHorizontal, Ban, Globe, Phone, Send, Star, Copy, ExternalLink, SlidersHorizontal, DoorClosed, CornerDownLeft, ArrowDownLeft, ArrowUpRight, Reply, Receipt, QrCode, Maximize2, Minimize2 } from 'lucide-react';
+import { Banknote, Calendar, CreditCard, Clock, AlertCircle, Plus, Users, X, Trash2, Edit2, Wand2, Sun, Moon, Sunset, MapPin, ListFilter, Map as MapIcon, List, MessageCircle, Mail, Armchair, BellRing, CheckSquare, Square, UserCheck, UserX, Combine, Scissors, Check, CheckCheck, ChevronDown, ChevronLeft, ChevronRight, AlertTriangle, AlertOctagon, StickyNote, Mic, Loader2, Info, RotateCcw, Printer, Eye, EyeOff, BookUser, BookOpen, MoreHorizontal, Ban, Globe, Phone, Send, Star, Copy, ExternalLink, SlidersHorizontal, DoorClosed, CornerDownLeft, ArrowDownLeft, ArrowUpRight, Reply, Receipt, QrCode, Maximize2, Minimize2, History } from 'lucide-react';
 import { QRCodeSVG } from 'qrcode.react';
 import { sendWhatsAppConfirmation, sendEmailConfirmation, sendCustomEmail, getTableMerges, getTableHidden, createTableHidden, deleteTableHidden, getRoomClosed, getCustomers, getReservationNotePresets, getReservationAllergenPresets, getPaymentRequests, createPaymentRequest, revokePaymentRequest, getReservationMessages, sendReservationReminder, createReservationGuestLink, OutboundMessage, getLegalSettings, getFeatureFlags, getOpeningHours, OpeningHoursRow, getActivePaymentProvider, getChannelSettings, RoomOccupancyCap, getTableAssignmentSuggestions, confirmTableAssignmentSuggestion, dismissTableAssignmentSuggestion } from '../services/apiService';
 import { billsApiService, printBill } from '../services/billsApiService';
@@ -51,6 +52,7 @@ import { BookingChannelsBar } from './BookingChannelsBar';
 import { ConfirmDeleteModal } from './ConfirmDeleteModal';
 import { DateNavigator } from './DateNavigator';
 import { useAuth } from '../contexts/AuthContext';
+import { isWebSource } from '../utils/reservationSource';
 import { moneySymbol } from '../utils/displayMoney';
 import { money } from '../utils/displayMoney';
 
@@ -126,7 +128,12 @@ const RESERVATION_STEPS = [
   { key: 'details', label: 'Dettagli', icon: Calendar },
   { key: 'payments', label: 'Pagamenti', icon: CreditCard },
   { key: 'messages', label: 'Comunicazione', icon: MessageCircle },
+  // Solo per chi vede il registro (logs:view): chi ha fatto cosa su questa
+  // prenotazione, unioni dei tavoli comprese. Resta ultimo, così gli indici
+  // dei primi tre non cambiano per chi non lo vede.
+  { key: 'history', label: 'Cronologia', icon: History },
 ] as const;
+const HISTORY_STEP = 3;
 
 // Sezione conto-al-tavolo nel modal prenotazione. Interruttore lato client
 // sopra al feature flag backend `pay_at_table_enabled`: con entrambi attivi
@@ -201,7 +208,7 @@ const renderChannelIcon = (res: Reservation, tv: (k: string) => string): React.R
       </span>
     );
   }
-  if (source === ReservationSource.GOOGLE) {
+  if (isWebSource(source)) {
     return (
       <span className={ATTR_BADGE} title={tv('filters.channelWeb')} aria-label={tv('channel.web')}>
         <Globe className="h-3.5 w-3.5" />
@@ -628,15 +635,18 @@ export const ReservationList: React.FC<ReservationListProps> = ({
   // Namespace della vista: caricata alla prima apertura di Prenotazioni.
   const { t: tv } = useTranslation('prenotazioni', { useSuspense: false });
 
-  /* I tre passi del modal si traducono tutti insieme: la costante resta
-     l'elenco (chiave, icona, versione italiana) e il testo passa di qui. */
-  const reservationSteps = useMemo(() => RESERVATION_STEPS.map(p => ({
-    key: p.key,
-    label: tv(`step.${p.key}`, p.label),
-    icon: p.icon,
-  })), [tv]);
   const stateLabel = useReservationStateLabel();
   const { hasPermission, hasFeature } = useAuth();
+  const canViewHistory = hasPermission('logs:view');
+  /* I passi del modal si traducono tutti insieme: la costante resta
+     l'elenco (chiave, icona, versione italiana) e il testo passa di qui. */
+  const reservationSteps = useMemo(() => RESERVATION_STEPS
+    .filter(p => p.key !== 'history' || canViewHistory)
+    .map(p => ({
+      key: p.key,
+      label: tv(`step.${p.key}`, p.label),
+      icon: p.icon,
+    })), [tv, canViewHistory]);
   const canViewBanquetPrice = hasPermission('banquet:view_price');
   // Tavoli aperti nella cassa Passepartout, per la mappa di oggi.
   const apertiInCassa = useTavoliApertiInCassa(hasFeature('passepartout'));
@@ -1671,8 +1681,11 @@ export const ReservationList: React.FC<ReservationListProps> = ({
       const matchesAllergens = !filterHasAllergens || (typeof r.notes === 'string' && /(Allergie|Intolleranze):/i.test(r.notes));
       const matchesNotes = !filterHasNotes || (typeof r.notes === 'string' && r.notes.trim().length > 0);
       const matchesNoTable = !filterNoTable || !r.table_id;
+      // Il filtro «Web» tiene la chiave storica GOOGLE e prende anche WEB.
       const matchesSource = filterSource === 'ALL'
         ? true
+        : filterSource === ReservationSource.GOOGLE
+        ? isWebSource(r.source)
         : (r.source ?? ReservationSource.MANUAL) === filterSource;
       const trimmedSearch = searchTerm.trim().toLowerCase();
       let matchesSearch = true;
@@ -4937,8 +4950,8 @@ export const ReservationList: React.FC<ReservationListProps> = ({
               {isEditing && (
                 <button
                   type="button"
-                  onClick={() => setFormStep(s => Math.min(RESERVATION_STEPS.length - 1, s + 1))}
-                  disabled={formStep === RESERVATION_STEPS.length - 1}
+                  onClick={() => setFormStep(s => Math.min(reservationSteps.length - 1, s + 1))}
+                  disabled={formStep === reservationSteps.length - 1}
                   aria-label={tv('modal.nextSection')}
                   title={tv('modal.nextSection')}
                   className={dsStepArrow}
@@ -6458,6 +6471,14 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                       </div>
                     )}
                     </section>
+
+                    {/* Step 4 — Cronologia. Montata solo quando la si apre:
+                        la query parte allora, non a ogni apertura del form. */}
+                    {isEditing && formData.id && canViewHistory && formStep === HISTORY_STEP && (
+                      <section className="px-4 pb-4 pt-2 sm:px-6 sm:pb-6">
+                        <ReservationHistory reservationId={formData.id} />
+                      </section>
+                    )}
                 </div>
 
         </ModalShell>
