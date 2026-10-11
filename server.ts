@@ -43,6 +43,13 @@ import { startSalaNodeReplica, getSalaNodeLocalStatus, isCloudUplinkDown } from 
 import { salaNodeAccessPolicy, startSalaNodeAccess, getSalaNodeTenantId } from './services/salaNodeAccess.js';
 import { startSalaNodeConfigSync, kickConfigSync } from './services/salaNodeConfigSync.js';
 import { VOICE_CHANNEL, WHATSAPP_CHANNEL, type ToolOutcome } from './services/bookingTools.js';
+import {
+    TAKEAWAY_CAPACITY_KEY, TAKEAWAY_CAPACITY_DEFAULT, TAKEAWAY_PREP_MINUTES_KEY, TAKEAWAY_PREP_MINUTES_DEFAULT,
+    TAKEAWAY_STOP_DATE_KEY, TAKEAWAY_DATE_MODE_KEY, TAKEAWAY_DATE_MODE_DEFAULT, TAKEAWAY_STATUSES,
+    getTakeawaySettings, loadTakeawayView, buildTakeawayItems, validateTakeawaySlot,
+    normalizeDishText, loadVoiceCatalogue, matchVoiceDish, takeawayDateReadback, filterOrderableSlots,
+    createTakeawayOrder, allocateTakeawayDailyNumber,
+} from './services/takeaway.js';
 import { TENANT_FEATURES, getTenantFeatures, isFeatureEnabledForTenant, invalidateTenantFeaturesCache, clearTenantFeaturesCache, type TenantFeature } from './services/entitlements.js';
 import { clearTenantLocaleCache, getTenantLocale, sqlTimeZone } from './services/tenantLocale.js';
 import { normalizePhoneE164 } from './utils/phone.js';
@@ -50,7 +57,11 @@ import {
     configureWhatsApp, isWhatsAppReady, isSmsReady, getSender, backendBaseUrl,
     sendWhatsAppText, sendTwilioSms, logOutboundMessage, logInboundMessage,
     handleTwilioWhatsAppInbound, validateTwilioSignature, pickTemplate, twilioMediaAuthHeader,
+    handleMetaWebhook, handleMetaWebhookVerify,
     createWhatsAppRouter, isWindowOpen, configureReservationButtons, publicWhatsAppLink, getRemindersPolicy,
+    configureWhatsAppMedia, fetchInboundMedia, MediaFetchError, agentMessageBody, photosForAgent,
+    notifyTakeawayReady, getTakeawayPolicy,
+    recordMarketingConsent, registerStopHook, configureCampaigns, campaignsTick,
     type OutboundConfirmationResult, type WhatsAppTemplateOpts,
 } from './services/whatsapp/index.js';
 import { AI_KEY_INVALID, AI_KEY_INVALID_MESSAGE, isAiKeyInvalid } from './utils/aiErrors.js';
@@ -953,16 +964,26 @@ async function handleTwilioWhatsAppStatus(tenantId: number, req: express.Request
     console.log(`[Twilio] Status: ${MessageSid} → ${MessageStatus} (to ${To})${errSuffix}`);
     res.status(200).send();
 
+    if (!MessageSid || !MessageStatus) return;
+    await persistDeliveryStatus(
+        tenantId, String(MessageSid), String(MessageStatus),
+        ErrorCode ? String(ErrorCode) : null,
+        ErrorCode ? `${ErrorCode}${ErrorMessage ? ` (${ErrorMessage})` : ''}` : null
+    );
+}
+
+/**
+ * Lo stato di consegna di un messaggio, da Twilio o da Meta (services/
+ * whatsapp/webhooks.ts): la conferma della prenotazione, la riga
+ * dell'inbox, il ripiego su SMS per gli errori WhatsApp definitivi.
+ */
+async function persistDeliveryStatus(tenantId: number, MessageSid: string, rawStatus: string, ErrorCode: string | null, errText: string | null): Promise<void> {
     // Persist the delivery status on the reservation, if we tracked this SID.
     // Twilio delivers callbacks out of order; only advance the status when the
     // new state is meaningful (delivered/failed/undelivered), and only stamp
     // confirmation_delivered_at once, on the first 'delivered' event.
-    if (!MessageSid || !MessageStatus) return;
     try {
-        const status = String(MessageStatus).toLowerCase();
-        const errText = ErrorCode
-            ? `${ErrorCode}${ErrorMessage ? ` (${ErrorMessage})` : ''}`
-            : null;
+        const status = String(rawStatus).toLowerCase();
         const updated = await queryWithRetry(
             `UPDATE reservations
              SET confirmation_status = $1::text,
@@ -1032,6 +1053,13 @@ async function handleTwilioWhatsAppStatus(tenantId: number, req: express.Request
         console.warn('[Twilio] status persist failed:', err?.message || err);
     }
 }
+
+// Il numero WhatsApp di un locale sull'API Cloud di Meta (Fase 12a): un solo
+// indirizzo per tutti, il ristorante viene da phone_number_id. Il corpo JSON
+// arriva già letto, col grezzo in req.rawBody per la firma.
+app.get('/webhook/meta-whatsapp', (req, res) => handleMetaWebhookVerify(req, res));
+// rls-bypass: webhook di Meta senza JWT; ogni messaggio gira poi nel contesto del tenant del numero
+app.post('/webhook/meta-whatsapp', (req, res) => { void handleMetaWebhook(req, res); });
 
 // Alias tenant 1 finché i provider non sono riconfigurati sui path con token.
 app.post('/webhook/twilio-whatsapp-status', twilioUrlEncoded, (req, res) => { void runWithTenantContext(PUBLIC_TENANT_ID, () => handleTwilioWhatsAppStatus(PUBLIC_TENANT_ID, req, res)); });
@@ -13399,7 +13427,8 @@ app.get('/messages/conversations/:phoneDigits', authenticate, requirePermission(
             `SELECT * FROM (
                 SELECT id, provider, channel, direction, from_phone, to_phone, body,
                        status, provider_sid, reservation_id, sent_at, delivered_at,
-                       failed_at, read_at, error_code, error_message, media, kind
+                       failed_at, read_at, error_code, error_message, media, kind,
+                       transcript, transcript_status, transcript_language
                 FROM outbound_messages
                 WHERE tenant_id = $2
                   AND channel IN ('sms','whatsapp')
@@ -13455,31 +13484,23 @@ app.get('/messages/:id/media/:index', authenticate, requirePermission('reservati
             return res.end(file.bytes);
         }
 
-        // Solo host Twilio: l'url arriva dal webhook, ma un domani una riga
-        // manomessa non deve trasformare questo endpoint in un proxy aperto.
-        let host: string;
-        try { host = new URL(String(item.url)).host; } catch { return res.status(400).json({ error: 'URL non valido' }); }
-        if (!/(^|\.)twilio\.com$/.test(host)) {
-            return res.status(400).json({ error: 'Host non consentito' });
+        // Dal provider, con le credenziali del mittente del ristorante e solo
+        // dai suoi host (services/whatsapp/media/fetch.ts).
+        let file: { bytes: Buffer; contentType: string };
+        try {
+            file = await fetchInboundMedia(req.tenantId!, item);
+        } catch (err: any) {
+            if (err instanceof MediaFetchError) {
+                if (err.status === 502) console.warn(`[media] ${err.message} per il messaggio ${id}`);
+                const message = err.status === 400 ? 'Host non consentito' : err.status === 503 ? 'WhatsApp non collegato' : 'Allegato non recuperabile';
+                return res.status(err.status === 413 ? 502 : err.status).json({ error: message });
+            }
+            throw err;
         }
-
-        // Le credenziali sono quelle del mittente del ristorante: un
-        // allegato si scarica solo dall'account che l'ha ricevuto.
-        const sender = await getSender(req.tenantId!);
-        if (!sender) return res.status(503).json({ error: 'Twilio non configurato' });
-
-        const upstream = await fetch(String(item.url), {
-            headers: { Authorization: twilioMediaAuthHeader(sender) },
-        });
-        if (!upstream.ok || !upstream.body) {
-            console.warn(`[media] Twilio ha risposto ${upstream.status} per il messaggio ${id}`);
-            return res.status(502).json({ error: 'Allegato non recuperabile' });
-        }
-        res.setHeader('Content-Type', upstream.headers.get('content-type') || item.content_type || 'application/octet-stream');
-        const len = upstream.headers.get('content-length');
-        if (len) res.setHeader('Content-Length', len);
+        res.setHeader('Content-Type', file.contentType);
+        res.setHeader('Content-Length', String(file.bytes.length));
         res.setHeader('Cache-Control', 'private, max-age=86400');
-        const buf = Buffer.from(await upstream.arrayBuffer());
+        const buf = file.bytes;
         res.end(buf);
     } catch (err: any) {
         console.error('GET /messages/:id/media error:', err);
@@ -14337,7 +14358,7 @@ const proposalRow = (r: any) => ({
 async function buildAgentContext(tenantId: number, key: string): Promise<{ ctx: AgentContext; reservationId: number | null } | null> {
     const [msgs, kb, soglia] = await Promise.all([
         queryWithRetry(
-            `SELECT direction, body, from_phone, to_phone, profile_name
+            `SELECT id, direction, body, from_phone, to_phone, profile_name, media, transcript
                FROM outbound_messages
               WHERE tenant_id = $2
                 AND channel IN ('sms','whatsapp')
@@ -14347,8 +14368,16 @@ async function buildAgentContext(tenantId: number, key: string): Promise<{ ctx: 
         queryWithRetry(`SELECT title, content FROM ai_knowledge_entries WHERE tenant_id = $1 AND is_active ORDER BY sort_order, id`, [tenantId]),
         getVoiceLargeGroupThreshold(tenantId),
     ]);
-    const messages = msgs.rows.reverse();
-    if (messages.length === 0) return null;
+    const rows = msgs.rows.reverse();
+    if (rows.length === 0) return null;
+    // Vocali trascritti e foto (Impostazioni › WhatsApp › Vocali e foto):
+    // il testo dice cosa c'era, le foto del turno del cliente si vedono.
+    const photos = await photosForAgent(tenantId, rows);
+    const messages = rows.map((m: any) => ({
+        ...m,
+        body: agentMessageBody(m),
+        ...(photos.has(m.id) ? { images: photos.get(m.id) } : {}),
+    }));
 
     // Stesso scoping della gemella in /messages/suggest-reply: tenant
     // sulla prenotazione e sui JOIN, o l'agente ragionerebbe sulla
@@ -14387,8 +14416,19 @@ async function buildAgentContext(tenantId: number, key: string): Promise<{ ctx: 
         restaurantName: (await publicBusinessIdentity(tenantId)).name,
         depositPolicy: await getAutoDepositPolicy(tenantId),
         timezone: (await getTenantLocale(tenantId)).timezone,
+        takeaway: await agentTakeawayContext(tenantId),
     };
     return { ctx, reservationId: resv.rows[0]?.id ?? null };
+}
+
+/** L'asporto in chat per l'agente: add-on asporto e «Asporto in chat»
+ *  acceso; il link di /ordina solo se la pagina è aperta. */
+async function agentTakeawayContext(tenantId: number): Promise<{ orderPageUrl: string | null } | null> {
+    if (!(await isFeatureEnabledForTenant(tenantId, 'takeaway'))) return null;
+    if (!(await getTakeawayPolicy(tenantId)).enabled) return null;
+    if (!(await getFeatureFlag(tenantId, 'takeaway_online_enabled', false))) return { orderPageUrl: null };
+    const slug: string | null = (await queryWithRetry('SELECT slug FROM tenants WHERE id = $1', [tenantId])).rows[0]?.slug ?? null;
+    return { orderPageUrl: slug ? `${publicBaseUrl()}/ordina/${slug}` : null };
 }
 
 /** Salva la proposta dell'agente. Una per volta e per conversazione: quelle
@@ -14475,14 +14515,15 @@ app.post('/messages/agent/extract-booking', authenticate, requirePermission('res
         if (!key) return res.status(400).json({ error: 'phone_digits mancante' });
 
         const msgs = await queryWithRetry(
-            `SELECT direction, body, from_phone, to_phone
+            `SELECT direction, body, from_phone, to_phone, media, transcript
                FROM outbound_messages
               WHERE tenant_id = $2
                 AND channel IN ('sms','whatsapp')
                 AND (to_phone_digits = ANY($1::text[]) OR from_phone_digits = ANY($1::text[]))
                 AND (kind IS NULL OR kind <> ALL($3::text[]))
               ORDER BY sent_at DESC LIMIT 15`, [phoneDigitsVariants(key), req.tenantId!, INBOX_HIDDEN_KINDS]);
-        const messages = msgs.rows.reverse();
+        // Un vocale trascritto vale come testo anche per precompilare il modulo.
+        const messages = msgs.rows.reverse().map((m: any) => ({ ...m, body: agentMessageBody(m) }));
         if (messages.length === 0) return res.status(404).json({ error: 'Conversazione vuota' });
 
         const inbound = messages.find((m: any) => m.direction === 'inbound');
@@ -14569,6 +14610,19 @@ async function loadAgentCatalogs(tenantId: number): Promise<{
 async function sendProposalFollowup(tenantId: number, tool: string, args: Record<string, any>, body: Record<string, any>): Promise<boolean> {
     try {
         const phone = String(args.phone || '');
+        // L'ordine d'asporto confermato dallo staff: piatti, ritiro, totale e
+        // il numero da dire al banco.
+        if (tool === 'create_takeaway_order') {
+            if (!phone || body?.success !== true) return false;
+            if (!(await isWhatsAppReady(tenantId)) || !(await isWindowOpen(tenantId, phone))) return false;
+            const english = isEnglishGuest(detectLanguageFromPhonePrefix(phone));
+            const numero = body.daily_number != null ? (english ? ` Your order number is ${body.daily_number}.` : ` Il tuo numero d'ordine è il ${body.daily_number}.`) : '';
+            const text = english
+                ? `Done! ${body.items}, to collect ${body.pickup}. Total ${body.total}.${numero}`
+                : `Fatto! ${body.items}, da ritirare ${body.pickup}. Totale ${body.total}.${numero}`;
+            await sendWhatsAppText(tenantId, phone, text, null, undefined, undefined, 'agent_followup');
+            return true;
+        }
         const reservationId = Number(body?.reservation_id);
         if (!phone || !Number.isInteger(reservationId)) return false;
         if (!(await isWhatsAppReady(tenantId)) || !(await isWindowOpen(tenantId, phone))) return false;
@@ -14654,7 +14708,15 @@ app.post('/messages/agent/proposals/:id/confirm', authenticate, requirePermissio
         // letta e approvata — vale come chiarimento per i controlli che
         // farebbero una domanda al cliente (nome diverso dalla rubrica,
         // prenotazione già in agenda): vedi tools/booking.ts.
-        const phone = String(args.phone || `+${prop.phone_digits}`);
+        // Il numero da cui il cliente scrive: phone_digits è la chiave della
+        // conversazione (ultime cifre), e «+» davanti non fa un numero vero.
+        const lastFrom = args.phone ? null : (await queryWithRetry(
+            `SELECT from_phone FROM outbound_messages
+              WHERE tenant_id = $1 AND direction = 'inbound' AND from_phone_digits = ANY($2::text[])
+              ORDER BY sent_at DESC LIMIT 1`,
+            [req.tenantId!, phoneDigitsVariants(prop.phone_digits)]
+        )).rows[0]?.from_phone;
+        const phone = String(args.phone || lastFrom || `+${prop.phone_digits}`);
         let body: Record<string, any>;
         try {
             body = await tool.execute(args, { tenantId: req.tenantId!, phone, phoneDigits: prop.phone_digits, approvedByStaff: true });
@@ -14670,7 +14732,7 @@ app.post('/messages/agent/proposals/:id/confirm', authenticate, requirePermissio
               WHERE id = $1`,
             [id, riuscito ? 'DONE' : 'FAILED', JSON.stringify(outcome.body), req.user?.userId ?? null]);
 
-        const followupSent = riuscito ? await sendProposalFollowup(req.tenantId!, prop.tool, args, outcome.body) : false;
+        const followupSent = riuscito ? await sendProposalFollowup(req.tenantId!, prop.tool, { ...args, phone }, outcome.body) : false;
         res.json({ ok: riuscito, tool: prop.tool, result: outcome.body, followup_sent: followupSent });
     } catch (err: any) {
         console.error('POST /messages/agent/proposals/:id/confirm error:', err);
@@ -18243,6 +18305,7 @@ const SCHEDULER_LOCK_HEALTH_RETENTION = 761009;
 const SCHEDULER_LOCK_HACCP_SENSORS = 761010;
 const SCHEDULER_LOCK_BOOKING_REMINDERS = 761011;
 const SCHEDULER_LOCK_WHATSAPP_AGENT = 761012;
+const SCHEDULER_LOCK_WHATSAPP_CAMPAIGNS = 761013;
 
 // Il lock advisory è di SESSIONE: va preso su un client dedicato tenuto per
 // tutta la durata del tick (sul pool condiviso un'altra query potrebbe
@@ -19320,6 +19383,16 @@ const startWhatsAppAgentScheduler = () => {
     setInterval(lockedTick, tickMs);
 };
 
+// Le campagne WhatsApp (services/whatsapp/campaigns/send.ts): un gruppo di
+// messaggi al minuto per campagna, nella fascia oraria del locale. Il lock
+// evita che due repliche mandino allo stesso destinatario.
+const startWhatsAppCampaignsScheduler = () => {
+    const tickMs = Number(process.env.WA_CAMPAIGN_TICK_MS) || 60_000;
+    const lockedTick = () => runSchedulerTickWithLock(SCHEDULER_LOCK_WHATSAPP_CAMPAIGNS, 'whatsapp-campaigns', () => campaignsTick())
+        .catch((err: any) => console.error('[whatsapp-campaigns] lock wrapper failed:', err?.message || err));
+    setInterval(lockedTick, tickMs);
+};
+
 // ============================================
 // CUSTOMERS (rubrica) - require authentication
 // ============================================
@@ -19448,21 +19521,11 @@ const setCustomerMarketingConsent = async (
     phone: string | null | undefined,
     consent: boolean | null | undefined
 ): Promise<void> => {
-    try {
-        if (consent === null || consent === undefined) return;
-        if (!phone || !String(phone).trim()) return;
-        const phoneDigits = String(phone).replace(/\D/g, '');
-        if (!phoneDigits) return;
-        await queryWithRetry(
-            `UPDATE customers
-             SET consent_marketing = $2, consent_marketing_updated_at = CURRENT_TIMESTAMP
-             WHERE tenant_id = $3
-               AND regexp_replace(COALESCE(phone, ''), '\\D', '', 'g') = $1`,
-            [phoneDigits, consent, tenantId]
-        );
-    } catch (err) {
-        console.error('setCustomerMarketingConsent failed:', err);
-    }
+    // Dal 11/10/2026 passa dal registro dei consensi (services/whatsapp/
+    // campaigns/consent.ts): stessa scheda, più la traccia di chi e quando.
+    if (consent === null || consent === undefined) return;
+    if (!phone || !String(phone).trim()) return;
+    await recordMarketingConsent(tenantId, phone, consent, 'staff');
 };
 
 // Keep the rubrica name in sync when a reservation is renamed. Looks up the
@@ -32054,167 +32117,6 @@ app.get('/reviews/requests', authenticate, requireFeature('reviews'), requirePer
 // posti. La comanda in cucina non nasce qui: arriva in una PR dedicata via
 // kitchen_order_id. Tutte le route esigono l'entitlement 'takeaway'.
 
-const TAKEAWAY_CAPACITY_KEY = 'takeaway_capacity_per_slot';
-const TAKEAWAY_CAPACITY_DEFAULT = 4;
-const TAKEAWAY_PREP_MINUTES_KEY = 'takeaway_prep_minutes';
-const TAKEAWAY_PREP_MINUTES_DEFAULT = 20;
-// text_value = data ISO: lo «stop asporto» vale per UNA data (di solito
-// stasera) e decade da solo — niente interruttore da ricordarsi di riaprire.
-const TAKEAWAY_STOP_DATE_KEY = 'takeaway_stop_date';
-// text_value = 'global' | 'own'. Se la board segue la data dell'app, il
-// giorno si cambia una volta sola dalla testata e vale per prenotazioni,
-// sala e asporto insieme; 'own' tiene il giorno del banco per conto suo,
-// com'era prima che il navigatore salisse in testata.
-const TAKEAWAY_DATE_MODE_KEY = 'takeaway_date_mode';
-const TAKEAWAY_DATE_MODE_DEFAULT: 'global' | 'own' = 'own';
-
-const TAKEAWAY_STATUSES = ['REQUESTED', 'CONFIRMED', 'IN_PREPARATION', 'READY', 'PICKED_UP', 'NO_SHOW', 'CANCELLED'] as const;
-
-async function getTakeawaySettings(tenantId: number): Promise<{ capacityPerSlot: number; prepMinutes: number; stopDate: string | null; dateMode: 'global' | 'own' }> {
-    try {
-        const result = await queryWithRetry(
-            'SELECT key, int_value, text_value FROM app_settings WHERE tenant_id = $1 AND key = ANY($2)',
-            [tenantId, [TAKEAWAY_CAPACITY_KEY, TAKEAWAY_PREP_MINUTES_KEY, TAKEAWAY_STOP_DATE_KEY, TAKEAWAY_DATE_MODE_KEY]]
-        );
-        const byKey = new Map<string, any>(result.rows.map((r: any) => [r.key, r]));
-        const intOr = (key: string, fallback: number) => {
-            const n = Number(byKey.get(key)?.int_value);
-            return Number.isFinite(n) && n > 0 ? Math.trunc(n) : fallback;
-        };
-        const stopRaw = byKey.get(TAKEAWAY_STOP_DATE_KEY)?.text_value;
-        const modeRaw = byKey.get(TAKEAWAY_DATE_MODE_KEY)?.text_value;
-        return {
-            capacityPerSlot: intOr(TAKEAWAY_CAPACITY_KEY, TAKEAWAY_CAPACITY_DEFAULT),
-            prepMinutes: intOr(TAKEAWAY_PREP_MINUTES_KEY, TAKEAWAY_PREP_MINUTES_DEFAULT),
-            stopDate: typeof stopRaw === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(stopRaw) ? stopRaw : null,
-            dateMode: modeRaw === 'global' || modeRaw === 'own' ? modeRaw : TAKEAWAY_DATE_MODE_DEFAULT,
-        };
-    } catch (err) {
-        console.error('[takeaway] lettura impostazioni fallita, uso i default:', (err as any)?.message || err);
-        return { capacityPerSlot: TAKEAWAY_CAPACITY_DEFAULT, prepMinutes: TAKEAWAY_PREP_MINUTES_DEFAULT, stopDate: null, dateMode: TAKEAWAY_DATE_MODE_DEFAULT };
-    }
-}
-
-// Uno slot di ritiro è valido se sta nella griglia di apertura di uno dei
-// due turni; il turno dell'ordine deriva da qui, mai dal client.
-async function resolveTakeawayShift(tenantId: number, date: string, time: string): Promise<'LUNCH' | 'DINNER' | null> {
-    const [lunch, dinner] = await Promise.all([
-        getAvailableSlots(tenantId, date, Shift.LUNCH),
-        getAvailableSlots(tenantId, date, Shift.DINNER),
-    ]);
-    if (lunch.includes(time)) return 'LUNCH';
-    if (dinner.includes(time)) return 'DINNER';
-    return null;
-}
-
-async function countTakeawayInSlot(tenantId: number, date: string, time: string, excludeId?: number): Promise<number> {
-    const result = await queryWithRetry(
-        `SELECT COUNT(*)::int AS n FROM takeaway_orders
-         WHERE tenant_id = $1 AND pickup_date = $2 AND pickup_time = $3
-           AND status NOT IN ('CANCELLED', 'NO_SHOW') AND id <> COALESCE($4, -1)`,
-        [tenantId, date, time, excludeId ?? null]
-    );
-    return result.rows[0]?.n ?? 0;
-}
-
-async function loadTakeawayView(tenantId: number, orderId: number): Promise<any | null> {
-    const [order, items] = await Promise.all([
-        // bill_id in vista: la board mostra «conto in cassa» senza
-        // interrogare /bills/open.
-        queryWithRetry(
-            `SELECT t.*, o.table_bill_id AS bill_id FROM takeaway_orders t
-             LEFT JOIN orders o ON o.id = t.kitchen_order_id AND o.tenant_id = t.tenant_id
-             WHERE t.id = $1 AND t.tenant_id = $2`,
-            [orderId, tenantId]
-        ),
-        queryWithRetry(
-            'SELECT id, takeaway_order_id, dish_id, name_snapshot, unit_price_cents, qty, note FROM takeaway_order_items WHERE takeaway_order_id = $1 AND tenant_id = $2 ORDER BY id',
-            [orderId, tenantId]
-        ),
-    ]);
-    if (order.rows.length === 0) return null;
-    const rows = items.rows;
-    const total = rows.reduce((sum: number, r: any) => sum + Number(r.unit_price_cents) * Number(r.qty), 0);
-    return { ...order.rows[0], items: rows, total_cents: total };
-}
-
-// Numero d'ordine del giorno («#12»): progressivo per (tenant, data di
-// ritiro), assegnato DENTRO la transazione di creazione e persistito — mai
-// derivato a video, così un annullamento non rinumera gli ordini già
-// comunicati ai clienti. L'advisory lock transazionale serializza le
-// assegnazioni concorrenti dello stesso giorno (due ordini web nello stesso
-// istante leggerebbero lo stesso MAX+1); l'indice unico parziale della
-// migration resta la rete di sicurezza. Il lock muore col COMMIT/ROLLBACK.
-async function allocateTakeawayDailyNumber(client: { query: (text: string, params?: any[]) => Promise<{ rows: any[] }> }, tenantId: number, pickupDate: string): Promise<number> {
-    await client.query(
-        `SELECT pg_advisory_xact_lock(hashtextextended('takeaway_daily:' || $1 || ':' || $2, 0))`,
-        [String(tenantId), pickupDate]
-    );
-    const r = await client.query(
-        `SELECT COALESCE(MAX(daily_number), 0) + 1 AS n FROM takeaway_orders WHERE tenant_id = $1 AND pickup_date = $2`,
-        [tenantId, pickupDate]
-    );
-    return Number(r.rows[0].n);
-}
-
-// Valida le righe e congela nome/prezzo dal menu. Prezzo base del piatto:
-// il listino dedicato all'asporto arriva con la scelta menu-asporto, non qui.
-async function buildTakeawayItems(tenantId: number, raw: unknown): Promise<{ error?: string; items?: { dish_id: number; name: string; cents: number; qty: number; note: string | null }[] }> {
-    if (!Array.isArray(raw) || raw.length === 0) return { error: 'Serve almeno una riga' };
-    if (raw.length > 50) return { error: 'Troppe righe (max 50)' };
-    const parsed: { dish_id: number; qty: number; note: string | null }[] = [];
-    for (const r of raw) {
-        const dishId = Math.trunc(Number((r as any)?.dish_id));
-        const qty = Math.trunc(Number((r as any)?.qty ?? 1));
-        if (!Number.isFinite(dishId) || dishId <= 0) return { error: 'dish_id mancante o non valido' };
-        if (!Number.isFinite(qty) || qty < 1 || qty > 99) return { error: 'Quantità non valida (1-99)' };
-        const note = typeof (r as any)?.note === 'string' ? (r as any).note.trim().slice(0, 300) : '';
-        parsed.push({ dish_id: dishId, qty, note: note || null });
-    }
-    const dishIds = [...new Set(parsed.map(p => p.dish_id))];
-    const dishes = await queryWithRetry(
-        'SELECT id, name, price FROM dishes WHERE id = ANY($1::int[]) AND tenant_id = $2',
-        [dishIds, tenantId]
-    );
-    const byId = new Map<number, any>(dishes.rows.map((d: any) => [Number(d.id), d]));
-    const items = [];
-    for (const p of parsed) {
-        const dish = byId.get(p.dish_id);
-        if (!dish) return { error: `Piatto ${p.dish_id} inesistente` };
-        items.push({
-            dish_id: p.dish_id,
-            name: String(dish.name),
-            cents: Math.max(0, Math.round(Number(dish.price) * 100)),
-            qty: p.qty,
-            note: p.note,
-        });
-    }
-    return { items };
-}
-
-// Le route di scrittura ricontrollano slot, stop e capienza; `force: true`
-// scavalca stop e capienza (MAI la validità dello slot): chi prende
-// l'ordine al banco può decidere che uno in più ci sta, la pagina pubblica
-// delle fasi successive no.
-async function validateTakeawaySlot(
-    tenantId: number, date: string, time: string,
-    opts: { force: boolean; excludeId?: number }
-): Promise<{ error?: { status: number; body: any }; shift?: 'LUNCH' | 'DINNER' }> {
-    const shift = await resolveTakeawayShift(tenantId, date, time);
-    if (!shift) return { error: { status: 400, body: { error: 'invalid_slot', message: 'Orario fuori dalla griglia di apertura' } } };
-    const settings = await getTakeawaySettings(tenantId);
-    if (!opts.force) {
-        if (settings.stopDate === date) {
-            return { error: { status: 409, body: { error: 'takeaway_stopped', message: 'Asporto fermo per questa data' } } };
-        }
-        const booked = await countTakeawayInSlot(tenantId, date, time, opts.excludeId);
-        if (booked >= settings.capacityPerSlot) {
-            return { error: { status: 409, body: { error: 'slot_full', message: 'Slot al completo', booked, capacity: settings.capacityPerSlot } } };
-        }
-    }
-    return { shift };
-}
-
 // La disponibilità per la scelta dello slot: griglia dei due turni con
 // prenotato/capienza. È la fotografia per chi prende l'ordine, non un
 // lock: la POST ricontrolla comunque.
@@ -32684,67 +32586,6 @@ async function takeawayVoiceOpen(tenantId: number, res: express.Response): Promi
     return true;
 }
 
-// Normalizzazione per il match dei piatti dettati: minuscole, niente
-// accenti, solo lettere e cifre. «Spaghetti all'Amatriciana» ≈ «spaghetti
-// amatriciana».
-const normalizeDishText = (s: string): string =>
-    String(s ?? '')
-        .toLowerCase()
-        .normalize('NFD')
-        .replace(/\p{M}/gu, '')
-        .replace(/[^a-z0-9]+/g, ' ')
-        .trim();
-
-async function loadVoiceCatalogue(tenantId: number): Promise<{ id: number; name: string; norm: string; tokens: Set<string> }[]> {
-    const rs = await queryWithRetry(
-        `SELECT d.id, d.name
-         FROM dishes d
-         WHERE d.tenant_id = $1 AND d.is_active AND d.crm_enabled
-           AND COALESCE(d.sold_by_weight, false) = false
-           AND EXISTS (SELECT 1 FROM dish_menus dm JOIN menus m ON m.id = dm.menu_id
-                       WHERE dm.dish_id = d.id AND m.system_key = 'ALLA_CARTA')`,
-        [tenantId]
-    );
-    return rs.rows.map((d: any) => {
-        const norm = normalizeDishText(d.name);
-        return { id: Number(d.id), name: String(d.name), norm, tokens: new Set(norm.split(' ')) };
-    });
-}
-
-// Dal nome dettato al piatto del menu. Esatto → contenimento → tokens
-// tutti presenti; più candidati alla pari = ambiguo, si chiede al cliente
-// invece di tirare a indovinare la cena di qualcuno.
-function matchVoiceDish(catalogue: { id: number; name: string; norm: string; tokens: Set<string> }[], spoken: string):
-    { dish: { id: number; name: string } } | { ambiguous: string[] } | { suggestions: string[] } {
-    const norm = normalizeDishText(spoken);
-    if (!norm) return { suggestions: [] };
-    const exact = catalogue.filter(d => d.norm === norm);
-    if (exact.length === 1) return { dish: exact[0] };
-    if (exact.length > 1) return { ambiguous: exact.map(d => d.name) };
-    const contains = catalogue.filter(d => d.norm.includes(norm) || norm.includes(d.norm));
-    if (contains.length === 1) return { dish: contains[0] };
-    if (contains.length > 1) return { ambiguous: contains.slice(0, 3).map(d => d.name) };
-    const spokenTokens = norm.split(' ').filter(t => t.length > 2);
-    if (spokenTokens.length > 0) {
-        const tokenMatch = catalogue.filter(d => spokenTokens.every(t => d.tokens.has(t)));
-        if (tokenMatch.length === 1) return { dish: tokenMatch[0] };
-        if (tokenMatch.length > 1) return { ambiguous: tokenMatch.slice(0, 3).map(d => d.name) };
-    }
-    // Niente match: i più vicini per token condivisi, per il «forse intendevi».
-    const scored = catalogue
-        .map(d => ({ d, score: spokenTokens.filter(t => d.tokens.has(t)).length }))
-        .filter(x => x.score > 0)
-        .sort((a, b) => b.score - a.score)
-        .slice(0, 3)
-        .map(x => x.d.name);
-    return { suggestions: scored };
-}
-
-const takeawayDateReadback = (iso: string, language?: string | null): string =>
-    new Date(`${iso}T12:00:00`).toLocaleDateString(
-        isEnglishGuest(normalizeLanguageCode(language)) ? 'en-GB' : 'it-IT',
-        { weekday: 'long', day: 'numeric', month: 'long' });
-
 async function handleElevenLabsCheckTakeawaySlots(tenantId: number, req: express.Request, res: express.Response) {
     try {
         if (!authorizeElevenLabs(req, res)) return;
@@ -32890,24 +32731,9 @@ async function handleElevenLabsCreateTakeawayOrder(tenantId: number, req: expres
         const built = await buildTakeawayItems(tenantId, matched);
         if (built.error) return fail('invalid_items', built.error);
 
-        const orderId = await withTenant(tenantId, async client => {
-            const dailyNumber = await allocateTakeawayDailyNumber(client, tenantId, date);
-            const ins = await client.query(
-                `INSERT INTO takeaway_orders (tenant_id, customer_name, customer_phone, pickup_date, pickup_time, shift, status, channel, notes, daily_number)
-                 VALUES ($1, $2, $3, $4, $5, $6, 'CONFIRMED', 'VOICE', $7, $8) RETURNING id`,
-                [tenantId, name, phone, date, time, slot.shift, notes || null, dailyNumber]
-            );
-            const id = Number(ins.rows[0].id);
-            await outboxEnqueueInTx(client, tenantId, 'takeaway:created', `takeaway:${id}`,
-                { takeaway_order_id: id }, { actor: { channel: 'voice' } });
-            for (const item of built.items!) {
-                await client.query(
-                    `INSERT INTO takeaway_order_items (tenant_id, takeaway_order_id, dish_id, name_snapshot, unit_price_cents, qty, note)
-                     VALUES ($1, $2, $3, $4, $5, $6, $7)`,
-                    [tenantId, id, item.dish_id, item.name, item.cents, item.qty, item.note]
-                );
-            }
-            return id;
+        const orderId = await createTakeawayOrder(tenantId, {
+            name, phone, date, time, shift: slot.shift!, channel: 'VOICE', notes: notes || null,
+            items: built.items!, outbox: { actor: { channel: 'voice' } },
         });
 
         const view = await loadTakeawayView(tenantId, orderId);
@@ -32966,21 +32792,6 @@ app.post('/webhook/t/:tenantToken/elevenlabs/create-takeaway-order', async (req,
 async function isTakeawayOnline(tenantId: number): Promise<boolean> {
     if (!(await isFeatureEnabledForTenant(tenantId, 'takeaway'))) return false;
     return getFeatureFlag(tenantId, 'takeaway_online_enabled', false);
-}
-
-// Minuti da un orario 'HH:MM'; -1 su forma imprevista (slot scartato).
-const slotMinutes = (time: string): number => {
-    const m = /^(\d{2}):(\d{2})$/.exec(time);
-    return m ? Number(m[1]) * 60 + Number(m[2]) : -1;
-};
-
-// Per OGGI uno slot è ordinabile solo se la cucina fa in tempo: ritiro ≥
-// adesso + minuti di preparazione. La griglia di domani passa intera.
-function filterOrderableSlots(slots: string[], date: string, prepMinutes: number, tz: string = 'Europe/Rome'): string[] {
-    if (date !== getItalianTodayIso(new Date(), tz)) return slots;
-    const now = getTimePartInTz(new Date(), tz);
-    const cutoff = slotMinutes(now) + prepMinutes;
-    return slots.filter(s => slotMinutes(s) >= cutoff);
 }
 
 // Bootstrap della pagina: identità + stato del canale. `takeawayEnabled`
@@ -33127,28 +32938,19 @@ async function handlePublicTakeawayOrderCreate(tenantId: number, req: express.Re
         if (built.error) return res.status(400).json({ error: 'invalid_items', message: built.error });
         const notes = typeof body.notes === 'string' ? body.notes.trim().slice(0, 1000) : '';
 
-        const orderId = await withTenant(tenantId, async client => {
-            const dailyNumber = await allocateTakeawayDailyNumber(client, tenantId, date);
-            const ins = await client.query(
-                `INSERT INTO takeaway_orders (tenant_id, customer_name, customer_phone, pickup_date, pickup_time, shift, status, channel, notes, daily_number)
-                 VALUES ($1, $2, $3, $4, $5, $6, 'CONFIRMED', 'WEB', $7, $8) RETURNING id`,
-                [tenantId, name, phone, date, time, slot.shift, notes || null, dailyNumber]
-            );
-            const id = Number(ins.rows[0].id);
-            await outboxEnqueueInTx(client, tenantId, 'takeaway:created', `takeaway:${id}`,
-                { takeaway_order_id: id }, { actor: { channel: 'web' } });
-            for (const item of built.items!) {
-                await client.query(
-                    `INSERT INTO takeaway_order_items (tenant_id, takeaway_order_id, dish_id, name_snapshot, unit_price_cents, qty, note)
-                     VALUES ($1, $2, $3, $4, $5, $6, $7)`,
-                    [tenantId, id, item.dish_id, item.name, item.cents, item.qty, item.note]
-                );
-            }
-            return id;
+        const orderId = await createTakeawayOrder(tenantId, {
+            name, phone, date, time, shift: slot.shift!, channel: 'WEB', notes: notes || null,
+            items: built.items!, outbox: { actor: { channel: 'web' } },
         });
 
         const view = await loadTakeawayView(tenantId, orderId);
         try { socketService?.broadcastToAll(tenantId, 'takeaway:created', view); } catch (_) {}
+        // La casella delle promozioni, facoltativa: con un sì il cliente entra
+        // in rubrica (se non c'era) col suo consenso registrato.
+        if (body.consent_marketing === true) {
+            await upsertCustomerFromReservation(tenantId, name, phone, null, null, null).catch(() => null);
+            await recordMarketingConsent(tenantId, phone, true, 'takeaway_form');
+        }
         // Il banco deve accorgersene anche a CRM chiuso: push come le
         // prenotazioni voce. Best-effort, l'ordine è comunque in board.
         const pieces = view.items.reduce((sum: number, i: any) => sum + Number(i.qty), 0);
@@ -33245,24 +33047,9 @@ app.post('/takeaway/orders', authenticate, requireFeature('takeaway'), requirePe
         const built = await buildTakeawayItems(req.tenantId!, body.items);
         if (built.error) return res.status(400).json({ error: 'invalid_items', message: built.error });
 
-        const orderId = await withTenant(req.tenantId!, async client => {
-            const dailyNumber = await allocateTakeawayDailyNumber(client, req.tenantId!, date);
-            const ins = await client.query(
-                `INSERT INTO takeaway_orders (tenant_id, customer_name, customer_phone, pickup_date, pickup_time, shift, status, channel, notes, created_by_user_id, daily_number)
-                 VALUES ($1, $2, $3, $4, $5, $6, 'CONFIRMED', 'STAFF', $7, $8, $9) RETURNING id`,
-                [req.tenantId!, name, phone || null, date, time, slot.shift, notes || null, req.user?.userId ?? null, dailyNumber]
-            );
-            const id = Number(ins.rows[0].id);
-            await outboxEnqueueInTx(client, req.tenantId!, 'takeaway:created', `takeaway:${id}`,
-                { takeaway_order_id: id }, outboxContext(req));
-            for (const item of built.items!) {
-                await client.query(
-                    `INSERT INTO takeaway_order_items (tenant_id, takeaway_order_id, dish_id, name_snapshot, unit_price_cents, qty, note)
-                     VALUES ($1, $2, $3, $4, $5, $6, $7)`,
-                    [req.tenantId!, id, item.dish_id, item.name, item.cents, item.qty, item.note]
-                );
-            }
-            return id;
+        const orderId = await createTakeawayOrder(req.tenantId!, {
+            name, phone: phone || null, date, time, shift: slot.shift!, channel: 'STAFF', notes: notes || null,
+            items: built.items!, createdByUserId: req.user?.userId ?? null, outbox: outboxContext(req),
         });
 
         const view = await loadTakeawayView(req.tenantId!, orderId);
@@ -33442,6 +33229,10 @@ app.post('/takeaway/orders/:id/status', authenticate, requireFeature('takeaway')
         if (updated.rows.length === 0) return res.status(404).json({ error: 'not_found' });
         const view = await loadTakeawayView(req.tenantId!, orderId);
         try { socketService?.broadcastToAll(req.tenantId!, 'takeaway:updated', view); } catch (_) {}
+        // «Il tuo ordine è pronto» al cliente, se il locale l'ha acceso.
+        if (status === 'READY') {
+            void notifyTakeawayReady(req.tenantId!, orderId, (await publicBusinessIdentity(req.tenantId!)).name);
+        }
         // Qualcuno ha preso in mano l'ordine: «nuovo ordine» è letto per
         // tutti. Ritirato, annullato o non ritirato, anche il «pronto»
         // della cucina non chiede più niente.
@@ -37797,6 +37588,9 @@ const handlePublicReservationCreate = async (tenantId: number, req: express.Requ
         // questa prenotazione non ne aveva una (selettore non toccato, browser
         // non rilevabile), la eredita.
         const resolvedLanguage = await upsertCustomerFromReservation(tenantId, customer_name, phoneE164, emailNormalized, null, language);
+        // La casella delle promozioni, facoltativa: solo un sì esplicito
+        // entra nel registro dei consensi.
+        if (body.consent_marketing === true && phoneE164) await recordMarketingConsent(tenantId, phoneE164, true, 'booking_form');
         if (resolvedLanguage && !created.language) {
             queryWithRetry(
                 `UPDATE reservations SET language = $1 WHERE id = $2 AND tenant_id = $3`,
@@ -38305,7 +38099,7 @@ app.post('/debug/whatsapp-test', authenticate, requireFeature('whatsapp'), requi
     if (useTwilio) {
         // Il mittente è quello del ristorante (services/whatsapp/config.ts):
         // un locale senza numero proprio non prova più dal numero del Frantoio.
-        if (!sender) {
+        if (!sender || sender.provider !== 'twilio') {
             return res.status(500).json({
                 error: 'missing_twilio_config',
                 message: 'Nessun mittente WhatsApp per questo locale',
@@ -40821,6 +40615,10 @@ app.post('/kds/items/:id/status', authenticate, requirePermission('orders:kds'),
                     loadTakeawayView(req.tenantId!, Number(takeawayId)).then(view => {
                         socketService?.broadcastToAll(req.tenantId!, 'takeaway:updated', view);
                     }).catch(err => console.warn('[kds] takeaway READY non propagato:', err?.message ?? err));
+                    // Pronto dal monitor: anche qui il cliente lo sa.
+                    publicBusinessIdentity(req.tenantId!)
+                        .then(identity => notifyTakeawayReady(req.tenantId!, Number(takeawayId), identity.name))
+                        .catch(() => {});
                 }
             } catch (err: any) {
                 console.warn('[kds] takeaway READY non propagato:', err?.message ?? err);
@@ -45823,6 +45621,7 @@ app.delete('/sala/profiles/:id', authenticate, requirePermission('settings:full'
 configureWhatsApp({
     broadcastToAll: (tenantId, event, payload) => { socketService?.broadcastToAll(tenantId, event, payload); },
     broadcastReservationsUpdatedByIds: ids => broadcastReservationsUpdatedByIds(ids),
+    persistDeliveryStatus: (tenantId, sid, status, errorCode, errText) => persistDeliveryStatus(tenantId, sid, status, errorCode, errText),
 });
 
 // L'agente WhatsApp che parte da solo: la coda chiede a server.ts il
@@ -45864,6 +45663,20 @@ configureReservationButtons({
         && (await getFeatureFlag(tenantId, 'ai_messages_enabled', false))
         && (await isFeatureEnabledForTenant(tenantId, 'whatsapp')),
 });
+
+// Le campagne (services/whatsapp/campaigns/): nome del locale nel template,
+// modalità legale per il marketing; e «STOP» su WhatsApp, che revoca il
+// consenso prima dei tasti e dell'agente.
+configureCampaigns({
+    businessName: async tenantId => (await publicBusinessIdentity(tenantId)).name,
+    marketingAllowed: async tenantId => (await getLegalConfig(tenantId)).legal_mode === 'advanced',
+});
+registerStopHook(async tenantId => (await publicBusinessIdentity(tenantId)).name);
+
+// Vocali trascritti all'arrivo (services/whatsapp/media/). Registrata DOPO
+// i tasti perché entrambe si mettono in testa agli agganci: così gira per
+// prima, e tasti e coda dell'agente trovano il vocale già scritto.
+configureWhatsAppMedia();
 
 // Quello che l'ospite dice della sua prenotazione (ritardo, note, allergie,
 // conferma): services/reservationGuestUpdates.ts scrive, qui il broadcast.
@@ -46350,6 +46163,12 @@ const startServer = async () => {
                         console.log('✅ WhatsApp agent scheduler started (15 s)');
                     } catch (schedErr) {
                         console.error('WhatsApp agent scheduler failed to start:', schedErr);
+                    }
+                    if (!isServiceNode) try {
+                        startWhatsAppCampaignsScheduler();
+                        console.log('✅ WhatsApp campaigns scheduler started (60 s)');
+                    } catch (schedErr) {
+                        console.error('WhatsApp campaigns scheduler failed to start:', schedErr);
                     }
                     if (!isServiceNode) try {
                         startBookingReminderScheduler();

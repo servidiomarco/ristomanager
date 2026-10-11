@@ -11,11 +11,13 @@
 // meglio di un messaggio che parte col nome di un altro locale.
 //
 // È l'unico posto, insieme a providers/twilio.ts, dove si leggono le
-// variabili TWILIO_* del canale messaggi. Niente database qui: le funzioni
-// sono pure e i test le chiamano direttamente (callbacks.ts legge il token
-// webhook del ristorante).
+// variabili TWILIO_* del canale messaggi. Le funzioni sull'env restano pure
+// (i test le chiamano direttamente); il mittente Meta di un locale (Fase 12)
+// si legge da whatsapp_senders, con una cache breve.
 
-import type { TwilioSender, WhatsAppSender } from './types.js';
+import { queryWithRetry } from '../../db.js';
+import { decryptSecret } from '../../utils/secrets.js';
+import type { MetaSender, TwilioSender, WhatsAppSender } from './types.js';
 
 /** I ristoranti che usano le credenziali Twilio in env. Il tenant 1 è il
  *  Frantoio, padrone del numero; un demo si aggiunge qui solo se deve
@@ -53,10 +55,65 @@ export function twilioRestBase(env: NodeJS.ProcessEnv = process.env): string {
     return (env.TWILIO_REST_URL || 'https://api.twilio.com').replace(/\/+$/, '');
 }
 
-/** Il mittente WhatsApp del ristorante, o null se non ne ha uno. */
+/** Base della Graph API di Meta. META_GRAPH_URL esiste per i test (stub). */
+export function metaGraphBase(env: NodeJS.ProcessEnv = process.env): string {
+    return (env.META_GRAPH_URL || 'https://graph.facebook.com/v25.0').replace(/\/+$/, '');
+}
+
+// Il mittente Meta si legge a ogni invio: mezzo minuto di cache basta a non
+// interrogare il database per ogni messaggio di una raffica, e il
+// collegamento e lo scollegamento la svuotano subito.
+const META_CACHE_MS = 30_000;
+const metaCache = new Map<number, { at: number; sender: MetaSender | null }>();
+
+export function invalidateSenderCache(tenantId?: number): void {
+    if (tenantId == null) metaCache.clear();
+    else metaCache.delete(tenantId);
+}
+
+async function metaSenderFor(tenantId: number): Promise<MetaSender | null> {
+    const hit = metaCache.get(tenantId);
+    if (hit && Date.now() - hit.at < META_CACHE_MS) return hit.sender;
+    let sender: MetaSender | null = null;
+    try {
+        const r = await queryWithRetry(
+            `SELECT phone_e164, phone_number_id, waba_id, display_name, quality_rating, messaging_limit, access_token_enc
+               FROM whatsapp_senders WHERE tenant_id = $1 AND provider = 'meta'`,
+            [tenantId]
+        );
+        const row = r.rows[0];
+        if (row) {
+            sender = {
+                provider: 'meta',
+                source: 'db',
+                phoneNumberId: String(row.phone_number_id),
+                wabaId: String(row.waba_id),
+                accessToken: decryptSecret(String(row.access_token_enc)),
+                from: `whatsapp:${row.phone_e164}`,
+                displayName: row.display_name ?? null,
+                qualityRating: row.quality_rating ?? null,
+                messagingLimit: row.messaging_limit ?? null,
+                graphBase: metaGraphBase(),
+            };
+        }
+    } catch (err: any) {
+        // Un token che non si decifra (chiave cambiata) vale come nessun
+        // mittente: il messaggio scende su email invece di fallire a metà.
+        console.error('[whatsapp] mittente Meta non leggibile:', err?.message || err);
+    }
+    metaCache.set(tenantId, { at: Date.now(), sender });
+    return sender;
+}
+
+/** Il mittente WhatsApp del ristorante, o null se non ne ha uno: Twilio da
+ *  env per i ristoranti elencati (il Frantoio), altrimenti il numero Meta
+ *  collegato dal locale. */
 export async function getSender(tenantId: number): Promise<WhatsAppSender | null> {
-    if (envTenantIds().has(tenantId)) return twilioEnvSender();
-    return null;
+    if (envTenantIds().has(tenantId)) {
+        const twilio = twilioEnvSender();
+        if (twilio) return twilio;
+    }
+    return metaSenderFor(tenantId);
 }
 
 /** Il ristorante può mandare WhatsApp adesso? */

@@ -36,6 +36,7 @@ const AZIONI: Array<{ key: keyof AgentAutoActions; label: string }> = [
   { key: 'modify', label: 'Sposta e cambia le persone' },
   { key: 'cancel', label: 'Annulla' },
   { key: 'notes', label: 'Note e allergie' },
+  { key: 'takeaway', label: 'Ordini d\'asporto' },
 ];
 
 /** Interruttore delle Impostazioni (stessa forma di AiMessagesSettingsManager). */
@@ -67,6 +68,8 @@ export const WhatsAppAgentCard: React.FC<Props> = ({ showToast }) => {
   const [simText, setSimText] = useState('');
   const [simBusy, setSimBusy] = useState(false);
   const [simLog, setSimLog] = useState<Battuta[]>([]);
+  // «Ordini d'asporto» compare solo a chi ha l'add-on asporto.
+  const [takeawayAvailable, setTakeawayAvailable] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -76,11 +79,12 @@ export const WhatsAppAgentCard: React.FC<Props> = ({ showToast }) => {
         if (cancelled) return;
         const agent: AgentPolicy = {
           ...r.agent,
-          auto_actions: r.agent.auto_actions ?? { create: true, modify: true, cancel: true, notes: true },
+          auto_actions: { create: true, modify: true, cancel: true, notes: true, takeaway: true, ...(r.agent.auto_actions ?? {}) },
           confirm_cancel: typeof r.agent.confirm_cancel === 'boolean' ? r.agent.confirm_cancel : true,
         };
         setPolicy(agent);
         setDraft(agent);
+        setTakeawayAvailable((r as { takeaway_available?: boolean }).takeaway_available === true);
       })
       .catch((err: any) => { if (!cancelled) setError(err?.message || t('agent.loadError', 'Impostazioni non disponibili')); });
     return () => { cancelled = true; };
@@ -163,10 +167,10 @@ export const WhatsAppAgentCard: React.FC<Props> = ({ showToast }) => {
         <div className="space-y-1">
           <p className="text-[13px] font-semibold text-[var(--ds-text-secondary)]">{t('agent.autoTitle', 'Cosa fa da solo')}</p>
           <div className="divide-y divide-[var(--ds-border)]">
-            {AZIONI.map(a => (
+            {AZIONI.filter(a => a.key !== 'takeaway' || takeawayAvailable).map(a => (
               <Interruttore
                 key={a.key}
-                on={draft.auto_actions[a.key]}
+                on={draft.auto_actions[a.key] !== false}
                 disabled={!canEdit}
                 label={t(`agent.auto.${a.key}`, a.label)}
                 onChange={v => setDraft({ ...draft, auto_actions: { ...draft.auto_actions, [a.key]: v } })}

@@ -278,6 +278,9 @@ button:disabled { cursor: not-allowed; }
 .done__slot { margin-top: 14px; font-size: 20px; font-weight: 800; }
 
 .footer { text-align: center; padding: 24px 16px 40px; font-size: 12px; color: var(--ds-text-subtle); }
+.consent { display: flex; align-items: flex-start; gap: 10px; margin-top: 16px; cursor: pointer; }
+.consent input { margin-top: 3px; width: 18px; height: 18px; flex-shrink: 0; accent-color: var(--ds-action-bg); }
+.consent span { font-size: 13px; color: var(--ds-text-secondary); }
     </style>
 </head>
 <body>
@@ -355,6 +358,11 @@ button:disabled { cursor: not-allowed; }
                 <label for="fNotes" data-i18n="fields.notes">Note per la cucina</label>
                 <textarea id="fNotes" name="notes" maxlength="1000" placeholder="Allergie, citofono, preferenze…" data-i18n-attr="placeholder:fields.notesPlaceholder"></textarea>
             </div>
+            <!-- Il consenso alle promozioni: facoltativo e mai spuntato di serie. -->
+            <label class="consent">
+                <input type="checkbox" id="fMarketing" />
+                <span data-i18n="fields.marketing">Voglio ricevere su WhatsApp offerte e novità del ristorante. Posso smettere quando voglio scrivendo STOP.</span>
+            </label>
         </section>
 
         <div class="notice notice--critical" id="error" hidden></div>
@@ -713,6 +721,7 @@ button:disabled { cursor: not-allowed; }
                     pickup_time: state.time,
                     notes: $('fNotes').value.trim(),
                     website: $('form').elements['website'].value,
+                    consent_marketing: $('fMarketing').checked,
                     items: [...state.cart.entries()].map(([dish_id, qty]) => ({ dish_id, qty })),
                 }),
             });

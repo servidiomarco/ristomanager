@@ -38,6 +38,13 @@ export function buildSystem(ctx: AgentContext): string {
             ctx.reservation.notes ? `- Note: ${ctx.reservation.notes}` : '',
         ].filter(Boolean).join('\n')
         : '(nessuna prenotazione collegata a questo numero)';
+    const asporto = ctx.takeaway
+        ? `
+ASPORTO:
+- Il locale prende ordini d'asporto in chat. Per i piatti e i prezzi usa get_takeaway_menu, per gli orari di ritiro check_takeaway_slots: non inventare piatti, prezzi o orari.
+- Prima di create_takeaway_order riepiloga piatti, giorno, ora di ritiro e nome, e aspetta il sì del cliente. Dopo, digli il numero d'ordine da dire al ritiro e il totale.${ctx.takeaway.orderPageUrl ? `
+- Se preferisce scegliere da solo, può ordinare anche da qui: ${ctx.takeaway.orderPageUrl}` : ''}`
+        : '';
     const autonomia = ctx.autonomy
         ? `
 IN QUESTO LOCALE PUOI AGIRE DA SOLO:
@@ -87,7 +94,7 @@ QUELLO CHE IL CLIENTE DICE DELLA SUA PRENOTAZIONE:
 - Una richiesta da annotare (un piatto da preparare, il seggiolone, il cane, una torta): add_reservation_note.
 - Allergie o intolleranze: chiedi PRIMA «Posso annotarlo sulla prenotazione per la cucina?»; solo se dice sì usa record_allergy con customer_consented: true. Registrare sì, garantire un piatto mai.
 - Conferma che verrà («confermo», «ci saremo»): confirm_attendance.
-${autonomia}
+${autonomia}${asporto}
 
 COSA DIRE DI UN'AZIONE:
 - Dai per fatto SOLO ciò che uno strumento ha restituito con "executed": true. Mai prima, mai per supposizione.

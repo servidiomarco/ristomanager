@@ -24,3 +24,15 @@ export { isWindowOpen, lastInboundAt, WINDOW_MS } from './window.js';
 export { configureReservationButtons, type ReservationButtonDeps } from './buttons.js';
 export { publicWhatsAppLink, waMeUrl } from './entry.js';
 export { getRemindersPolicy } from './settings.js';
+export {
+    configureWhatsAppMedia, fetchInboundMedia, MediaFetchError, agentMessageBody, photosForAgent,
+    isTranscriptionConfigured, type AgentImage,
+} from './media/index.js';
+export { getMediaPolicy } from './settings.js';
+export { notifyTakeawayReady } from './takeawayReady.js';
+export { getTakeawayPolicy } from './settings.js';
+export {
+    recordMarketingConsent, registerStopHook, configureCampaigns, campaignsTick, type ConsentSource,
+} from './campaigns/index.js';
+export { handleMetaWebhook, handleMetaWebhookVerify } from './webhooks.js';
+export { invalidateSenderCache, metaGraphBase } from './config.js';

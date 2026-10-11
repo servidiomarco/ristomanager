@@ -188,12 +188,13 @@ jobs:
       # che ogni test accende sulla porta del server + 12) e le SID finte del
       # promemoria. In un passo a parte perché nel resto della suite il
       # tenant 1 resta senza mittente.
-      - name: Agente WhatsApp in modalità Azioni e tasti del promemoria (mittente WhatsApp e Twilio finti)
+      - name: Agente WhatsApp in modalità Azioni, tasti del promemoria, vocali e foto, asporto in chat, campagne (mittente WhatsApp e Twilio finti)
         env:
           TWILIO_WHATSAPP_FROM: '+393895916494'
           TWILIO_WA_CONTENT_SID_BOOKING_REMINDER: HXtestplain
           TWILIO_WA_CONTENT_SID_BOOKING_REMINDER_QR: HXtestqr
-        run: npx vitest run tests/api/agente-whatsapp-azioni.test.ts tests/api/whatsapp-tasti.test.ts
+          TWILIO_WA_CONTENT_SID_CAMPAIGN: HXtestcampaign
+        run: npx vitest run tests/api/agente-whatsapp-azioni.test.ts tests/api/whatsapp-tasti.test.ts tests/api/whatsapp-media.test.ts tests/api/asporto-whatsapp.test.ts tests/api/campagne.test.ts
 
   api-tests:
     name: Test API

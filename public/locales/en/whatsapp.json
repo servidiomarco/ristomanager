@@ -7,12 +7,40 @@
     "provider": "Provider: {{p}}",
     "connected": "Connected",
     "notConnectedTitle": "No number connected",
-    "notConnected": "Messages to guests go out by email, if configured. Connecting the restaurant's own number comes with an upcoming update.",
     "sms": "SMS fallback",
     "on": "On",
     "off": "Off",
     "webhookInbound": "Incoming messages",
-    "webhookStatus": "Message status"
+    "webhookStatus": "Message status",
+    "notConnectedNow": "Messages to guests go out by email, if set up.",
+    "meta": {
+      "provider": "Meta · Cloud API",
+      "quality": "Number quality",
+      "limit": "Sending limit",
+      "limitPerDay": "{{n}} customers a day",
+      "limitUnlimited": "unlimited",
+      "q": {
+        "green": "high",
+        "yellow": "medium",
+        "red": "low",
+        "unknown": "not rated yet"
+      },
+      "notSubscribed": "The number sends, but Meta did not subscribe the app to the account: guest messages won't arrive. Connect again with the right token.",
+      "open": "Connect a Meta number",
+      "formHint": "All three values are in the Meta console, under WhatsApp › API Setup.",
+      "phoneNumberId": "Phone number ID",
+      "wabaId": "WhatsApp Business account ID",
+      "token": "Access token",
+      "tokenHint": "Prefer a system user token: it doesn't expire. Stored encrypted.",
+      "connect": "Connect",
+      "cancel": "Cancel",
+      "connectError": "Number not connected",
+      "disconnectOpen": "Disconnect the number",
+      "disconnectConfirm": "From now on messages to guests go out by email. The number stays on Meta.",
+      "disconnect": "Disconnect",
+      "disconnectError": "Number not disconnected",
+      "webhook": "Meta app webhook"
+    }
   },
   "templates": {
     "loadError": "Templates unavailable",
@@ -28,7 +56,9 @@
       "caparre": "Deposits",
       "conto": "Bill",
       "recensioni": "Reviews",
-      "banchetti": "Banquets"
+      "banchetti": "Banquets",
+      "asporto": "Takeaway",
+      "marketing": "Campaigns"
     },
     "name": {
       "BOOKING_RECEIVED": "Request received",
@@ -96,7 +126,8 @@
       "create": "Book",
       "modify": "Move and change party size",
       "cancel": "Cancel",
-      "notes": "Notes and allergies"
+      "notes": "Notes and allergies",
+      "takeaway": "Takeaway orders"
     },
     "confirmCancel": "Ask for confirmation before cancelling",
     "autoRules": "What is off, it proposes. Always left to staff: deposits, banquets, large groups, room changes and bookings too close.",
@@ -128,5 +159,81 @@
     "onMenu": "Show in the digital menu",
     "save": "Save",
     "readyTexts": "Ready-made texts"
+  },
+  "media": {
+    "transcribe": "Transcribe voice notes",
+    "transcribeHint": "In Messages the voice note also appears written, and the agent reads it as a message. Uses Sofia's ElevenLabs credits.",
+    "transcribeMissing": "The ElevenLabs key is missing on the server: transcription cannot run.",
+    "photos": "Let the agent see photos",
+    "photosHint": "The agent looks at the photos the customer sends (up to three per reply): a booking screenshot, a ticket, a menu.",
+    "loadError": "Settings unavailable",
+    "saveError": "Not saved"
+  },
+  "takeawayChat": {
+    "toggle": "The agent takes takeaway orders",
+    "toggleHint": "In chat it shows the menu, offers the free pickup times and, after the customer says yes, records the order on the board. Takeaway rules apply: capacity, stop and preparation time.",
+    "ready": "Notify when the order is ready",
+    "readyHint": "When the order goes to \"Ready\" (from the counter or the kitchen monitor) the customer gets a WhatsApp. Outside the 24 hours the \"Takeaway order ready\" template is needed.",
+    "noAddon": "The Takeaway add-on is required.",
+    "loadError": "Settings unavailable",
+    "saveError": "Not saved"
+  },
+  "campaigns": {
+    "loadError": "Campaigns unavailable",
+    "previewError": "Preview failed",
+    "created": "Campaign saved: check it and start it",
+    "createError": "Not saved",
+    "started": "Campaign started",
+    "estimateChanged": "The recipients have changed: check the amount and try again",
+    "startError": "Not started",
+    "cancelError": "Not cancelled",
+    "needLegal": "The advanced legal mode is required (Settings › Privacy).",
+    "needEnabled": "Turn on campaigns in Settings › WhatsApp › Campaigns.",
+    "needTemplate": "The campaign template is not approved by Meta yet.",
+    "spent": "Spent this month: {{speso}} of {{tetto}}. One message costs about {{unit}}. Sending from {{da}} to {{a}}, never twice to the same number within {{giorni}} days.",
+    "new": "New campaign",
+    "name": "Name (only you see it)",
+    "namePlaceholder": "E.g. Truffle dinner",
+    "message": "The message",
+    "messagePlaceholder": "E.g. Friday 24th truffle dinner, €45 per person. Reply here to book.",
+    "messageHint": "It arrives as \"Hi Mario, some news from [restaurant name]: …\", with the \"Stop promotions\" button.",
+    "segDays": "Not back for at least (days)",
+    "any": "All",
+    "segVisits": "At least this many visits",
+    "segLanguage": "Language",
+    "allLanguages": "All",
+    "italian": "Italian",
+    "english": "English",
+    "segVip": "VIP only",
+    "preview": "Count recipients",
+    "previewResult": "{{n}} recipients, about {{costo}}",
+    "rules": "Only customers who agreed to promotions, never those who said STOP, are blacklisted or had a no-show in the last 90 days.",
+    "save": "Save the campaign",
+    "empty": "No campaigns yet.",
+    "draftInfo": "{{n}} estimated recipients, about {{costo}}",
+    "counts": "{{sent}} sent · {{waiting}} queued · {{skipped}} skipped · {{failed}} failed",
+    "confirmStart": "Confirm: {{n}} messages, about {{costo}}",
+    "resume": "Resume",
+    "start": "Start",
+    "cancel": "Cancel the campaign",
+    "status": {
+      "draft": "draft",
+      "sending": "sending",
+      "paused": "paused",
+      "done": "finished",
+      "cancelled": "cancelled"
+    }
+  },
+  "campaignsPolicy": {
+    "loadError": "Settings unavailable",
+    "saved": "Saved",
+    "saveError": "Not saved: check the values",
+    "enabled": "Send campaigns to customers",
+    "hint": "Campaigns are created in Messages › Campaigns. They only reach those who agreed to promotions (also via the box on /prenota and /ordina); whoever replies STOP gets nothing more. The advanced legal mode is required.",
+    "from": "Send from (hour)",
+    "to": "Until (hour)",
+    "pause": "Days between two campaigns to the same number",
+    "budget": "Monthly spending cap (€)",
+    "save": "Save"
   }
 }

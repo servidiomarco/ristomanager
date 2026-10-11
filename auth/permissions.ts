@@ -36,6 +36,9 @@ export type Permission =
   | 'banquet:manage_payments'
   | 'customers:view'
   | 'customers:full'
+  // Campagne WhatsApp ai clienti: mandano messaggi a pagamento a molte
+  // persone in un colpo, quindi solo titolare e direzione.
+  | 'campaigns:manage'
   | 'inventory:view'
   | 'inventory:full'
   | 'inventory:invoices'
@@ -146,6 +149,7 @@ const ROLE_PERMISSIONS: Record<UserRole, Permission[]> = {
     'banquet:manage_payments',
     'customers:view',
     'customers:full',
+    'campaigns:manage',
     'inventory:view',
     'inventory:full',
     'inventory:invoices',
@@ -200,6 +204,7 @@ const ROLE_PERMISSIONS: Record<UserRole, Permission[]> = {
     'banquet:manage_payments',
     'customers:view',
     'customers:full',
+    'campaigns:manage',
     'inventory:view',
     'inventory:full',
     'inventory:invoices',
@@ -247,6 +252,7 @@ const ROLE_PERMISSIONS: Record<UserRole, Permission[]> = {
     'banquet:manage_payments',
     'customers:view',
     'customers:full',
+    'campaigns:manage',
     'inventory:view',
     'inventory:full',
     'inventory:invoices',

@@ -25,8 +25,10 @@ export interface AgentAutoActions {
     cancel: boolean;
     /** Note e allergie (queste ultime sempre col consenso del cliente). */
     notes: boolean;
+    /** Ordini d'asporto (con «Asporto in chat» acceso). */
+    takeaway: boolean;
 }
-export const AUTO_ACTION_KEYS: ReadonlyArray<keyof AgentAutoActions> = ['create', 'modify', 'cancel', 'notes'];
+export const AUTO_ACTION_KEYS: ReadonlyArray<keyof AgentAutoActions> = ['create', 'modify', 'cancel', 'notes', 'takeaway'];
 
 export interface WhatsAppAgentPolicy {
     mode: AgentMode;
@@ -57,7 +59,7 @@ export const DEFAULT_AGENT_POLICY: WhatsAppAgentPolicy = {
     max_replies_per_thread_24h: 6,
     max_runs_per_day: 120,
     daily_budget_eur: 5,
-    auto_actions: { create: true, modify: true, cancel: true, notes: true },
+    auto_actions: { create: true, modify: true, cancel: true, notes: true, takeaway: true },
     confirm_cancel: true,
 };
 
@@ -219,3 +221,106 @@ export const saveRemindersPolicy = (tenantId: number, p: WhatsAppRemindersPolicy
 export const getEntryPolicy = (tenantId: number) =>
     readJson(tenantId, ENTRY_KEY, r => normalizeEntryPolicy(r), DEFAULT_ENTRY_POLICY);
 export const saveEntryPolicy = (tenantId: number, p: WhatsAppEntryPolicy) => writeJson(tenantId, ENTRY_KEY, p);
+
+// ---------------------------------------------------------------------------
+// Vocali e foto
+// ---------------------------------------------------------------------------
+
+/** Cosa si fa degli allegati dei clienti. Spenti di serie: la trascrizione
+ *  usa i crediti ElevenLabs di Sofia, le foto costano token all'agente. */
+export interface WhatsAppMediaPolicy {
+    /** I vocali si trascrivono: l'Inbox li mostra scritti, l'agente li legge. */
+    transcribe_voice: boolean;
+    /** L'agente guarda le foto nuove del cliente (al massimo tre per giro). */
+    read_photos: boolean;
+}
+export const DEFAULT_MEDIA_POLICY: WhatsAppMediaPolicy = { transcribe_voice: false, read_photos: false };
+const MEDIA_KEY = 'whatsapp_media_policy';
+
+export function normalizeMediaPolicy(raw: unknown, base: WhatsAppMediaPolicy = DEFAULT_MEDIA_POLICY): WhatsAppMediaPolicy | null {
+    if (!isPlainObject(raw)) return null;
+    const out = { ...base };
+    for (const k of ['transcribe_voice', 'read_photos'] as const) {
+        if (raw[k] === undefined) continue;
+        if (typeof raw[k] !== 'boolean') return null;
+        out[k] = raw[k] as boolean;
+    }
+    return out;
+}
+
+export const getMediaPolicy = (tenantId: number) =>
+    readJson(tenantId, MEDIA_KEY, r => normalizeMediaPolicy(r), DEFAULT_MEDIA_POLICY);
+export const saveMediaPolicy = (tenantId: number, p: WhatsAppMediaPolicy) => writeJson(tenantId, MEDIA_KEY, p);
+
+// ---------------------------------------------------------------------------
+// Asporto in chat
+// ---------------------------------------------------------------------------
+
+/** L'asporto su WhatsApp (serve l'add-on asporto). Spento di serie. */
+export interface WhatsAppTakeawayPolicy {
+    /** L'agente prende gli ordini d'asporto in chat. */
+    enabled: boolean;
+    /** Quando l'ordine passa a «Pronto», il cliente riceve un WhatsApp. */
+    notify_ready: boolean;
+}
+export const DEFAULT_TAKEAWAY_POLICY: WhatsAppTakeawayPolicy = { enabled: false, notify_ready: false };
+const TAKEAWAY_KEY = 'whatsapp_takeaway_policy';
+
+export function normalizeTakeawayPolicy(raw: unknown, base: WhatsAppTakeawayPolicy = DEFAULT_TAKEAWAY_POLICY): WhatsAppTakeawayPolicy | null {
+    if (!isPlainObject(raw)) return null;
+    const out = { ...base };
+    for (const k of ['enabled', 'notify_ready'] as const) {
+        if (raw[k] === undefined) continue;
+        if (typeof raw[k] !== 'boolean') return null;
+        out[k] = raw[k] as boolean;
+    }
+    return out;
+}
+
+export const getTakeawayPolicy = (tenantId: number) =>
+    readJson(tenantId, TAKEAWAY_KEY, r => normalizeTakeawayPolicy(r), DEFAULT_TAKEAWAY_POLICY);
+export const saveTakeawayPolicy = (tenantId: number, p: WhatsAppTakeawayPolicy) => writeJson(tenantId, TAKEAWAY_KEY, p);
+
+// ---------------------------------------------------------------------------
+// Campagne
+// ---------------------------------------------------------------------------
+
+/** Le campagne WhatsApp (Impostazioni › WhatsApp › Campagne). Spente di serie. */
+export interface WhatsAppCampaignsPolicy {
+    enabled: boolean;
+    /** Fascia d'invio nell'ora del locale: dalle `send_from_hour` alle `send_to_hour`. */
+    send_from_hour: number;
+    send_to_hour: number;
+    /** Giorni di pausa per numero fra una campagna e l'altra. */
+    pause_days: number;
+    /** Tetto di spesa del mese per le campagne; raggiunto, l'invio si ferma. */
+    monthly_budget_eur: number;
+}
+export const DEFAULT_CAMPAIGNS_POLICY: WhatsAppCampaignsPolicy = {
+    enabled: false, send_from_hour: 10, send_to_hour: 21, pause_days: 7, monthly_budget_eur: 50,
+};
+const CAMPAIGNS_KEY = 'whatsapp_campaigns_policy';
+
+export function normalizeCampaignsPolicy(raw: unknown, base: WhatsAppCampaignsPolicy = DEFAULT_CAMPAIGNS_POLICY): WhatsAppCampaignsPolicy | null {
+    if (!isPlainObject(raw)) return null;
+    const out = { ...base };
+    if (raw.enabled !== undefined) {
+        if (typeof raw.enabled !== 'boolean') return null;
+        out.enabled = raw.enabled;
+    }
+    const ints: Array<[keyof WhatsAppCampaignsPolicy, number, number]> = [
+        ['send_from_hour', 0, 23], ['send_to_hour', 1, 24], ['pause_days', 1, 90], ['monthly_budget_eur', 1, 5000],
+    ];
+    for (const [k, min, max] of ints) {
+        if (raw[k] === undefined) continue;
+        const n = Number(raw[k]);
+        if (!Number.isInteger(n) || n < min || n > max) return null;
+        (out as any)[k] = n;
+    }
+    if (out.send_to_hour <= out.send_from_hour) return null;
+    return out;
+}
+
+export const getCampaignsPolicy = (tenantId: number) =>
+    readJson(tenantId, CAMPAIGNS_KEY, r => normalizeCampaignsPolicy(r), DEFAULT_CAMPAIGNS_POLICY);
+export const saveCampaignsPolicy = (tenantId: number, p: WhatsAppCampaignsPolicy) => writeJson(tenantId, CAMPAIGNS_KEY, p);
