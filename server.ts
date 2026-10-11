@@ -322,6 +322,7 @@ import { createScheduledTasksRouter, scheduledTasksTick, syncBanquetScheduledTas
 import { createHaccpRouter, haccpSensorWatchTick, runHaccpExpiryReminder, runHaccpMissingReminder, type HaccpDeps } from './services/haccpRoutes.js';
 import { createFoodCostRouter } from './services/foodCostRoutes.js';
 import { createFattureFornitoriRouter } from './services/fattureFornitoriRoutes.js';
+import { configureRestaurantInfo } from './services/restaurantInfo.js';
 import { shoppingReminderBody } from './utils/shoppingReminder.js';
 import { describeShiftChanges, shiftDayLabel, type ShiftDayChange } from './utils/staffShiftChange.js';
 import { buildEReceiptPayload, buildFatturaPaXml, getFiscalDriver, type FiscalSeller, type InvoiceBuyer } from './services/fiscalService.js';
@@ -45596,6 +45597,21 @@ app.delete('/sala/profiles/:id', authenticate, requirePermission('settings:full'
 // momento dell'invio.
 configureWhatsApp({
     broadcastToAll: (tenantId, event, payload) => { socketService?.broadcastToAll(tenantId, event, payload); },
+});
+
+// Informazioni sul locale per gli agenti (services/restaurantInfo.ts):
+// identità pubblica, menu digitale e giorni riservati stanno qui.
+configureRestaurantInfo({
+    identity: async tenantId => publicBusinessIdentity(tenantId),
+    digitalMenuUrl: async tenantId => {
+        if (!(await getFeatureFlag(tenantId, 'digital_menu_enabled', false))) return null;
+        const r = await queryWithRetry('SELECT slug FROM tenants WHERE id = $1', [tenantId]);
+        const slug: string | null = r.rows[0]?.slug ?? null;
+        // Con lo slug il link apre il menu di QUESTO ristorante; senza,
+        // /m/ risolverebbe dal dominio e ripiegherebbe sul tenant 1.
+        return slug ? `${publicBaseUrl()}/m/${slug}` : null;
+    },
+    dateBlocks: async tenantId => getVoiceDateBlocks(tenantId),
 });
 
 bookingTools.configureBookingTools({

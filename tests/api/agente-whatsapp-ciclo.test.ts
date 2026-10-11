@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import http from 'node:http';
 import { Client } from 'pg';
 import { api, ownerToken, bearer } from './helpers';
+import { AI_STUB_PORT, startAiStub, stubCalls as chiama, stubText as testo, type AiStub, type StubReply as Risposta } from './aiStub';
 
 // WhatsApp, Fase 3: il ciclo dell'agente (services/whatsapp/agent/run.ts).
 //
@@ -18,11 +18,6 @@ const NUMERO = '3391188001';        // la conversazione principale
 const NUMERO_GRAZIE = '3391188002'; // «grazie 👍»
 const NUMERO_NOTE = '3391188003';   // modifica confermata dallo staff
 
-const AI_STUB_PORT = (() => {
-    const m = /^http:\/\/127\.0\.0\.1:(\d+)\/?$/.exec(process.env.ANTHROPIC_BASE_URL || '');
-    return m && process.env.ANTHROPIC_API_KEY ? Number(m[1]) : 0;
-})();
-
 /** 'YYYY-MM-DD' fra `days` giorni, nel fuso del locale. */
 const giornoFra = (days: number): string => {
     const oggi = new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Rome' }).format(new Date());
@@ -31,51 +26,23 @@ const giornoFra = (days: number): string => {
 };
 const DATA = giornoFra(9);
 
-type Risposta = { content: any[]; stop_reason?: string };
-const testo = (t: string): Risposta => ({ content: [{ type: 'text', text: t }], stop_reason: 'end_turn' });
-const chiama = (...calls: Array<[string, string, Record<string, any>]>): Risposta => ({
-    content: calls.map(([id, name, input]) => ({ type: 'tool_use', id, name, input })),
-    stop_reason: 'tool_use',
-});
-
 describe.runIf(AI_STUB_PORT > 0)('agente WhatsApp: il ciclo', () => {
-    const received: Array<{ body: any; headers: http.IncomingHttpHeaders }> = [];
-    const coda: Risposta[] = [];
-    let stub: http.Server;
+    let stub: AiStub;
+    let received: AiStub['received'];
     let db: Client;
     let token = '';
     let orario = '';
     let esistenteId = 0;
 
     const giro = async (numero: string, ...risposte: Risposta[]) => {
-        received.length = 0;
-        coda.splice(0, coda.length, ...risposte);
-        const res = await api().post('/messages/agent/run').set(bearer(token)).send({ phone_digits: numero });
-        return res;
+        stub.load(...risposte);
+        return api().post('/messages/agent/run').set(bearer(token)).send({ phone_digits: numero });
     };
-    const ultimoUtente = (n: number) => {
-        const msgs = received[n].body.messages;
-        return msgs[msgs.length - 1];
-    };
+    const ultimoUtente = (n: number) => stub.lastMessage(n);
 
     beforeAll(async () => {
-        stub = http.createServer((req, res) => {
-            let body = '';
-            req.on('data', chunk => { body += chunk; });
-            req.on('end', () => {
-                let parsed: any = null;
-                try { parsed = JSON.parse(body); } catch { /* resta null */ }
-                received.push({ body: parsed, headers: req.headers });
-                const r = coda.shift() ?? testo('Va bene.');
-                res.writeHead(200, { 'content-type': 'application/json' });
-                res.end(JSON.stringify({
-                    id: `msg_stub_${received.length}`, type: 'message', role: 'assistant', model: 'stub',
-                    content: r.content, stop_reason: r.stop_reason ?? 'end_turn', stop_sequence: null,
-                    usage: { input_tokens: 10, output_tokens: 5 },
-                }));
-            });
-        });
-        await new Promise<void>(resolve => stub.listen(AI_STUB_PORT, '127.0.0.1', () => resolve()));
+        stub = await startAiStub();
+        received = stub.received;
 
         db = new Client({ connectionString: process.env.DATABASE_URL || 'postgresql://localhost/ristotest_api' });
         await db.connect();
@@ -114,7 +81,7 @@ describe.runIf(AI_STUB_PORT > 0)('agente WhatsApp: il ciclo', () => {
     });
 
     afterAll(async () => {
-        await new Promise<void>(resolve => stub.close(() => resolve()));
+        await stub.close();
         await api().put('/settings/features').set(bearer(token)).send({ ai_messages_enabled: false });
         const numeri = [NUMERO, NUMERO_GRAZIE, NUMERO_NOTE];
         await db.query(`DELETE FROM outbound_messages WHERE tenant_id = 1 AND (from_phone_digits = ANY($1) OR to_phone_digits = ANY($1))`,

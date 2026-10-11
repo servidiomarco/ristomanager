@@ -6,12 +6,16 @@ import type { AgentContext } from '../types.js';
 import type { AgentTool } from './types.js';
 import { checkAvailabilityTool, createReservationTool, modifyReservationTool, cancelReservationTool } from './booking.js';
 import { skipReplyTool } from './skip.js';
+import { restaurantInfoTool } from './info.js';
+import { requestCallbackTool } from './callback.js';
 
 export const AGENT_TOOLS: readonly AgentTool[] = [
     checkAvailabilityTool,
     createReservationTool,
     modifyReservationTool,
     cancelReservationTool,
+    restaurantInfoTool,
+    requestCallbackTool,
     skipReplyTool,
 ];
 
