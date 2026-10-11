@@ -282,12 +282,14 @@ const ModifyPanel: React.FC<{
         </p>
       )}
 
+      {/* flex-1 solo da sm in su: nella colonna del telefono la sua base zero vince
+          su h-11 e schiaccia i due tasti all'altezza del testo. */}
       <div className="mt-5 flex flex-col gap-2 sm:flex-row-reverse">
-        <button type="button" onClick={save} disabled={!changed || saving || loading} className={`${dsButton.primary} flex-1`}>
+        <button type="button" onClick={save} disabled={!changed || saving || loading} className={`${dsButton.primary} sm:flex-1`}>
           {saving && <Loader2 className="h-4 w-4 animate-spin" aria-hidden />}
           {t('modify.save')}
         </button>
-        <button type="button" onClick={onClose} disabled={saving} className={`${dsButton.quiet} flex-1`}>
+        <button type="button" onClick={onClose} disabled={saving} className={`${dsButton.quiet} sm:flex-1`}>
           {t('modify.keep')}
         </button>
       </div>
