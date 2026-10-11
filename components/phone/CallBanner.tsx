@@ -56,7 +56,9 @@ const displayPhone = (e164: string): string => {
 };
 
 // Il bordo della card: Sofia al telefono, squilla, si parla col locale,
-// oppure finita (fermo).
+// oppure finita (fermo). Il giro è l'`animation` della classe del telaio:
+// l'entrata (tileIn) sta sull'involucro esterno, perché uno style inline
+// sullo stesso elemento la sostituiva e il bordo restava fermo.
 type Frame = 'ai' | 'ring' | 'call' | null;
 const frameClass = (f: Frame): string =>
   f === 'ai' ? 'ds-ai-frame'
@@ -279,20 +281,22 @@ export const CallBanner: React.FC<{
   return (
     <div className="pointer-events-none fixed inset-x-2 top-2 z-[58] flex flex-col gap-2 md:inset-x-auto md:right-4 md:top-[88px] md:w-[380px]">
       {orphan && (
-        <div role="status" aria-live="polite" className={`pointer-events-auto shadow-[var(--ds-shadow-raised)] ${frameClass(orphan === soft.incoming ? 'ring' : 'call')}`} style={{ animation: 'tileIn 200ms ease-out both' }}>
-          <div className={`${innerRadius('call')} bg-[var(--ds-surface)] p-3`}>
-            <div className="flex items-start gap-3">
-              <Avatar icon={orphan.direction === 'out' ? PhoneOutgoing : PhoneIncoming} tone="info" />
-              <div className="min-w-0 flex-1">
-                <p className="text-[12px] font-medium text-[var(--ds-arriving-text)]">
-                  {orphan.direction === 'out' ? t('phone.outgoing') : t('phone.incomingHere')}
-                </p>
-                <p className="truncate text-[16px] font-semibold tabular-nums text-[var(--ds-text-primary)]">
-                  {orphan.number ? displayPhone(orphan.number) : t('phone.hiddenNumber')}
-                </p>
+        <div role="status" aria-live="polite" className="pointer-events-auto" style={{ animation: 'tileIn 200ms ease-out both' }}>
+          <div className={`shadow-[var(--ds-shadow-raised)] ${frameClass(orphan === soft.incoming ? 'ring' : 'call')}`}>
+            <div className={`${innerRadius('call')} bg-[var(--ds-surface)] p-3`}>
+              <div className="flex items-start gap-3">
+                <Avatar icon={orphan.direction === 'out' ? PhoneOutgoing : PhoneIncoming} tone="info" />
+                <div className="min-w-0 flex-1">
+                  <p className="text-[12px] font-medium text-[var(--ds-arriving-text)]">
+                    {orphan.direction === 'out' ? t('phone.outgoing') : t('phone.incomingHere')}
+                  </p>
+                  <p className="truncate text-[16px] font-semibold tabular-nums text-[var(--ds-text-primary)]">
+                    {orphan.number ? displayPhone(orphan.number) : t('phone.hiddenNumber')}
+                  </p>
+                </div>
               </div>
+              {orphan === soft.incoming ? ringButtons : inCallBar(orphan, { phone: orphan.number })}
             </div>
-            {orphan === soft.incoming ? ringButtons : inCallBar(orphan, { phone: orphan.number })}
           </div>
         </div>
       )}
@@ -325,144 +329,146 @@ export const CallBanner: React.FC<{
             key={call.id}
             role="status"
             aria-live="polite"
-            className={`pointer-events-auto shadow-[var(--ds-shadow-raised)] ${frameClass(frame)}`}
+            className="pointer-events-auto"
             style={{ animation: 'tileIn 200ms ease-out both' }}
           >
-            <div className={`${innerRadius(frame)} bg-[var(--ds-surface)] p-3`}>
-              <div className="flex items-start gap-3">
-                {/* La cornetta e non le iniziali: è una chiamata, non una scheda. */}
-                <Avatar icon={Phone} tone={customer?.is_blacklisted ? 'critical' : 'info'} />
-                <div className="min-w-0 flex-1">
-                  <p className="flex items-center gap-1.5 text-[12px] font-medium text-[var(--ds-arriving-text)]">
-                    <HeadIcon className="h-3.5 w-3.5 flex-shrink-0" aria-hidden />
-                    <span className="truncate">{headline}</span>
-                  </p>
-                  {customer?.phone ? (
-                    <button
-                      type="button"
-                      onClick={() => onOpenCustomer(customer.phone!)}
-                      className="block max-w-full truncate text-left text-[16px] font-semibold text-[var(--ds-text-primary)] hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] rounded-[var(--ds-radius-sm)]"
-                    >
-                      {title}
-                    </button>
+            <div className={`shadow-[var(--ds-shadow-raised)] ${frameClass(frame)}`}>
+              <div className={`${innerRadius(frame)} bg-[var(--ds-surface)] p-3`}>
+                <div className="flex items-start gap-3">
+                  {/* La cornetta e non le iniziali: è una chiamata, non una scheda. */}
+                  <Avatar icon={Phone} tone={customer?.is_blacklisted ? 'critical' : 'info'} />
+                  <div className="min-w-0 flex-1">
+                    <p className="flex items-center gap-1.5 text-[12px] font-medium text-[var(--ds-arriving-text)]">
+                      <HeadIcon className="h-3.5 w-3.5 flex-shrink-0" aria-hidden />
+                      <span className="truncate">{headline}</span>
+                    </p>
+                    {customer?.phone ? (
+                      <button
+                        type="button"
+                        onClick={() => onOpenCustomer(customer.phone!)}
+                        className="block max-w-full truncate text-left text-[16px] font-semibold text-[var(--ds-text-primary)] hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] rounded-[var(--ds-radius-sm)]"
+                      >
+                        {title}
+                      </button>
+                    ) : (
+                      <p className="truncate text-[16px] font-semibold text-[var(--ds-text-primary)]">{title}</p>
+                    )}
+                    {name && phoneLabel && (
+                      <p className="truncate text-[13px] tabular-nums text-[var(--ds-text-secondary)]">{phoneLabel}</p>
+                    )}
+                  </div>
+                  <button
+                    type="button"
+                    onClick={toggleMuted}
+                    aria-label={muted ? t('phone.unmute') : t('phone.mute')}
+                    title={muted ? t('phone.unmute') : t('phone.mute')}
+                    className="inline-flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-[var(--ds-radius-control)] text-[var(--ds-text-secondary)] transition-colors hover:bg-[var(--ds-surface-row)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+                  >
+                    {muted ? <BellOff className="h-4 w-4" aria-hidden /> : <Bell className="h-4 w-4" aria-hidden />}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => dismiss(call.id)}
+                    aria-label={t('phone.close')}
+                    className="inline-flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-[var(--ds-radius-control)] bg-[var(--ds-surface-row)] text-[var(--ds-text-secondary)] transition-colors hover:text-[var(--ds-text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+                  >
+                    <X className="h-4 w-4" aria-hidden />
+                  </button>
+                </div>
+
+                <div className="mt-2 flex flex-wrap gap-1.5">
+                  {customer?.is_blacklisted && <StatusPill tone="critical">{t('phone.blacklisted')}</StatusPill>}
+                  {customer?.is_vip && <StatusPill tone="pending">{t('phone.vip')}</StatusPill>}
+                  {card.no_shows > 0 && <StatusPill tone="critical">{t('phone.noShows', { count: card.no_shows })}</StatusPill>}
+                  {card.visits > 0 ? (
+                    <StatusPill>
+                      {t('phone.visits', { count: card.visits })}
+                      {card.last_visit && ` · ${t('phone.lastVisit', { date: shortDate(card.last_visit) })}`}
+                    </StatusPill>
                   ) : (
-                    <p className="truncate text-[16px] font-semibold text-[var(--ds-text-primary)]">{title}</p>
-                  )}
-                  {name && phoneLabel && (
-                    <p className="truncate text-[13px] tabular-nums text-[var(--ds-text-secondary)]">{phoneLabel}</p>
+                    <StatusPill>{customer ? t('phone.firstVisit') : t('phone.notInBook')}</StatusPill>
                   )}
                 </div>
-                <button
-                  type="button"
-                  onClick={toggleMuted}
-                  aria-label={muted ? t('phone.unmute') : t('phone.mute')}
-                  title={muted ? t('phone.unmute') : t('phone.mute')}
-                  className="inline-flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-[var(--ds-radius-control)] text-[var(--ds-text-secondary)] transition-colors hover:bg-[var(--ds-surface-row)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
-                >
-                  {muted ? <BellOff className="h-4 w-4" aria-hidden /> : <Bell className="h-4 w-4" aria-hidden />}
-                </button>
-                <button
-                  type="button"
-                  onClick={() => dismiss(call.id)}
-                  aria-label={t('phone.close')}
-                  className="inline-flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-[var(--ds-radius-control)] bg-[var(--ds-surface-row)] text-[var(--ds-text-secondary)] transition-colors hover:text-[var(--ds-text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
-                >
-                  <X className="h-4 w-4" aria-hidden />
-                </button>
-              </div>
 
-              <div className="mt-2 flex flex-wrap gap-1.5">
-                {customer?.is_blacklisted && <StatusPill tone="critical">{t('phone.blacklisted')}</StatusPill>}
-                {customer?.is_vip && <StatusPill tone="pending">{t('phone.vip')}</StatusPill>}
-                {card.no_shows > 0 && <StatusPill tone="critical">{t('phone.noShows', { count: card.no_shows })}</StatusPill>}
-                {card.visits > 0 ? (
-                  <StatusPill>
-                    {t('phone.visits', { count: card.visits })}
-                    {card.last_visit && ` · ${t('phone.lastVisit', { date: shortDate(card.last_visit) })}`}
-                  </StatusPill>
-                ) : (
-                  <StatusPill>{customer ? t('phone.firstVisit') : t('phone.notInBook')}</StatusPill>
+                {customer?.dietary_notes && (
+                  <p className="mt-2 line-clamp-2 text-[13px] text-[var(--ds-critical-text)]">
+                    {t('phone.allergies', { text: customer.dietary_notes })}
+                  </p>
+                )}
+
+                {card.last_note && !ended && (
+                  <p className="mt-2 flex gap-1.5 text-[13px] text-[var(--ds-text-secondary)]">
+                    <NotebookPen className="mt-0.5 h-3.5 w-3.5 flex-shrink-0" aria-hidden />
+                    <span className="line-clamp-2">{t('phone.lastNote', { date: shortDate(card.last_note.at), text: card.last_note.text })}</span>
+                  </p>
+                )}
+
+                {(booking ? [{ id: booking.id, reservation_time: booking.reservation_time, guests: booking.guests }] : card.upcoming.slice(0, 2)).map(r => (
+                  <button
+                    key={r.id}
+                    type="button"
+                    onClick={() => onOpenReservation({ id: r.id, reservation_time: r.reservation_time })}
+                    className="mt-2 flex w-full items-center gap-2 rounded-[var(--ds-radius-sm)] bg-[var(--ds-surface-row)] px-2.5 py-2 text-left text-[13px] text-[var(--ds-text-primary)] transition-colors hover:bg-[var(--ds-border)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+                  >
+                    <CalendarDays className="h-4 w-4 flex-shrink-0 text-[var(--ds-text-secondary)]" aria-hidden />
+                    <span className="truncate tabular-nums">
+                      {t('phone.booking', { day: dayLabel(r.reservation_time), time: timeLabel(r.reservation_time), count: r.guests })}
+                    </span>
+                  </button>
+                ))}
+
+                {!ended && isHere(soft.incoming, call.id) && ringButtons}
+                {!ended && isHere(soft.active, call.id) && inCallBar(soft.active!, { customer_name: name || undefined, phone: customer?.phone || card.phone, phone_call_ref: call.call_sid || call.id })}
+
+                {/* La nota a fine chiamata, per le chiamate prese dal locale. */}
+                {ended?.outcome === 'answered' && (() => {
+                  const n = notes[call.id];
+                  if (!n) {
+                    return (
+                      <button
+                        type="button"
+                        onClick={() => { pinned.current.add(call.id); setNotes(prev => ({ ...prev, [call.id]: { draft: '' } })); }}
+                        className="mt-2 inline-flex h-9 items-center gap-1.5 rounded-[var(--ds-radius-control)] px-3 text-[13px] font-semibold text-[var(--ds-arriving-text)] transition-colors hover:bg-[var(--ds-arriving-tint)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+                      >
+                        <NotebookPen className="h-4 w-4" aria-hidden /> {t('phone.addNote')}
+                      </button>
+                    );
+                  }
+                  if (n.saved) return <p className="mt-2 text-[13px] text-[var(--ds-seated-text)]">{t('phone.noteSaved')}</p>;
+                  return (
+                    <div className="mt-2 space-y-2">
+                      <textarea
+                        autoFocus
+                        rows={2}
+                        maxLength={1000}
+                        value={n.draft}
+                        onChange={e => setNotes(prev => ({ ...prev, [call.id]: { draft: e.target.value } }))}
+                        placeholder={t('phone.notePlaceholder')}
+                        aria-label={t('phone.addNote')}
+                        className="w-full resize-none rounded-[var(--ds-radius-sm)] bg-[var(--ds-surface-row)] px-3 py-2 text-[14px] text-[var(--ds-text-primary)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+                      />
+                      {n.error && <p className="text-[13px] text-[var(--ds-critical-text)]">{t('phone.noteError')}</p>}
+                      <div className="flex gap-2">
+                        <button type="button" onClick={() => saveNote(call.id, call.call_sid || call.id)} disabled={!n.draft.trim() || n.saving} className={`${dsButton.primary} flex-1`}>
+                          {n.saving && <Loader2 className="h-4 w-4 animate-spin" aria-hidden />}
+                          {t('phone.saveNote')}
+                        </button>
+                        <button type="button" onClick={() => dismiss(call.id)} className={dsButton.quiet}>{t('phone.close')}</button>
+                      </div>
+                    </div>
+                  );
+                })()}
+
+                {ended && (ended.outcome === 'callback' || ended.outcome === 'follow_up' || ended.outcome === 'missed') && (
+                  <button
+                    type="button"
+                    onClick={() => { dismiss(call.id); onOpenCalls(); }}
+                    className="mt-2 inline-flex h-9 items-center rounded-[var(--ds-radius-control)] px-3 text-[13px] font-semibold text-[var(--ds-arriving-text)] transition-colors hover:bg-[var(--ds-arriving-tint)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+                  >
+                    {t('phone.openCalls')}
+                  </button>
                 )}
               </div>
-
-              {customer?.dietary_notes && (
-                <p className="mt-2 line-clamp-2 text-[13px] text-[var(--ds-critical-text)]">
-                  {t('phone.allergies', { text: customer.dietary_notes })}
-                </p>
-              )}
-
-              {card.last_note && !ended && (
-                <p className="mt-2 flex gap-1.5 text-[13px] text-[var(--ds-text-secondary)]">
-                  <NotebookPen className="mt-0.5 h-3.5 w-3.5 flex-shrink-0" aria-hidden />
-                  <span className="line-clamp-2">{t('phone.lastNote', { date: shortDate(card.last_note.at), text: card.last_note.text })}</span>
-                </p>
-              )}
-
-              {(booking ? [{ id: booking.id, reservation_time: booking.reservation_time, guests: booking.guests }] : card.upcoming.slice(0, 2)).map(r => (
-                <button
-                  key={r.id}
-                  type="button"
-                  onClick={() => onOpenReservation({ id: r.id, reservation_time: r.reservation_time })}
-                  className="mt-2 flex w-full items-center gap-2 rounded-[var(--ds-radius-sm)] bg-[var(--ds-surface-row)] px-2.5 py-2 text-left text-[13px] text-[var(--ds-text-primary)] transition-colors hover:bg-[var(--ds-border)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
-                >
-                  <CalendarDays className="h-4 w-4 flex-shrink-0 text-[var(--ds-text-secondary)]" aria-hidden />
-                  <span className="truncate tabular-nums">
-                    {t('phone.booking', { day: dayLabel(r.reservation_time), time: timeLabel(r.reservation_time), count: r.guests })}
-                  </span>
-                </button>
-              ))}
-
-              {!ended && isHere(soft.incoming, call.id) && ringButtons}
-              {!ended && isHere(soft.active, call.id) && inCallBar(soft.active!, { customer_name: name || undefined, phone: customer?.phone || card.phone, phone_call_ref: call.call_sid || call.id })}
-
-              {/* La nota a fine chiamata, per le chiamate prese dal locale. */}
-              {ended?.outcome === 'answered' && (() => {
-                const n = notes[call.id];
-                if (!n) {
-                  return (
-                    <button
-                      type="button"
-                      onClick={() => { pinned.current.add(call.id); setNotes(prev => ({ ...prev, [call.id]: { draft: '' } })); }}
-                      className="mt-2 inline-flex h-9 items-center gap-1.5 rounded-[var(--ds-radius-control)] px-3 text-[13px] font-semibold text-[var(--ds-arriving-text)] transition-colors hover:bg-[var(--ds-arriving-tint)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
-                    >
-                      <NotebookPen className="h-4 w-4" aria-hidden /> {t('phone.addNote')}
-                    </button>
-                  );
-                }
-                if (n.saved) return <p className="mt-2 text-[13px] text-[var(--ds-seated-text)]">{t('phone.noteSaved')}</p>;
-                return (
-                  <div className="mt-2 space-y-2">
-                    <textarea
-                      autoFocus
-                      rows={2}
-                      maxLength={1000}
-                      value={n.draft}
-                      onChange={e => setNotes(prev => ({ ...prev, [call.id]: { draft: e.target.value } }))}
-                      placeholder={t('phone.notePlaceholder')}
-                      aria-label={t('phone.addNote')}
-                      className="w-full resize-none rounded-[var(--ds-radius-sm)] bg-[var(--ds-surface-row)] px-3 py-2 text-[14px] text-[var(--ds-text-primary)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
-                    />
-                    {n.error && <p className="text-[13px] text-[var(--ds-critical-text)]">{t('phone.noteError')}</p>}
-                    <div className="flex gap-2">
-                      <button type="button" onClick={() => saveNote(call.id, call.call_sid || call.id)} disabled={!n.draft.trim() || n.saving} className={`${dsButton.primary} flex-1`}>
-                        {n.saving && <Loader2 className="h-4 w-4 animate-spin" aria-hidden />}
-                        {t('phone.saveNote')}
-                      </button>
-                      <button type="button" onClick={() => dismiss(call.id)} className={dsButton.quiet}>{t('phone.close')}</button>
-                    </div>
-                  </div>
-                );
-              })()}
-
-              {ended && (ended.outcome === 'callback' || ended.outcome === 'follow_up' || ended.outcome === 'missed') && (
-                <button
-                  type="button"
-                  onClick={() => { dismiss(call.id); onOpenCalls(); }}
-                  className="mt-2 inline-flex h-9 items-center rounded-[var(--ds-radius-control)] px-3 text-[13px] font-semibold text-[var(--ds-arriving-text)] transition-colors hover:bg-[var(--ds-arriving-tint)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
-                >
-                  {t('phone.openCalls')}
-                </button>
-              )}
             </div>
           </div>
         );
