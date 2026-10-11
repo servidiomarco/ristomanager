@@ -574,6 +574,11 @@ Per i ristoranti con cassa **Passepartout Menù** (modulo dedicato). Tutto si re
 - **Trascrivi i vocali**: un vocale del cliente compare anche scritto sotto il lettore audio in Messaggi, e l'agente lo legge come un messaggio. La lingua si riconosce da sola; usa i crediti ElevenLabs di Sofia.
 - **Fai leggere le foto all'agente**: l'agente guarda le foto che il cliente manda nel suo ultimo messaggio (al massimo tre), per esempio lo screenshot di una prenotazione.
 
+**Asporto in chat** (Impostazioni › WhatsApp › Asporto in chat, con l'add-on Asporto, spento di serie)
+- L'agente prende gli ordini d'asporto in chat: mostra il menu con i prezzi, propone gli orari di ritiro ancora liberi e, dopo il riepilogo e il sì del cliente, registra l'ordine sulla board col suo numero del giorno. Valgono le regole del banco: capienza per orario, stop della giornata, minuti di preparazione. Un piatto che non c'è o un orario pieno non diventano un ordine: l'agente lo dice al cliente.
+- In modalità «Azioni» l'ordine entra da solo (si può spegnere con «Ordini d'asporto»); nelle altre è una proposta che lo staff conferma, e il cliente riceve il riepilogo col numero.
+- **Avvisa quando l'ordine è pronto**: quando l'ordine passa a «Pronto», dal banco o dal monitor di cucina, il cliente riceve un WhatsApp, una volta sola. Fuori dalle 24 ore serve il template «Ordine d'asporto pronto».
+
 **Farsi trovare** (Impostazioni › WhatsApp › Farsi trovare)
 - Il link wa.me del locale con un testo già scritto (di serie «Ciao! Vorrei prenotare un tavolo.»), il suo QR da scaricare e stampare, e i testi pronti per Google Business e la bio di Instagram.
 - Due interruttori: la pillola «WhatsApp» sulla pagina /prenota e «Scrivici su WhatsApp» in fondo al menu digitale.
@@ -923,6 +928,7 @@ Pagina unica a blocchi, con chip-àncora per saltare alla sezione e una **ricerc
 
 | Data | Sezione | Modifica |
 |---|---|---|
+| 2026-10-11 | Asporto, Messaggi: WhatsApp e SMS, Impostazioni | **Ordini d'asporto su WhatsApp e «il tuo ordine è pronto».** Con l'add-on Asporto, in Impostazioni › WhatsApp › Asporto in chat l'agente prende gli ordini in chat con le regole del banco (capienza, stop, tempi di preparazione) e, se vuoi, il cliente riceve un WhatsApp quando l'ordine è pronto. |
 | 2026-10-11 | Messaggi: WhatsApp e SMS, Impostazioni | **Vocali trascritti e foto lette dall'agente.** In Impostazioni › WhatsApp › Vocali e foto: i vocali dei clienti compaiono anche scritti in Messaggi e l'agente li legge; l'agente può anche guardare le foto che il cliente manda. |
 | 2026-10-11 | Messaggi: WhatsApp e SMS, Impostazioni | **Promemoria WhatsApp con i tasti e «Farsi trovare».** Il promemoria può arrivare con «Ci saremo», «Devo modificare» e «Annulla»: il cliente risponde con un tocco, anche con l'AI spenta («Annulla» chiede conferma). In Impostazioni › WhatsApp › Farsi trovare trovi il link e il QR del tuo WhatsApp, i testi per Google e Instagram, e puoi mostrarlo su /prenota e nel menu digitale. |
 | 2026-10-11 | Messaggi: WhatsApp e SMS, Impostazioni | **L'agente WhatsApp può anche prenotare, spostare e annullare da solo.** Nuova modalità «Azioni» in Impostazioni › WhatsApp › Agente automatico: dove le regole lo permettono fa da sé, altrimenti propone allo staff (caparre, banchetti, gruppi numerosi, cambi di sala, prenotazioni troppo vicine). Prima di annullare chiede conferma al cliente. Ogni azione arriva come notifica e in chat ha il tasto «Annulla». |

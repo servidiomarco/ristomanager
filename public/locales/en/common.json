@@ -168,7 +168,9 @@
     "waEntry": "Get found",
     "waEntryHint": "Your WhatsApp link and QR, on /prenota and in the menu",
     "waMedia": "Voice notes and photos",
-    "waMediaHint": "Transcribe voice notes, let the agent see photos"
+    "waMediaHint": "Transcribe voice notes, let the agent see photos",
+    "waTakeaway": "Takeaway in chat",
+    "waTakeawayHint": "Takeaway orders on WhatsApp and the \"ready\" message"
   },
   "aria": {
     "openMenu": "Open menu",

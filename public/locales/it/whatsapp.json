@@ -28,7 +28,8 @@
       "caparre": "Caparre",
       "conto": "Conto",
       "recensioni": "Recensioni",
-      "banchetti": "Banchetti"
+      "banchetti": "Banchetti",
+      "asporto": "Asporto"
     },
     "name": {
       "BOOKING_RECEIVED": "Richiesta ricevuta",
@@ -96,7 +97,8 @@
       "create": "Prenota",
       "modify": "Sposta e cambia le persone",
       "cancel": "Annulla",
-      "notes": "Note e allergie"
+      "notes": "Note e allergie",
+      "takeaway": "Ordini d'asporto"
     },
     "confirmCancel": "Chiedi conferma prima di annullare",
     "autoRules": "Quello che è spento lo propone. Sempre allo staff: caparre, banchetti, gruppi numerosi, cambi di sala e prenotazioni troppo vicine.",
@@ -135,6 +137,15 @@
     "transcribeMissing": "Manca la chiave ElevenLabs sul server: la trascrizione non può partire.",
     "photos": "Fai leggere le foto all'agente",
     "photosHint": "L'agente guarda le foto che il cliente manda (al massimo tre per risposta): uno screenshot di una prenotazione, un biglietto, un menu.",
+    "loadError": "Impostazioni non disponibili",
+    "saveError": "Non salvato"
+  },
+  "takeawayChat": {
+    "toggle": "L'agente prende gli ordini d'asporto",
+    "toggleHint": "In chat mostra il menu, propone gli orari di ritiro liberi e, dopo il sì del cliente, registra l'ordine sulla board. Le regole sono quelle dell'asporto: capienza, stop e minuti di preparazione.",
+    "ready": "Avvisa quando l'ordine è pronto",
+    "readyHint": "Quando l'ordine passa a «Pronto» (dal banco o dal monitor) il cliente riceve un WhatsApp. Fuori dalle 24 ore serve il template «Ordine d'asporto pronto».",
+    "noAddon": "Serve l'add-on Asporto.",
     "loadError": "Impostazioni non disponibili",
     "saveError": "Non salvato"
   }

@@ -28,7 +28,8 @@
       "caparre": "Deposits",
       "conto": "Bill",
       "recensioni": "Reviews",
-      "banchetti": "Banquets"
+      "banchetti": "Banquets",
+      "asporto": "Takeaway"
     },
     "name": {
       "BOOKING_RECEIVED": "Request received",
@@ -96,7 +97,8 @@
       "create": "Book",
       "modify": "Move and change party size",
       "cancel": "Cancel",
-      "notes": "Notes and allergies"
+      "notes": "Notes and allergies",
+      "takeaway": "Takeaway orders"
     },
     "confirmCancel": "Ask for confirmation before cancelling",
     "autoRules": "What is off, it proposes. Always left to staff: deposits, banquets, large groups, room changes and bookings too close.",
@@ -135,6 +137,15 @@
     "transcribeMissing": "The ElevenLabs key is missing on the server: transcription cannot run.",
     "photos": "Let the agent see photos",
     "photosHint": "The agent looks at the photos the customer sends (up to three per reply): a booking screenshot, a ticket, a menu.",
+    "loadError": "Settings unavailable",
+    "saveError": "Not saved"
+  },
+  "takeawayChat": {
+    "toggle": "The agent takes takeaway orders",
+    "toggleHint": "In chat it shows the menu, offers the free pickup times and, after the customer says yes, records the order on the board. Takeaway rules apply: capacity, stop and preparation time.",
+    "ready": "Notify when the order is ready",
+    "readyHint": "When the order goes to \"Ready\" (from the counter or the kitchen monitor) the customer gets a WhatsApp. Outside the 24 hours the \"Takeaway order ready\" template is needed.",
+    "noAddon": "The Takeaway add-on is required.",
     "loadError": "Settings unavailable",
     "saveError": "Not saved"
   }

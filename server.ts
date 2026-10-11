@@ -43,6 +43,13 @@ import { startSalaNodeReplica, getSalaNodeLocalStatus, isCloudUplinkDown } from 
 import { salaNodeAccessPolicy, startSalaNodeAccess, getSalaNodeTenantId } from './services/salaNodeAccess.js';
 import { startSalaNodeConfigSync, kickConfigSync } from './services/salaNodeConfigSync.js';
 import { VOICE_CHANNEL, WHATSAPP_CHANNEL, type ToolOutcome } from './services/bookingTools.js';
+import {
+    TAKEAWAY_CAPACITY_KEY, TAKEAWAY_CAPACITY_DEFAULT, TAKEAWAY_PREP_MINUTES_KEY, TAKEAWAY_PREP_MINUTES_DEFAULT,
+    TAKEAWAY_STOP_DATE_KEY, TAKEAWAY_DATE_MODE_KEY, TAKEAWAY_DATE_MODE_DEFAULT, TAKEAWAY_STATUSES,
+    getTakeawaySettings, loadTakeawayView, buildTakeawayItems, validateTakeawaySlot,
+    normalizeDishText, loadVoiceCatalogue, matchVoiceDish, takeawayDateReadback, filterOrderableSlots,
+    createTakeawayOrder, allocateTakeawayDailyNumber,
+} from './services/takeaway.js';
 import { TENANT_FEATURES, getTenantFeatures, isFeatureEnabledForTenant, invalidateTenantFeaturesCache, clearTenantFeaturesCache, type TenantFeature } from './services/entitlements.js';
 import { clearTenantLocaleCache, getTenantLocale, sqlTimeZone } from './services/tenantLocale.js';
 import { normalizePhoneE164 } from './utils/phone.js';
@@ -52,6 +59,7 @@ import {
     handleTwilioWhatsAppInbound, validateTwilioSignature, pickTemplate, twilioMediaAuthHeader,
     createWhatsAppRouter, isWindowOpen, configureReservationButtons, publicWhatsAppLink, getRemindersPolicy,
     configureWhatsAppMedia, fetchInboundMedia, MediaFetchError, agentMessageBody, photosForAgent,
+    notifyTakeawayReady, getTakeawayPolicy,
     type OutboundConfirmationResult, type WhatsAppTemplateOpts,
 } from './services/whatsapp/index.js';
 import { AI_KEY_INVALID, AI_KEY_INVALID_MESSAGE, isAiKeyInvalid } from './utils/aiErrors.js';
@@ -14389,8 +14397,19 @@ async function buildAgentContext(tenantId: number, key: string): Promise<{ ctx: 
         restaurantName: (await publicBusinessIdentity(tenantId)).name,
         depositPolicy: await getAutoDepositPolicy(tenantId),
         timezone: (await getTenantLocale(tenantId)).timezone,
+        takeaway: await agentTakeawayContext(tenantId),
     };
     return { ctx, reservationId: resv.rows[0]?.id ?? null };
+}
+
+/** L'asporto in chat per l'agente: add-on asporto e «Asporto in chat»
+ *  acceso; il link di /ordina solo se la pagina è aperta. */
+async function agentTakeawayContext(tenantId: number): Promise<{ orderPageUrl: string | null } | null> {
+    if (!(await isFeatureEnabledForTenant(tenantId, 'takeaway'))) return null;
+    if (!(await getTakeawayPolicy(tenantId)).enabled) return null;
+    if (!(await getFeatureFlag(tenantId, 'takeaway_online_enabled', false))) return { orderPageUrl: null };
+    const slug: string | null = (await queryWithRetry('SELECT slug FROM tenants WHERE id = $1', [tenantId])).rows[0]?.slug ?? null;
+    return { orderPageUrl: slug ? `${publicBaseUrl()}/ordina/${slug}` : null };
 }
 
 /** Salva la proposta dell'agente. Una per volta e per conversazione: quelle
@@ -14572,6 +14591,19 @@ async function loadAgentCatalogs(tenantId: number): Promise<{
 async function sendProposalFollowup(tenantId: number, tool: string, args: Record<string, any>, body: Record<string, any>): Promise<boolean> {
     try {
         const phone = String(args.phone || '');
+        // L'ordine d'asporto confermato dallo staff: piatti, ritiro, totale e
+        // il numero da dire al banco.
+        if (tool === 'create_takeaway_order') {
+            if (!phone || body?.success !== true) return false;
+            if (!(await isWhatsAppReady(tenantId)) || !(await isWindowOpen(tenantId, phone))) return false;
+            const english = isEnglishGuest(detectLanguageFromPhonePrefix(phone));
+            const numero = body.daily_number != null ? (english ? ` Your order number is ${body.daily_number}.` : ` Il tuo numero d'ordine è il ${body.daily_number}.`) : '';
+            const text = english
+                ? `Done! ${body.items}, to collect ${body.pickup}. Total ${body.total}.${numero}`
+                : `Fatto! ${body.items}, da ritirare ${body.pickup}. Totale ${body.total}.${numero}`;
+            await sendWhatsAppText(tenantId, phone, text, null, undefined, undefined, 'agent_followup');
+            return true;
+        }
         const reservationId = Number(body?.reservation_id);
         if (!phone || !Number.isInteger(reservationId)) return false;
         if (!(await isWhatsAppReady(tenantId)) || !(await isWindowOpen(tenantId, phone))) return false;
@@ -14657,7 +14689,15 @@ app.post('/messages/agent/proposals/:id/confirm', authenticate, requirePermissio
         // letta e approvata — vale come chiarimento per i controlli che
         // farebbero una domanda al cliente (nome diverso dalla rubrica,
         // prenotazione già in agenda): vedi tools/booking.ts.
-        const phone = String(args.phone || `+${prop.phone_digits}`);
+        // Il numero da cui il cliente scrive: phone_digits è la chiave della
+        // conversazione (ultime cifre), e «+» davanti non fa un numero vero.
+        const lastFrom = args.phone ? null : (await queryWithRetry(
+            `SELECT from_phone FROM outbound_messages
+              WHERE tenant_id = $1 AND direction = 'inbound' AND from_phone_digits = ANY($2::text[])
+              ORDER BY sent_at DESC LIMIT 1`,
+            [req.tenantId!, phoneDigitsVariants(prop.phone_digits)]
+        )).rows[0]?.from_phone;
+        const phone = String(args.phone || lastFrom || `+${prop.phone_digits}`);
         let body: Record<string, any>;
         try {
             body = await tool.execute(args, { tenantId: req.tenantId!, phone, phoneDigits: prop.phone_digits, approvedByStaff: true });
@@ -14673,7 +14713,7 @@ app.post('/messages/agent/proposals/:id/confirm', authenticate, requirePermissio
               WHERE id = $1`,
             [id, riuscito ? 'DONE' : 'FAILED', JSON.stringify(outcome.body), req.user?.userId ?? null]);
 
-        const followupSent = riuscito ? await sendProposalFollowup(req.tenantId!, prop.tool, args, outcome.body) : false;
+        const followupSent = riuscito ? await sendProposalFollowup(req.tenantId!, prop.tool, { ...args, phone }, outcome.body) : false;
         res.json({ ok: riuscito, tool: prop.tool, result: outcome.body, followup_sent: followupSent });
     } catch (err: any) {
         console.error('POST /messages/agent/proposals/:id/confirm error:', err);
@@ -32055,167 +32095,6 @@ app.get('/reviews/requests', authenticate, requireFeature('reviews'), requirePer
 // posti. La comanda in cucina non nasce qui: arriva in una PR dedicata via
 // kitchen_order_id. Tutte le route esigono l'entitlement 'takeaway'.
 
-const TAKEAWAY_CAPACITY_KEY = 'takeaway_capacity_per_slot';
-const TAKEAWAY_CAPACITY_DEFAULT = 4;
-const TAKEAWAY_PREP_MINUTES_KEY = 'takeaway_prep_minutes';
-const TAKEAWAY_PREP_MINUTES_DEFAULT = 20;
-// text_value = data ISO: lo «stop asporto» vale per UNA data (di solito
-// stasera) e decade da solo — niente interruttore da ricordarsi di riaprire.
-const TAKEAWAY_STOP_DATE_KEY = 'takeaway_stop_date';
-// text_value = 'global' | 'own'. Se la board segue la data dell'app, il
-// giorno si cambia una volta sola dalla testata e vale per prenotazioni,
-// sala e asporto insieme; 'own' tiene il giorno del banco per conto suo,
-// com'era prima che il navigatore salisse in testata.
-const TAKEAWAY_DATE_MODE_KEY = 'takeaway_date_mode';
-const TAKEAWAY_DATE_MODE_DEFAULT: 'global' | 'own' = 'own';
-
-const TAKEAWAY_STATUSES = ['REQUESTED', 'CONFIRMED', 'IN_PREPARATION', 'READY', 'PICKED_UP', 'NO_SHOW', 'CANCELLED'] as const;
-
-async function getTakeawaySettings(tenantId: number): Promise<{ capacityPerSlot: number; prepMinutes: number; stopDate: string | null; dateMode: 'global' | 'own' }> {
-    try {
-        const result = await queryWithRetry(
-            'SELECT key, int_value, text_value FROM app_settings WHERE tenant_id = $1 AND key = ANY($2)',
-            [tenantId, [TAKEAWAY_CAPACITY_KEY, TAKEAWAY_PREP_MINUTES_KEY, TAKEAWAY_STOP_DATE_KEY, TAKEAWAY_DATE_MODE_KEY]]
-        );
-        const byKey = new Map<string, any>(result.rows.map((r: any) => [r.key, r]));
-        const intOr = (key: string, fallback: number) => {
-            const n = Number(byKey.get(key)?.int_value);
-            return Number.isFinite(n) && n > 0 ? Math.trunc(n) : fallback;
-        };
-        const stopRaw = byKey.get(TAKEAWAY_STOP_DATE_KEY)?.text_value;
-        const modeRaw = byKey.get(TAKEAWAY_DATE_MODE_KEY)?.text_value;
-        return {
-            capacityPerSlot: intOr(TAKEAWAY_CAPACITY_KEY, TAKEAWAY_CAPACITY_DEFAULT),
-            prepMinutes: intOr(TAKEAWAY_PREP_MINUTES_KEY, TAKEAWAY_PREP_MINUTES_DEFAULT),
-            stopDate: typeof stopRaw === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(stopRaw) ? stopRaw : null,
-            dateMode: modeRaw === 'global' || modeRaw === 'own' ? modeRaw : TAKEAWAY_DATE_MODE_DEFAULT,
-        };
-    } catch (err) {
-        console.error('[takeaway] lettura impostazioni fallita, uso i default:', (err as any)?.message || err);
-        return { capacityPerSlot: TAKEAWAY_CAPACITY_DEFAULT, prepMinutes: TAKEAWAY_PREP_MINUTES_DEFAULT, stopDate: null, dateMode: TAKEAWAY_DATE_MODE_DEFAULT };
-    }
-}
-
-// Uno slot di ritiro è valido se sta nella griglia di apertura di uno dei
-// due turni; il turno dell'ordine deriva da qui, mai dal client.
-async function resolveTakeawayShift(tenantId: number, date: string, time: string): Promise<'LUNCH' | 'DINNER' | null> {
-    const [lunch, dinner] = await Promise.all([
-        getAvailableSlots(tenantId, date, Shift.LUNCH),
-        getAvailableSlots(tenantId, date, Shift.DINNER),
-    ]);
-    if (lunch.includes(time)) return 'LUNCH';
-    if (dinner.includes(time)) return 'DINNER';
-    return null;
-}
-
-async function countTakeawayInSlot(tenantId: number, date: string, time: string, excludeId?: number): Promise<number> {
-    const result = await queryWithRetry(
-        `SELECT COUNT(*)::int AS n FROM takeaway_orders
-         WHERE tenant_id = $1 AND pickup_date = $2 AND pickup_time = $3
-           AND status NOT IN ('CANCELLED', 'NO_SHOW') AND id <> COALESCE($4, -1)`,
-        [tenantId, date, time, excludeId ?? null]
-    );
-    return result.rows[0]?.n ?? 0;
-}
-
-async function loadTakeawayView(tenantId: number, orderId: number): Promise<any | null> {
-    const [order, items] = await Promise.all([
-        // bill_id in vista: la board mostra «conto in cassa» senza
-        // interrogare /bills/open.
-        queryWithRetry(
-            `SELECT t.*, o.table_bill_id AS bill_id FROM takeaway_orders t
-             LEFT JOIN orders o ON o.id = t.kitchen_order_id AND o.tenant_id = t.tenant_id
-             WHERE t.id = $1 AND t.tenant_id = $2`,
-            [orderId, tenantId]
-        ),
-        queryWithRetry(
-            'SELECT id, takeaway_order_id, dish_id, name_snapshot, unit_price_cents, qty, note FROM takeaway_order_items WHERE takeaway_order_id = $1 AND tenant_id = $2 ORDER BY id',
-            [orderId, tenantId]
-        ),
-    ]);
-    if (order.rows.length === 0) return null;
-    const rows = items.rows;
-    const total = rows.reduce((sum: number, r: any) => sum + Number(r.unit_price_cents) * Number(r.qty), 0);
-    return { ...order.rows[0], items: rows, total_cents: total };
-}
-
-// Numero d'ordine del giorno («#12»): progressivo per (tenant, data di
-// ritiro), assegnato DENTRO la transazione di creazione e persistito — mai
-// derivato a video, così un annullamento non rinumera gli ordini già
-// comunicati ai clienti. L'advisory lock transazionale serializza le
-// assegnazioni concorrenti dello stesso giorno (due ordini web nello stesso
-// istante leggerebbero lo stesso MAX+1); l'indice unico parziale della
-// migration resta la rete di sicurezza. Il lock muore col COMMIT/ROLLBACK.
-async function allocateTakeawayDailyNumber(client: { query: (text: string, params?: any[]) => Promise<{ rows: any[] }> }, tenantId: number, pickupDate: string): Promise<number> {
-    await client.query(
-        `SELECT pg_advisory_xact_lock(hashtextextended('takeaway_daily:' || $1 || ':' || $2, 0))`,
-        [String(tenantId), pickupDate]
-    );
-    const r = await client.query(
-        `SELECT COALESCE(MAX(daily_number), 0) + 1 AS n FROM takeaway_orders WHERE tenant_id = $1 AND pickup_date = $2`,
-        [tenantId, pickupDate]
-    );
-    return Number(r.rows[0].n);
-}
-
-// Valida le righe e congela nome/prezzo dal menu. Prezzo base del piatto:
-// il listino dedicato all'asporto arriva con la scelta menu-asporto, non qui.
-async function buildTakeawayItems(tenantId: number, raw: unknown): Promise<{ error?: string; items?: { dish_id: number; name: string; cents: number; qty: number; note: string | null }[] }> {
-    if (!Array.isArray(raw) || raw.length === 0) return { error: 'Serve almeno una riga' };
-    if (raw.length > 50) return { error: 'Troppe righe (max 50)' };
-    const parsed: { dish_id: number; qty: number; note: string | null }[] = [];
-    for (const r of raw) {
-        const dishId = Math.trunc(Number((r as any)?.dish_id));
-        const qty = Math.trunc(Number((r as any)?.qty ?? 1));
-        if (!Number.isFinite(dishId) || dishId <= 0) return { error: 'dish_id mancante o non valido' };
-        if (!Number.isFinite(qty) || qty < 1 || qty > 99) return { error: 'Quantità non valida (1-99)' };
-        const note = typeof (r as any)?.note === 'string' ? (r as any).note.trim().slice(0, 300) : '';
-        parsed.push({ dish_id: dishId, qty, note: note || null });
-    }
-    const dishIds = [...new Set(parsed.map(p => p.dish_id))];
-    const dishes = await queryWithRetry(
-        'SELECT id, name, price FROM dishes WHERE id = ANY($1::int[]) AND tenant_id = $2',
-        [dishIds, tenantId]
-    );
-    const byId = new Map<number, any>(dishes.rows.map((d: any) => [Number(d.id), d]));
-    const items = [];
-    for (const p of parsed) {
-        const dish = byId.get(p.dish_id);
-        if (!dish) return { error: `Piatto ${p.dish_id} inesistente` };
-        items.push({
-            dish_id: p.dish_id,
-            name: String(dish.name),
-            cents: Math.max(0, Math.round(Number(dish.price) * 100)),
-            qty: p.qty,
-            note: p.note,
-        });
-    }
-    return { items };
-}
-
-// Le route di scrittura ricontrollano slot, stop e capienza; `force: true`
-// scavalca stop e capienza (MAI la validità dello slot): chi prende
-// l'ordine al banco può decidere che uno in più ci sta, la pagina pubblica
-// delle fasi successive no.
-async function validateTakeawaySlot(
-    tenantId: number, date: string, time: string,
-    opts: { force: boolean; excludeId?: number }
-): Promise<{ error?: { status: number; body: any }; shift?: 'LUNCH' | 'DINNER' }> {
-    const shift = await resolveTakeawayShift(tenantId, date, time);
-    if (!shift) return { error: { status: 400, body: { error: 'invalid_slot', message: 'Orario fuori dalla griglia di apertura' } } };
-    const settings = await getTakeawaySettings(tenantId);
-    if (!opts.force) {
-        if (settings.stopDate === date) {
-            return { error: { status: 409, body: { error: 'takeaway_stopped', message: 'Asporto fermo per questa data' } } };
-        }
-        const booked = await countTakeawayInSlot(tenantId, date, time, opts.excludeId);
-        if (booked >= settings.capacityPerSlot) {
-            return { error: { status: 409, body: { error: 'slot_full', message: 'Slot al completo', booked, capacity: settings.capacityPerSlot } } };
-        }
-    }
-    return { shift };
-}
-
 // La disponibilità per la scelta dello slot: griglia dei due turni con
 // prenotato/capienza. È la fotografia per chi prende l'ordine, non un
 // lock: la POST ricontrolla comunque.
@@ -32685,67 +32564,6 @@ async function takeawayVoiceOpen(tenantId: number, res: express.Response): Promi
     return true;
 }
 
-// Normalizzazione per il match dei piatti dettati: minuscole, niente
-// accenti, solo lettere e cifre. «Spaghetti all'Amatriciana» ≈ «spaghetti
-// amatriciana».
-const normalizeDishText = (s: string): string =>
-    String(s ?? '')
-        .toLowerCase()
-        .normalize('NFD')
-        .replace(/\p{M}/gu, '')
-        .replace(/[^a-z0-9]+/g, ' ')
-        .trim();
-
-async function loadVoiceCatalogue(tenantId: number): Promise<{ id: number; name: string; norm: string; tokens: Set<string> }[]> {
-    const rs = await queryWithRetry(
-        `SELECT d.id, d.name
-         FROM dishes d
-         WHERE d.tenant_id = $1 AND d.is_active AND d.crm_enabled
-           AND COALESCE(d.sold_by_weight, false) = false
-           AND EXISTS (SELECT 1 FROM dish_menus dm JOIN menus m ON m.id = dm.menu_id
-                       WHERE dm.dish_id = d.id AND m.system_key = 'ALLA_CARTA')`,
-        [tenantId]
-    );
-    return rs.rows.map((d: any) => {
-        const norm = normalizeDishText(d.name);
-        return { id: Number(d.id), name: String(d.name), norm, tokens: new Set(norm.split(' ')) };
-    });
-}
-
-// Dal nome dettato al piatto del menu. Esatto → contenimento → tokens
-// tutti presenti; più candidati alla pari = ambiguo, si chiede al cliente
-// invece di tirare a indovinare la cena di qualcuno.
-function matchVoiceDish(catalogue: { id: number; name: string; norm: string; tokens: Set<string> }[], spoken: string):
-    { dish: { id: number; name: string } } | { ambiguous: string[] } | { suggestions: string[] } {
-    const norm = normalizeDishText(spoken);
-    if (!norm) return { suggestions: [] };
-    const exact = catalogue.filter(d => d.norm === norm);
-    if (exact.length === 1) return { dish: exact[0] };
-    if (exact.length > 1) return { ambiguous: exact.map(d => d.name) };
-    const contains = catalogue.filter(d => d.norm.includes(norm) || norm.includes(d.norm));
-    if (contains.length === 1) return { dish: contains[0] };
-    if (contains.length > 1) return { ambiguous: contains.slice(0, 3).map(d => d.name) };
-    const spokenTokens = norm.split(' ').filter(t => t.length > 2);
-    if (spokenTokens.length > 0) {
-        const tokenMatch = catalogue.filter(d => spokenTokens.every(t => d.tokens.has(t)));
-        if (tokenMatch.length === 1) return { dish: tokenMatch[0] };
-        if (tokenMatch.length > 1) return { ambiguous: tokenMatch.slice(0, 3).map(d => d.name) };
-    }
-    // Niente match: i più vicini per token condivisi, per il «forse intendevi».
-    const scored = catalogue
-        .map(d => ({ d, score: spokenTokens.filter(t => d.tokens.has(t)).length }))
-        .filter(x => x.score > 0)
-        .sort((a, b) => b.score - a.score)
-        .slice(0, 3)
-        .map(x => x.d.name);
-    return { suggestions: scored };
-}
-
-const takeawayDateReadback = (iso: string, language?: string | null): string =>
-    new Date(`${iso}T12:00:00`).toLocaleDateString(
-        isEnglishGuest(normalizeLanguageCode(language)) ? 'en-GB' : 'it-IT',
-        { weekday: 'long', day: 'numeric', month: 'long' });
-
 async function handleElevenLabsCheckTakeawaySlots(tenantId: number, req: express.Request, res: express.Response) {
     try {
         if (!authorizeElevenLabs(req, res)) return;
@@ -32891,24 +32709,9 @@ async function handleElevenLabsCreateTakeawayOrder(tenantId: number, req: expres
         const built = await buildTakeawayItems(tenantId, matched);
         if (built.error) return fail('invalid_items', built.error);
 
-        const orderId = await withTenant(tenantId, async client => {
-            const dailyNumber = await allocateTakeawayDailyNumber(client, tenantId, date);
-            const ins = await client.query(
-                `INSERT INTO takeaway_orders (tenant_id, customer_name, customer_phone, pickup_date, pickup_time, shift, status, channel, notes, daily_number)
-                 VALUES ($1, $2, $3, $4, $5, $6, 'CONFIRMED', 'VOICE', $7, $8) RETURNING id`,
-                [tenantId, name, phone, date, time, slot.shift, notes || null, dailyNumber]
-            );
-            const id = Number(ins.rows[0].id);
-            await outboxEnqueueInTx(client, tenantId, 'takeaway:created', `takeaway:${id}`,
-                { takeaway_order_id: id }, { actor: { channel: 'voice' } });
-            for (const item of built.items!) {
-                await client.query(
-                    `INSERT INTO takeaway_order_items (tenant_id, takeaway_order_id, dish_id, name_snapshot, unit_price_cents, qty, note)
-                     VALUES ($1, $2, $3, $4, $5, $6, $7)`,
-                    [tenantId, id, item.dish_id, item.name, item.cents, item.qty, item.note]
-                );
-            }
-            return id;
+        const orderId = await createTakeawayOrder(tenantId, {
+            name, phone, date, time, shift: slot.shift!, channel: 'VOICE', notes: notes || null,
+            items: built.items!, outbox: { actor: { channel: 'voice' } },
         });
 
         const view = await loadTakeawayView(tenantId, orderId);
@@ -32967,21 +32770,6 @@ app.post('/webhook/t/:tenantToken/elevenlabs/create-takeaway-order', async (req,
 async function isTakeawayOnline(tenantId: number): Promise<boolean> {
     if (!(await isFeatureEnabledForTenant(tenantId, 'takeaway'))) return false;
     return getFeatureFlag(tenantId, 'takeaway_online_enabled', false);
-}
-
-// Minuti da un orario 'HH:MM'; -1 su forma imprevista (slot scartato).
-const slotMinutes = (time: string): number => {
-    const m = /^(\d{2}):(\d{2})$/.exec(time);
-    return m ? Number(m[1]) * 60 + Number(m[2]) : -1;
-};
-
-// Per OGGI uno slot è ordinabile solo se la cucina fa in tempo: ritiro ≥
-// adesso + minuti di preparazione. La griglia di domani passa intera.
-function filterOrderableSlots(slots: string[], date: string, prepMinutes: number, tz: string = 'Europe/Rome'): string[] {
-    if (date !== getItalianTodayIso(new Date(), tz)) return slots;
-    const now = getTimePartInTz(new Date(), tz);
-    const cutoff = slotMinutes(now) + prepMinutes;
-    return slots.filter(s => slotMinutes(s) >= cutoff);
 }
 
 // Bootstrap della pagina: identità + stato del canale. `takeawayEnabled`
@@ -33128,24 +32916,9 @@ async function handlePublicTakeawayOrderCreate(tenantId: number, req: express.Re
         if (built.error) return res.status(400).json({ error: 'invalid_items', message: built.error });
         const notes = typeof body.notes === 'string' ? body.notes.trim().slice(0, 1000) : '';
 
-        const orderId = await withTenant(tenantId, async client => {
-            const dailyNumber = await allocateTakeawayDailyNumber(client, tenantId, date);
-            const ins = await client.query(
-                `INSERT INTO takeaway_orders (tenant_id, customer_name, customer_phone, pickup_date, pickup_time, shift, status, channel, notes, daily_number)
-                 VALUES ($1, $2, $3, $4, $5, $6, 'CONFIRMED', 'WEB', $7, $8) RETURNING id`,
-                [tenantId, name, phone, date, time, slot.shift, notes || null, dailyNumber]
-            );
-            const id = Number(ins.rows[0].id);
-            await outboxEnqueueInTx(client, tenantId, 'takeaway:created', `takeaway:${id}`,
-                { takeaway_order_id: id }, { actor: { channel: 'web' } });
-            for (const item of built.items!) {
-                await client.query(
-                    `INSERT INTO takeaway_order_items (tenant_id, takeaway_order_id, dish_id, name_snapshot, unit_price_cents, qty, note)
-                     VALUES ($1, $2, $3, $4, $5, $6, $7)`,
-                    [tenantId, id, item.dish_id, item.name, item.cents, item.qty, item.note]
-                );
-            }
-            return id;
+        const orderId = await createTakeawayOrder(tenantId, {
+            name, phone, date, time, shift: slot.shift!, channel: 'WEB', notes: notes || null,
+            items: built.items!, outbox: { actor: { channel: 'web' } },
         });
 
         const view = await loadTakeawayView(tenantId, orderId);
@@ -33246,24 +33019,9 @@ app.post('/takeaway/orders', authenticate, requireFeature('takeaway'), requirePe
         const built = await buildTakeawayItems(req.tenantId!, body.items);
         if (built.error) return res.status(400).json({ error: 'invalid_items', message: built.error });
 
-        const orderId = await withTenant(req.tenantId!, async client => {
-            const dailyNumber = await allocateTakeawayDailyNumber(client, req.tenantId!, date);
-            const ins = await client.query(
-                `INSERT INTO takeaway_orders (tenant_id, customer_name, customer_phone, pickup_date, pickup_time, shift, status, channel, notes, created_by_user_id, daily_number)
-                 VALUES ($1, $2, $3, $4, $5, $6, 'CONFIRMED', 'STAFF', $7, $8, $9) RETURNING id`,
-                [req.tenantId!, name, phone || null, date, time, slot.shift, notes || null, req.user?.userId ?? null, dailyNumber]
-            );
-            const id = Number(ins.rows[0].id);
-            await outboxEnqueueInTx(client, req.tenantId!, 'takeaway:created', `takeaway:${id}`,
-                { takeaway_order_id: id }, outboxContext(req));
-            for (const item of built.items!) {
-                await client.query(
-                    `INSERT INTO takeaway_order_items (tenant_id, takeaway_order_id, dish_id, name_snapshot, unit_price_cents, qty, note)
-                     VALUES ($1, $2, $3, $4, $5, $6, $7)`,
-                    [req.tenantId!, id, item.dish_id, item.name, item.cents, item.qty, item.note]
-                );
-            }
-            return id;
+        const orderId = await createTakeawayOrder(req.tenantId!, {
+            name, phone: phone || null, date, time, shift: slot.shift!, channel: 'STAFF', notes: notes || null,
+            items: built.items!, createdByUserId: req.user?.userId ?? null, outbox: outboxContext(req),
         });
 
         const view = await loadTakeawayView(req.tenantId!, orderId);
@@ -33443,6 +33201,10 @@ app.post('/takeaway/orders/:id/status', authenticate, requireFeature('takeaway')
         if (updated.rows.length === 0) return res.status(404).json({ error: 'not_found' });
         const view = await loadTakeawayView(req.tenantId!, orderId);
         try { socketService?.broadcastToAll(req.tenantId!, 'takeaway:updated', view); } catch (_) {}
+        // «Il tuo ordine è pronto» al cliente, se il locale l'ha acceso.
+        if (status === 'READY') {
+            void notifyTakeawayReady(req.tenantId!, orderId, (await publicBusinessIdentity(req.tenantId!)).name);
+        }
         // Qualcuno ha preso in mano l'ordine: «nuovo ordine» è letto per
         // tutti. Ritirato, annullato o non ritirato, anche il «pronto»
         // della cucina non chiede più niente.
@@ -40822,6 +40584,10 @@ app.post('/kds/items/:id/status', authenticate, requirePermission('orders:kds'),
                     loadTakeawayView(req.tenantId!, Number(takeawayId)).then(view => {
                         socketService?.broadcastToAll(req.tenantId!, 'takeaway:updated', view);
                     }).catch(err => console.warn('[kds] takeaway READY non propagato:', err?.message ?? err));
+                    // Pronto dal monitor: anche qui il cliente lo sa.
+                    publicBusinessIdentity(req.tenantId!)
+                        .then(identity => notifyTakeawayReady(req.tenantId!, Number(takeawayId), identity.name))
+                        .catch(() => {});
                 }
             } catch (err: any) {
                 console.warn('[kds] takeaway READY non propagato:', err?.message ?? err);

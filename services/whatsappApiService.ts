@@ -23,7 +23,7 @@ export type TemplateApproval = 'approved' | 'pending' | 'rejected' | 'unsubmitte
 export interface WhatsAppTemplateRow {
   key: string;
   label: string;
-  group: 'prenotazioni' | 'caparre' | 'conto' | 'recensioni' | 'banchetti';
+  group: 'prenotazioni' | 'caparre' | 'conto' | 'recensioni' | 'banchetti' | 'asporto';
   category: 'UTILITY' | 'MARKETING';
   languages: Array<{
     language: 'it' | 'en';
@@ -93,6 +93,8 @@ export interface AgentAutoActions {
   modify: boolean;
   cancel: boolean;
   notes: boolean;
+  /** Assente su un backend precedente alla Fase 10. */
+  takeaway?: boolean;
 }
 
 export interface AgentPolicy {
@@ -196,12 +198,20 @@ export interface WhatsAppSettings {
   /** Assenti su un backend precedente alla Fase 9. */
   media?: MediaPolicy;
   transcription_ready?: boolean;
+  /** Assenti su un backend precedente alla Fase 10. */
+  takeaway?: TakeawayChatPolicy;
+  takeaway_available?: boolean;
+}
+
+export interface TakeawayChatPolicy {
+  enabled: boolean;
+  notify_ready: boolean;
 }
 
 export const getWhatsAppSettings = (): Promise<WhatsAppSettings> =>
   apiRequest(`${API_URL}/whatsapp/settings`, { headers: getHeaders() });
 
-export const saveWhatsAppSettings = (patch: { reminders?: Partial<RemindersPolicy>; entry?: Partial<EntryPolicy>; media?: Partial<MediaPolicy> }): Promise<WhatsAppSettings> =>
+export const saveWhatsAppSettings = (patch: { reminders?: Partial<RemindersPolicy>; entry?: Partial<EntryPolicy>; media?: Partial<MediaPolicy>; takeaway?: Partial<TakeawayChatPolicy> }): Promise<WhatsAppSettings> =>
   apiRequest(`${API_URL}/whatsapp/settings`, { method: 'PUT', headers: getHeaders(), body: JSON.stringify(patch) });
 
 /** Il testo che il cliente trova già scritto, se il locale non ne sceglie uno. */

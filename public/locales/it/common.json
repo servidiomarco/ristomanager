@@ -168,7 +168,9 @@
     "waEntry": "Farsi trovare",
     "waEntryHint": "Link e QR del tuo WhatsApp, su /prenota e nel menu",
     "waMedia": "Vocali e foto",
-    "waMediaHint": "Trascrivi i vocali, fai guardare le foto all'agente"
+    "waMediaHint": "Trascrivi i vocali, fai guardare le foto all'agente",
+    "waTakeaway": "Asporto in chat",
+    "waTakeawayHint": "Ordini d'asporto su WhatsApp e avviso «pronto»"
   },
   "aria": {
     "openMenu": "Apri menu",

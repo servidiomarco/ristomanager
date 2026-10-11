@@ -25,8 +25,10 @@ export interface AgentAutoActions {
     cancel: boolean;
     /** Note e allergie (queste ultime sempre col consenso del cliente). */
     notes: boolean;
+    /** Ordini d'asporto (con «Asporto in chat» acceso). */
+    takeaway: boolean;
 }
-export const AUTO_ACTION_KEYS: ReadonlyArray<keyof AgentAutoActions> = ['create', 'modify', 'cancel', 'notes'];
+export const AUTO_ACTION_KEYS: ReadonlyArray<keyof AgentAutoActions> = ['create', 'modify', 'cancel', 'notes', 'takeaway'];
 
 export interface WhatsAppAgentPolicy {
     mode: AgentMode;
@@ -57,7 +59,7 @@ export const DEFAULT_AGENT_POLICY: WhatsAppAgentPolicy = {
     max_replies_per_thread_24h: 6,
     max_runs_per_day: 120,
     daily_budget_eur: 5,
-    auto_actions: { create: true, modify: true, cancel: true, notes: true },
+    auto_actions: { create: true, modify: true, cancel: true, notes: true, takeaway: true },
     confirm_cancel: true,
 };
 
@@ -249,3 +251,32 @@ export function normalizeMediaPolicy(raw: unknown, base: WhatsAppMediaPolicy = D
 export const getMediaPolicy = (tenantId: number) =>
     readJson(tenantId, MEDIA_KEY, r => normalizeMediaPolicy(r), DEFAULT_MEDIA_POLICY);
 export const saveMediaPolicy = (tenantId: number, p: WhatsAppMediaPolicy) => writeJson(tenantId, MEDIA_KEY, p);
+
+// ---------------------------------------------------------------------------
+// Asporto in chat
+// ---------------------------------------------------------------------------
+
+/** L'asporto su WhatsApp (serve l'add-on asporto). Spento di serie. */
+export interface WhatsAppTakeawayPolicy {
+    /** L'agente prende gli ordini d'asporto in chat. */
+    enabled: boolean;
+    /** Quando l'ordine passa a «Pronto», il cliente riceve un WhatsApp. */
+    notify_ready: boolean;
+}
+export const DEFAULT_TAKEAWAY_POLICY: WhatsAppTakeawayPolicy = { enabled: false, notify_ready: false };
+const TAKEAWAY_KEY = 'whatsapp_takeaway_policy';
+
+export function normalizeTakeawayPolicy(raw: unknown, base: WhatsAppTakeawayPolicy = DEFAULT_TAKEAWAY_POLICY): WhatsAppTakeawayPolicy | null {
+    if (!isPlainObject(raw)) return null;
+    const out = { ...base };
+    for (const k of ['enabled', 'notify_ready'] as const) {
+        if (raw[k] === undefined) continue;
+        if (typeof raw[k] !== 'boolean') return null;
+        out[k] = raw[k] as boolean;
+    }
+    return out;
+}
+
+export const getTakeawayPolicy = (tenantId: number) =>
+    readJson(tenantId, TAKEAWAY_KEY, r => normalizeTakeawayPolicy(r), DEFAULT_TAKEAWAY_POLICY);
+export const saveTakeawayPolicy = (tenantId: number, p: WhatsAppTakeawayPolicy) => writeJson(tenantId, TAKEAWAY_KEY, p);

@@ -70,7 +70,8 @@
     "modify_reservation": "L'agente ha modificato",
     "cancel_reservation": "L'agente ha annullato",
     "add_reservation_note": "L'agente ha annotato",
-    "record_allergy": "L'agente ha segnato un'allergia"
+    "record_allergy": "L'agente ha segnato un'allergia",
+    "create_takeaway_order": "L'agente ha preso un ordine d'asporto"
   },
   "agentDidOther": "L'agente ha agito",
   "agentUndo": "Annulla",

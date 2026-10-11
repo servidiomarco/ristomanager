@@ -76,6 +76,7 @@ import { WhatsAppAgentCard } from './components/whatsapp/WhatsAppAgentCard';
 import { WhatsAppRemindersCard } from './components/whatsapp/WhatsAppRemindersCard';
 import { WhatsAppEntryCard } from './components/whatsapp/WhatsAppEntryCard';
 import { WhatsAppMediaCard } from './components/whatsapp/WhatsAppMediaCard';
+import { WhatsAppTakeawayCard } from './components/whatsapp/WhatsAppTakeawayCard';
 import { ReviewSettingsCard } from './components/ReviewSettingsCard';
 import { RecensioniPage } from './components/RecensioniPage';
 import { MediaLibraryManager } from './components/MediaLibraryManager';
@@ -4010,6 +4011,15 @@ const App: React.FC = () => {
                   >
                     <CardErrorBoundary label={t('settings.waMedia', 'Vocali e foto')}>
                       <WhatsAppMediaCard showToast={addToast} />
+                    </CardErrorBoundary>
+                  </SettingsDisclosure>
+                  <SettingsDisclosure
+                    icon={ShoppingBag}
+                    title={t('settings.waTakeaway', 'Asporto in chat')}
+                    description={t('settings.waTakeawayHint', "Ordini d'asporto su WhatsApp e avviso «pronto»")}
+                  >
+                    <CardErrorBoundary label={t('settings.waTakeaway', 'Asporto in chat')}>
+                      <WhatsAppTakeawayCard showToast={addToast} />
                     </CardErrorBoundary>
                   </SettingsDisclosure>
                   <SettingsDisclosure
