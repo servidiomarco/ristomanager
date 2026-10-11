@@ -1400,12 +1400,17 @@ export interface InventoryMovement {
   created_at: string;
 }
 
+// L'assenza di un collega vista senza il permesso staff:leave: il server
+// manda ferie, malattia e permesso con questo tipo e senza note. Non è un
+// TimeOffType: non si registra, si legge soltanto.
+export const TIME_OFF_MASKED = 'ASSENZA' as const;
+
 export interface StaffTimeOff {
   id: string;
   staffId: string;
   startDate: string; // YYYY-MM-DD
   endDate: string; // YYYY-MM-DD
-  type: TimeOffType;
+  type: TimeOffType | typeof TIME_OFF_MASKED;
   shift?: Shift | null; // null/undefined = full day; LUNCH or DINNER = single shift
   notes?: string;
   approved: boolean;
@@ -1431,6 +1436,7 @@ export interface LeaveRequest {
   decidedByName?: string | null;
   decidedAt?: string | null;
   decisionNote?: string | null;
+  timeOffId?: string | null; // l'assenza VACANZA delle ferie approvate
   createdAt: string;
 }
 

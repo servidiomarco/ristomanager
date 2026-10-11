@@ -49,7 +49,8 @@
     "RIPOSO": "Rest day",
     "VACANZA": "Holiday",
     "MALATTIA": "Sick leave",
-    "PERMESSO": "Time off"
+    "PERMESSO": "Time off",
+    "ASSENZA": "Away"
   },
   "leaveRecorded": {
     "RIPOSO": "Rest day recorded",
@@ -106,6 +107,9 @@
   "leave": "Leave",
   "weeklyRestDay": "Weekly rest day",
   "deleteLeaveAria": "Delete {{label}}",
+  "editLeaveAria": "Edit {{label}}",
+  "editLeave": "Edit leave",
+  "leaveUpdated": "Leave updated",
   "fromContract": "{{label}} from the contract ({{type}})",
   "contractExplainer": "On a {{type}} contract the calendar fills in lunch and dinner every day within the contract period, except the rest day and any absence.",
   "extraExplainer": "A casual contract has no automatic shifts: every service is assigned from the calendar.",

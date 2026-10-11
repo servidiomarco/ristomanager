@@ -85,6 +85,11 @@ export const PianoFerie: React.FC<PianoFerieProps> = ({ staffMembers, canManage,
   const [rejecting, setRejecting] = useState<LeaveRequest | null>(null);
   const [rejectNote, setRejectNote] = useState('');
   const [revoking, setRevoking] = useState<LeaveRequest | null>(null);
+  // Ferie approvate da correggere, anche passate: si spostano le date
+  // dell'assenza e la richiesta le segue (lo fa il server).
+  const [editing, setEditing] = useState<LeaveRequest | null>(null);
+  const [editStart, setEditStart] = useState('');
+  const [editEnd, setEditEnd] = useState('');
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [requestOpen, setRequestOpen] = useState(false);
   const [showDecided, setShowDecided] = useState(false);
@@ -254,6 +259,28 @@ export const PianoFerie: React.FC<PianoFerieProps> = ({ staffMembers, canManage,
       const [res] = await decide([{ id: r.id, decision: 'REVOKE' }]);
       if (res?.ok) showToast(t('revokedToast'), 'success');
       setRevoking(null);
+      await afterChange();
+    } catch (err) {
+      showToast(leaveErrorText(err, t), 'error');
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  const openEdit = (r: LeaveRequest) => {
+    setEditing(r);
+    setEditStart(r.startDate);
+    setEditEnd(r.endDate);
+  };
+
+  const confirmEdit = async () => {
+    if (!editing?.timeOffId || !editStart || !editEnd || editEnd < editStart) return;
+    const r = editing;
+    setBusyId(r.id);
+    try {
+      await staffApiService.updateTimeOff(r.timeOffId!, { startDate: editStart, endDate: editEnd });
+      showToast(t('editedToast'), 'success');
+      setEditing(null);
       await afterChange();
     } catch (err) {
       showToast(leaveErrorText(err, t), 'error');
@@ -783,7 +810,9 @@ export const PianoFerie: React.FC<PianoFerieProps> = ({ staffMembers, canManage,
             <div className="space-y-2">
               {decided.map(r => {
                 const s = staffById.get(r.staffId);
-                const canRevoke = canManage && r.status === 'APPROVED' && r.endDate >= todayIso;
+                // Anche ferie già fatte: correggerle a posteriori è normale.
+                const canRevoke = canManage && r.status === 'APPROVED';
+                const canEdit = canRevoke && !!r.timeOffId;
                 return (
                   <div key={r.id} className="flex flex-wrap items-center gap-2 rounded-[var(--ds-radius)] bg-[var(--ds-surface)] p-3 shadow-[var(--ds-shadow-card)]">
                     <StatusPill tone={LEAVE_STATUS_TONE[r.status]}>{leaveStatusLabel(r.status, t)}</StatusPill>
@@ -798,6 +827,11 @@ export const PianoFerie: React.FC<PianoFerieProps> = ({ staffMembers, canManage,
                         </div>
                       )}
                     </div>
+                    {canEdit && (
+                      <button type="button" onClick={() => openEdit(r)} className={dsButton.quiet}>
+                        {t('edit')}
+                      </button>
+                    )}
                     {canRevoke && (
                       <button type="button" onClick={() => setRevoking(r)} className={dsButton.quiet}>
                         {t('revoke')}
@@ -841,6 +875,59 @@ export const PianoFerie: React.FC<PianoFerieProps> = ({ staffMembers, canManage,
               className={dsTextarea}
             />
           </Field>
+        </FormCard>
+      </ModalShell>
+
+      {/* ── Ferie approvate da correggere ── */}
+      <ModalShell
+        open={!!editing}
+        onClose={() => setEditing(null)}
+        title={t('editTitle')}
+        subtitle={editing && staffById.get(editing.staffId) ? fullName(staffById.get(editing.staffId)!) : undefined}
+        size="sm"
+        closeOnEscape
+        bodyClassName="px-5 pb-5 pt-1 sm:px-6"
+        footer={
+          <>
+            <button type="button" onClick={() => setEditing(null)} className={dsButton.secondary}>{t('cancel')}</button>
+            <button
+              type="button"
+              onClick={confirmEdit}
+              disabled={busyId === editing?.id || !editStart || !editEnd || editEnd < editStart}
+              className={dsButton.primary}
+            >
+              {busyId === editing?.id && <Loader2 className="h-4 w-4 animate-spin" aria-hidden />}
+              {t('save')}
+            </button>
+          </>
+        }
+      >
+        <FormCard>
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+            <Field label={t('from')} htmlFor="ferie-edit-start">
+              <input
+                id="ferie-edit-start"
+                type="date"
+                value={editStart}
+                onChange={e => {
+                  const v = e.target.value;
+                  setEditStart(v);
+                  if (v && editEnd < v) setEditEnd(v);
+                }}
+                className={dsInput}
+              />
+            </Field>
+            <Field label={t('to')} htmlFor="ferie-edit-end">
+              <input
+                id="ferie-edit-end"
+                type="date"
+                value={editEnd}
+                min={editStart || undefined}
+                onChange={e => setEditEnd(e.target.value)}
+                className={dsInput}
+              />
+            </Field>
+          </div>
         </FormCard>
       </ModalShell>
 
