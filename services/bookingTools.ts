@@ -870,7 +870,7 @@ export async function createReservation(
                     detectedLanguage
                 );
                 const whatsappTemplate = d.buildBookingDepositRequestTemplate(
-                    d.toTitleCase(created.customer_name), depositGuestsLabel, depositDateLabel,
+                    tenantId, d.toTitleCase(created.customer_name), depositGuestsLabel, depositDateLabel,
                     normalizedTime, depositAmountCents, order.checkoutUrl,
                     detectedLanguage, Math.trunc(guests),
                     { currency: await d.getTenantCurrency(tenantId) }

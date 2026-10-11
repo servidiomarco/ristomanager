@@ -45,6 +45,12 @@ import { VOICE_CHANNEL, WHATSAPP_CHANNEL, type ToolOutcome } from './services/bo
 import { TENANT_FEATURES, getTenantFeatures, isFeatureEnabledForTenant, invalidateTenantFeaturesCache, clearTenantFeaturesCache, type TenantFeature } from './services/entitlements.js';
 import { clearTenantLocaleCache, getTenantLocale, sqlTimeZone } from './services/tenantLocale.js';
 import { normalizePhoneE164 } from './utils/phone.js';
+import {
+    configureWhatsApp, isWhatsAppReady, isSmsReady, getSender, backendBaseUrl,
+    sendWhatsAppText, sendTwilioSms, logOutboundMessage, logInboundMessage,
+    handleTwilioWhatsAppInbound, validateTwilioSignature, pickTemplate, twilioMediaAuthHeader,
+    type OutboundConfirmationResult, type WhatsAppTemplateOpts,
+} from './services/whatsapp/index.js';
 import { AI_KEY_INVALID, AI_KEY_INVALID_MESSAGE, isAiKeyInvalid } from './utils/aiErrors.js';
 import { provisionTenant, ProvisioningError } from './services/tenantProvisioning.js';
 import {
@@ -916,93 +922,9 @@ app.post('/webhook/t/:tenantToken/vonage-status', async (req, res) => {
 // rest of the API json-only.
 const twilioUrlEncoded = express.urlencoded({ extended: false });
 
-// Twilio signs every request: HMAC-SHA1 with the auth token, message =
-// public_url + sorted(key+value) concatenation, base64-encoded. We need
-// trust-proxy=1 (already set) so req.protocol/host reflect the URL Twilio
-// configured, not the loopback Railway sees internally.
-function validateTwilioSignature(req: express.Request): boolean {
-    const authToken = process.env.TWILIO_AUTH_TOKEN;
-    if (!authToken) return false;
-    const signature = req.header('X-Twilio-Signature');
-    if (!signature) return false;
-    try {
-        const url = `${req.protocol}://${req.get('host')}${req.originalUrl}`;
-        const params = (req.body || {}) as Record<string, string>;
-        const sortedKeys = Object.keys(params).sort();
-        const data = sortedKeys.reduce((acc, key) => acc + key + (params[key] ?? ''), url);
-        const expected = crypto.createHmac('sha1', authToken).update(data).digest('base64');
-        const a = Buffer.from(signature);
-        const b = Buffer.from(expected);
-        if (a.length !== b.length) return false;
-        return crypto.timingSafeEqual(a, b);
-    } catch (err) {
-        console.error('[Twilio] Signature validation failed:', err);
-        return false;
-    }
-}
-
-// Twilio WhatsApp inbound messages webhook. Persists the inbound row into
-// outbound_messages (direction='inbound') and broadcasts it via socket so the
-// operator inbox can show it in real time. Deliberately NO auto-reply: the
-// old bot that tried to parse "DATA ORA OSPITI NOME" was misleading for
-// customers replying to a confirmation ("Ok perfetto") and has been retired.
-// Corpo condiviso fra path storico (alias tenant 1) e gemello col token. La
-// firma Twilio copre l'URL completo (req.originalUrl), quindi vale anche sul
-// path tokenizzato: Twilio firma l'URL che ha configurato, token compreso.
-async function handleTwilioWhatsAppInbound(tenantId: number, req: express.Request, res: express.Response): Promise<void> {
-    if (!validateTwilioSignature(req)) {
-        console.warn('[Twilio] Inbound: invalid signature, rejecting');
-        res.status(403).send();
-        return;
-    }
-    console.log('[Twilio] Incoming message:', req.body);
-    // Acknowledge with empty TwiML so Twilio doesn't auto-reply on our behalf.
-    res.set('Content-Type', 'text/xml').status(200).send('<?xml version="1.0" encoding="UTF-8"?><Response></Response>');
-
-    // Entitlement WhatsApp spento: ack 200 già inviato (Twilio ritenta sui
-    // 4xx/5xx e disattiverebbe il webhook dopo troppi errori), ma il
-    // messaggio non entra nell'inbox. Copre anche gli SMS inbound: il numero
-    // Twilio è unico e fa parte dello stesso add-on messaggistica.
-    if (!(await isFeatureEnabledForTenant(tenantId, 'whatsapp'))) {
-        console.warn('[Twilio] inbound ignorato: entitlement whatsapp disattivo');
-        return;
-    }
-
-    try {
-        const fromRaw = String(req.body?.From || '');
-        const toRaw = String(req.body?.To || '');
-        const from = fromRaw.replace(/^whatsapp:/, '');
-        const to = toRaw.replace(/^whatsapp:/, '');
-        const body = String(req.body?.Body || '').trim();
-        const sid = req.body?.MessageSid || req.body?.SmsMessageSid || null;
-        const isWhatsApp = fromRaw.startsWith('whatsapp:');
-        const channel: 'sms' | 'whatsapp' = isWhatsApp ? 'whatsapp' : 'sms';
-        // Foto, vocali e posizioni: prima venivano scartati insieme al
-        // messaggio (nessuna riga, nessuna notifica) perche' il body e' vuoto.
-        // Gli url Twilio richiedono autenticazione: si salvano cosi' come sono
-        // e si servono dal proxy /messages/:id/media/:index.
-        const numMedia = Number(req.body?.NumMedia || 0);
-        const media: Array<{ url: string; content_type: string }> = [];
-        for (let i = 0; i < numMedia; i++) {
-            const url = String(req.body?.[`MediaUrl${i}`] || '');
-            if (!url) continue;
-            media.push({ url, content_type: String(req.body?.[`MediaContentType${i}`] || 'application/octet-stream') });
-        }
-        if (!from || (!body && media.length === 0)) {
-            console.log('[Twilio] Inbound: missing From or empty message, ignoring');
-            return;
-        }
-        const row = await logInboundMessage({
-            tenantId,
-            provider: 'twilio', channel, from, to, body, sid, media,
-        });
-        if (row && socketService) {
-            socketService.broadcastToAll(tenantId, 'message:inbound', row);
-        }
-    } catch (error) {
-        console.error('[Twilio] Error processing inbound:', error);
-    }
-}
+// Firma dei webhook Twilio e corpo del webhook in arrivo: in
+// services/whatsapp/webhooks.ts (validateTwilioSignature,
+// handleTwilioWhatsAppInbound), importati qui sopra.
 
 // Alias tenant 1 finché i provider non sono riconfigurati sui path con token.
 app.post('/webhook/twilio-whatsapp', twilioUrlEncoded, (req, res) => { void runWithTenantContext(PUBLIC_TENANT_ID, () => handleTwilioWhatsAppInbound(PUBLIC_TENANT_ID, req, res)); });
@@ -1146,7 +1068,7 @@ async function maybeFallbackWhatsAppToSms(tenantId: number, originalSid: string,
     if (!row || row.direction !== 'outbound' || row.channel !== 'whatsapp') return;
     if (!row.reservation_id) return;
     if (!row.body || !String(row.body).trim()) return;
-    if (!isTwilioSmsConfigured()) return;
+    if (!isSmsReady(Number(row.tenant_id))) return;
 
     // Idempotency: skip if we (auto or manual) already sent an SMS for this
     // reservation after the failed WA. Twilio can deliver the terminal state
@@ -2294,7 +2216,7 @@ async function handleElevenLabsPostCall(tenantId: number, req: express.Request, 
         if (row && row.phone) {
             const manage = await guestManageLink(tenantId, row.id);
             const message = buildConfirmationMessage(row.customer_name, row.reservation_time, row.guests, row.room_name, resolveGuestLanguage(row), { timezone: fusoMsg, manage });
-            const whatsappTemplate = buildBookingConfirmedTemplate(row.customer_name, row.reservation_time, row.guests, resolveGuestLanguage(row), { timezone: fusoMsg, manage });
+            const whatsappTemplate = buildBookingConfirmedTemplate(tenantId, row.customer_name, row.reservation_time, row.guests, resolveGuestLanguage(row), { timezone: fusoMsg, manage });
             sendBookingConfirmation(tenantId, row.phone, message, row.id, { whatsappTemplate }).catch(err =>
                 console.warn('[ElevenLabs] post-call confirmation send failed:', err?.message || err)
             );
@@ -4218,7 +4140,7 @@ app.put('/reservations/:id', authenticate, requirePermission('reservations:full'
                     roomName,
                     resolveGuestLanguage(updatedReservation), { timezone: fusoMsg, manage }),
                 whatsappTemplate: buildBookingConfirmedTemplate(
-                    updatedReservation.customer_name,
+                    req.tenantId!, updatedReservation.customer_name,
                     updatedReservation.reservation_time,
                     updatedReservation.guests,
                     resolveGuestLanguage(updatedReservation), { timezone: fusoMsg, manage }),
@@ -4253,7 +4175,7 @@ app.put('/reservations/:id', authenticate, requirePermission('reservations:full'
                     updatedReservation.guests,
                     resolveGuestLanguage(updatedReservation), { timezone: fusoMsg }),
                 whatsappTemplate: buildBookingDeclinedTemplate(
-                    updatedReservation.customer_name,
+                    req.tenantId!, updatedReservation.customer_name,
                     updatedReservation.reservation_time,
                     updatedReservation.guests,
                     resolveGuestLanguage(updatedReservation), { timezone: fusoMsg }),
@@ -4299,7 +4221,7 @@ app.put('/reservations/:id', authenticate, requirePermission('reservations:full'
                     updatedReservation.id,
                     {
                         whatsappTemplate: buildBookingUpdatedTemplate(
-                            updatedReservation.customer_name,
+                            req.tenantId!, updatedReservation.customer_name,
                             updatedReservation.reservation_time,
                             updatedReservation.guests,
                             resolveGuestLanguage(updatedReservation), { timezone: fusoMsg }),
@@ -4502,7 +4424,7 @@ app.post('/reservations/:id/send-reminder', authenticate, requirePermission('res
             buildReminderMessage(resv.customer_name, resv.reservation_time, resv.guests, resv.room_name, resolveGuestLanguage(resv), { timezone: fusoMsg, manage }, businessIdentity(req.tenantId!)),
             id,
             {
-                whatsappTemplate: buildBookingReminderTemplate(resv.customer_name, resv.reservation_time, resv.guests, resolveGuestLanguage(resv), { timezone: fusoMsg, manage }),
+                whatsappTemplate: buildBookingReminderTemplate(req.tenantId!, resv.customer_name, resv.reservation_time, resv.guests, resolveGuestLanguage(resv), { timezone: fusoMsg, manage }),
                 recordConfirmation: false,
             }
         );
@@ -4798,7 +4720,7 @@ app.post('/reservations/:id/confirm-whatsapp', authenticate, requireFeature('wha
 
         let outcome: OutboundConfirmationResult;
         if (channelChoice === 'sms') {
-            if (!isTwilioSmsConfigured()) {
+            if (!isSmsReady(req.tenantId!)) {
                 return res.status(400).json({ error: 'SMS non configurato' });
             }
             outcome = await sendTwilioSms(req.tenantId!, reservation.phone, message, reservation.id);
@@ -4806,7 +4728,7 @@ app.post('/reservations/:id/confirm-whatsapp', authenticate, requireFeature('wha
                 console.warn('[confirmation] recordConfirmationSent failed:', err?.message || err)
             );
         } else if (channelChoice === 'whatsapp') {
-            if (!isTwilioWhatsAppConfigured() && !isMetaWhatsAppConfigured()) {
+            if (!(await isWhatsAppReady(req.tenantId!))) {
                 return res.status(400).json({ error: 'WhatsApp non configurato' });
             }
             // Manual "Invia WhatsApp" from the CRM: freeform sends fail
@@ -4816,7 +4738,7 @@ app.post('/reservations/:id/confirm-whatsapp', authenticate, requireFeature('wha
             // returns undefined and Twilio would reject with 63016 again —
             // but that only happens during a broken rollout.
             const whatsappTemplate = buildBookingConfirmedTemplate(
-                reservation.customer_name,
+                req.tenantId!, reservation.customer_name,
                 reservation.reservation_time,
                 reservation.guests,
                 reservation.language, { timezone: fusoMsg, manage });
@@ -4827,7 +4749,7 @@ app.post('/reservations/:id/confirm-whatsapp', authenticate, requireFeature('wha
         } else {
             outcome = await sendBookingConfirmation(req.tenantId!, reservation.phone, message, reservation.id, {
                 whatsappTemplate: buildBookingConfirmedTemplate(
-                    reservation.customer_name,
+                    req.tenantId!, reservation.customer_name,
                     reservation.reservation_time,
                     reservation.guests,
                     reservation.language, { timezone: fusoMsg, manage }),
@@ -9327,7 +9249,7 @@ app.post('/reservations/:id/bill/notify', authenticate, requirePermission('payme
         try {
             const delivery = await sendBookingConfirmation(req.tenantId!, reservation.phone, message, reservation.id, {
                 whatsappTemplate: buildTableBillLinkTemplate(
-                    reservation.customer_name,
+                    req.tenantId!, reservation.customer_name,
                     Number(bill.covers) || 1,
                     Number(bill.total_cents),
                     bill.share_token,
@@ -13532,12 +13454,13 @@ app.get('/messages/:id/media/:index', authenticate, requirePermission('reservati
             return res.status(400).json({ error: 'Host non consentito' });
         }
 
-        const sid = process.env.TWILIO_ACCOUNT_SID;
-        const token = process.env.TWILIO_AUTH_TOKEN;
-        if (!sid || !token) return res.status(503).json({ error: 'Twilio non configurato' });
+        // Le credenziali sono quelle del mittente del ristorante: un
+        // allegato si scarica solo dall'account che l'ha ricevuto.
+        const sender = await getSender(req.tenantId!);
+        if (!sender) return res.status(503).json({ error: 'Twilio non configurato' });
 
         const upstream = await fetch(String(item.url), {
-            headers: { Authorization: 'Basic ' + Buffer.from(`${sid}:${token}`).toString('base64') },
+            headers: { Authorization: twilioMediaAuthHeader(sender) },
         });
         if (!upstream.ok || !upstream.body) {
             console.warn(`[media] Twilio ha risposto ${upstream.status} per il messaggio ${id}`);
@@ -13811,7 +13734,7 @@ app.post('/email/threads/:emailKey/suggest-booking', authenticate, requirePermis
             fromEmail: email.from_email || key,
             subject: email.subject,
             body: email.body || '',
-            restaurantName: businessIdentity().name,
+            restaurantName: (await publicBusinessIdentity(req.tenantId!)).name,
             timezone: (await getTenantLocale(req.tenantId!)).timezone,
         });
 
@@ -14311,9 +14234,10 @@ app.post('/messages/suggest-reply', authenticate, requirePermission('reservation
                   WHERE tenant_id = $2
                     AND channel IN ('sms','whatsapp')
                     AND (to_phone_digits = ANY($1::text[]) OR from_phone_digits = ANY($1::text[]))
+                    AND (kind IS NULL OR kind <> ALL($3::text[]))
                   ORDER BY sent_at DESC
                   LIMIT 15`,
-                [phoneDigitsVariants(key), req.tenantId!]
+                [phoneDigitsVariants(key), req.tenantId!, INBOX_HIDDEN_KINDS]
             ),
             queryWithRetry(
                 `SELECT title, content FROM ai_knowledge_entries WHERE tenant_id = $1 AND is_active ORDER BY sort_order, id`,
@@ -14344,7 +14268,7 @@ app.post('/messages/suggest-reply', authenticate, requirePermission('reservation
             reservation: resv.rows[0] ?? null,
             customer: await loadCustomerProfileForAi(req.tenantId!, key),
             knowledge: kb.rows as any,
-            restaurantName: businessIdentity().name,
+            restaurantName: (await publicBusinessIdentity(req.tenantId!)).name,
             depositPolicy: await getAutoDepositPolicy(req.tenantId!),
             timezone: (await getTenantLocale(req.tenantId!)).timezone,
         }, {
@@ -14413,7 +14337,8 @@ app.post('/messages/agent/run', authenticate, requirePermission('reservations:fu
                   WHERE tenant_id = $2
                     AND channel IN ('sms','whatsapp')
                     AND (to_phone_digits = ANY($1::text[]) OR from_phone_digits = ANY($1::text[]))
-                  ORDER BY sent_at DESC LIMIT 15`, [phoneDigitsVariants(key), req.tenantId!]),
+                    AND (kind IS NULL OR kind <> ALL($3::text[]))
+                  ORDER BY sent_at DESC LIMIT 15`, [phoneDigitsVariants(key), req.tenantId!, INBOX_HIDDEN_KINDS]),
             queryWithRetry(`SELECT title, content FROM ai_knowledge_entries WHERE tenant_id = $1 AND is_active ORDER BY sort_order, id`, [req.tenantId!]),
             getVoiceLargeGroupThreshold(req.tenantId!),
         ]);
@@ -14448,7 +14373,7 @@ app.post('/messages/agent/run', authenticate, requirePermission('reservations:fu
             phone,
             knowledge: kb.rows as any,
             largeGroupThreshold: soglia,
-            restaurantName: businessIdentity().name,
+            restaurantName: (await publicBusinessIdentity(req.tenantId!)).name,
             depositPolicy: await getAutoDepositPolicy(req.tenantId!),
             timezone: (await getTenantLocale(req.tenantId!)).timezone,
         });
@@ -14520,7 +14445,8 @@ app.post('/messages/agent/extract-booking', authenticate, requirePermission('res
               WHERE tenant_id = $2
                 AND channel IN ('sms','whatsapp')
                 AND (to_phone_digits = ANY($1::text[]) OR from_phone_digits = ANY($1::text[]))
-              ORDER BY sent_at DESC LIMIT 15`, [phoneDigitsVariants(key), req.tenantId!]);
+                AND (kind IS NULL OR kind <> ALL($3::text[]))
+              ORDER BY sent_at DESC LIMIT 15`, [phoneDigitsVariants(key), req.tenantId!, INBOX_HIDDEN_KINDS]);
         const messages = msgs.rows.reverse();
         if (messages.length === 0) return res.status(404).json({ error: 'Conversazione vuota' });
 
@@ -15237,7 +15163,7 @@ app.post('/payments/requests', authenticate, requirePermission('reservations:ful
             if (!(await isSmtpConfigured(req.tenantId!))) return res.status(400).json({ error: 'Email non configurata (server SMTP mancante)' });
         } else {
             if (!reservation.phone) return res.status(400).json({ error: 'La prenotazione non ha un numero di telefono' });
-            if (channel === 'sms' && !isTwilioSmsConfigured()) return res.status(400).json({ error: 'SMS non configurato' });
+            if (channel === 'sms' && !isSmsReady(req.tenantId!)) return res.status(400).json({ error: 'SMS non configurato' });
         }
 
         // Create the gateway order first — if the API call fails we don't
@@ -15296,7 +15222,7 @@ app.post('/payments/requests', authenticate, requirePermission('reservations:ful
             ? `${reservation.guests} ${Number(reservation.guests) === 1 ? 'guest' : 'guests'}`
             : `${reservation.guests} ${Number(reservation.guests) === 1 ? 'persona' : 'persone'}`;
         const whatsappTemplate = buildBookingDepositRequestTemplate(
-            reservation.customer_name,
+            req.tenantId!, reservation.customer_name,
             depositGuestsLabel,
             depositDateLabel,
             depositTimeLabel,
@@ -15818,7 +15744,7 @@ async function applyPaymentOrderTransition(
                     // niente JWT in mano, il tenant è quello della payment_request.
                     await sendBookingConfirmation(Number(row.tenant_id) || PUBLIC_TENANT_ID, reservation.phone, message, reservation.id, {
                         whatsappTemplate: buildBookingDepositConfirmedTemplate(
-                            reservation.customer_name,
+                            Number(row.tenant_id) || PUBLIC_TENANT_ID, reservation.customer_name,
                             reservation.reservation_time,
                             reservation.guests,
                             row.amount_cents,
@@ -18459,7 +18385,7 @@ const declineReservationForExpiredLink = async (
                 email: r.email,
                 reservationId: Number(r.id),
                 smsText: buildDeclineMessage(r.customer_name, r.reservation_time, r.guests, resolveGuestLanguage(r), { timezone: fusoMsg }),
-                whatsappTemplate: buildBookingDeclinedTemplate(r.customer_name, r.reservation_time, r.guests, resolveGuestLanguage(r), { timezone: fusoMsg }),
+                whatsappTemplate: buildBookingDeclinedTemplate(tenantId, r.customer_name, r.reservation_time, r.guests, resolveGuestLanguage(r), { timezone: fusoMsg }),
                 buildEmail: () => buildBookingDeclineEmail({
                     customerName: r.customer_name,
                     reservationTime: r.reservation_time,
@@ -19069,7 +18995,7 @@ const startReviewRequestScheduler = () => {
                         email,
                         reservationId: row.id,
                         smsText: buildReviewRequestMessage(row.customer_name, reviewUrl, identity, language),
-                        whatsappTemplate: buildReviewRequestTemplate(row.customer_name, reviewUrl, language),
+                        whatsappTemplate: buildReviewRequestTemplate(tenantId, row.customer_name, reviewUrl, language),
                         buildEmail: () => buildReviewRequestEmail({ customerName: row.customer_name, reviewUrl, identity, language }),
                         kind: 'review_request',
                     });
@@ -19233,7 +19159,7 @@ const startBookingReminderScheduler = () => {
                         email,
                         reservationId: row.id,
                         smsText: buildReminderMessage(row.customer_name, row.reservation_time, row.guests, row.room_name, language, msgOpts, identity),
-                        whatsappTemplate: buildBookingReminderTemplate(row.customer_name, row.reservation_time, row.guests, language, msgOpts),
+                        whatsappTemplate: buildBookingReminderTemplate(tenantId, row.customer_name, row.reservation_time, row.guests, language, msgOpts),
                         buildEmail: () => buildBookingReminderEmail({
                             customerName: row.customer_name,
                             reservationTime: row.reservation_time,
@@ -21116,21 +21042,22 @@ const banquetQuoteUrl = (token: string): string => `${payAtTableBaseUrl()}/preve
 // dall'operatore). Finché il template non è approvato e cablato in env, il
 // foglio Condividi mostra il canale come «in attivazione» — l'interruttore
 // è questa funzione, nessun deploy applicativo per accenderlo.
-const banquetQuoteWhatsAppReady = (): boolean =>
-    isTwilioWhatsAppConfigured() && !!process.env.TWILIO_WA_CONTENT_SID_BANQUET_QUOTE;
+const banquetQuoteWhatsAppReady = async (tenantId: number): Promise<boolean> =>
+    (await isWhatsAppReady(tenantId)) && !!pickTemplate(tenantId, 'TWILIO_WA_CONTENT_SID_BANQUET_QUOTE', null);
 
 // Card call-to-action: corpo {{1}} nome, {{2}} evento, {{3}} data; il
 // bottone «Apri il preventivo» ha l'host cablato nel template e {{4}} porta
 // SOLO il token (stessa regola dei template acconto: host nel template,
 // token nella variabile).
 function buildBanquetQuoteTemplate(
+    tenantId: number,
     customerName: string | null | undefined,
     eventName: string,
     eventDateIso: string | null,
     shareToken: string,
     language?: string | null
 ): WhatsAppTemplateOpts | undefined {
-    const picked = pickWhatsAppTemplateSid('TWILIO_WA_CONTENT_SID_BANQUET_QUOTE', language);
+    const picked = pickWhatsAppTemplateSid(tenantId, 'TWILIO_WA_CONTENT_SID_BANQUET_QUOTE', language);
     if (!picked) return undefined;
     // La data si formatta QUI, sulla lingua della SID scelta: costruirla al
     // call site produrrebbe un ibrido quando l'ospite è EN ma la SID _EN
@@ -21155,7 +21082,7 @@ app.post('/banquet-menus/:id/share', authenticate, requirePermission('menu:full'
         if (!Number.isInteger(id)) return res.status(400).json({ error: 'id non valido' });
         const token = await ensureBanquetShareToken(req.tenantId!, id);
         if (!token) return res.status(404).json({ error: 'Banquet not found' });
-        res.json({ token, url: banquetQuoteUrl(token), whatsapp_ready: banquetQuoteWhatsAppReady() });
+        res.json({ token, url: banquetQuoteUrl(token), whatsapp_ready: await banquetQuoteWhatsAppReady(req.tenantId!) });
     } catch (err) {
         console.error('POST /banquet-menus/:id/share error:', err);
         res.status(500).json({ error: 'Internal server error' });
@@ -21166,7 +21093,7 @@ app.post('/banquet-menus/:id/send-quote-whatsapp', authenticate, requirePermissi
     try {
         const id = Number(req.params.id);
         if (!Number.isInteger(id)) return res.status(400).json({ error: 'id non valido' });
-        if (!banquetQuoteWhatsAppReady()) {
+        if (!(await banquetQuoteWhatsAppReady(req.tenantId!))) {
             return res.status(503).json({ error: 'whatsapp_non_configurato', message: "L'invio WhatsApp dal numero del ristorante non è ancora attivo." });
         }
         const rs = await queryWithRetry(
@@ -21193,7 +21120,7 @@ app.post('/banquet-menus/:id/send-quote-whatsapp', authenticate, requirePermissi
         const dateLabel = row.event_date
             ? new Date(row.event_date + 'T00:00:00').toLocaleDateString(english ? 'en-GB' : 'it-IT', { day: 'numeric', month: 'long', year: 'numeric' })
             : (english ? 'to be agreed' : 'da definire');
-        const template = buildBanquetQuoteTemplate(row.customer_name, row.name, row.event_date ?? null, token, guestLanguage);
+        const template = buildBanquetQuoteTemplate(req.tenantId!, row.customer_name, row.name, row.event_date ?? null, token, guestLanguage);
         if (!template) {
             return res.status(503).json({ error: 'whatsapp_non_configurato', message: "L'invio WhatsApp dal numero del ristorante non è ancora attivo." });
         }
@@ -27719,13 +27646,14 @@ function templateName(customerName: string | null | undefined): string {
 // ricade sul comportamento di sempre — SID italiana con variabili
 // italiane, mai un ibrido "corpo IT + variabili EN" che sfigurerebbe.
 function pickWhatsAppTemplateSid(
+    tenantId: number,
     baseEnvKey: string,
     language: string | null | undefined
 ): { contentSid: string; english: boolean } | undefined {
-    const englishSid = isEnglishGuest(language) ? process.env[`${baseEnvKey}_EN`] : undefined;
-    if (englishSid) return { contentSid: englishSid, english: true };
-    const italianSid = process.env[baseEnvKey];
-    return italianSid ? { contentSid: italianSid, english: false } : undefined;
+    // Il registro (services/whatsapp/templates/registry.ts) sa quali SID
+    // valgono per il ristorante: quelle in env solo per chi usa le
+    // credenziali in env, mai per un altro locale.
+    return pickTemplate(tenantId, baseEnvKey, language);
 }
 // Conferma e promemoria hanno una seconda versione col bottone «Gestisci
 // la prenotazione» (scripts/create-whatsapp-templates-gestione.mjs): stesse
@@ -27742,17 +27670,18 @@ function pickWhatsAppTemplateSid(
 // SID non c'è (si mette su Railway dopo l'ok di Meta), resta `_LINK`.
 type PickedBookingTemplate = { contentSid: string; english: boolean; manage: GuestManageLink | null; maps: boolean };
 function pickBookingTemplateSid(
+    tenantId: number,
     baseEnvKey: string,
     language: string | null | undefined,
     manage: GuestManageLink | null | undefined
 ): PickedBookingTemplate | undefined {
-    const plain = pickWhatsAppTemplateSid(baseEnvKey, language);
+    const plain = pickWhatsAppTemplateSid(tenantId, baseEnvKey, language);
     const sameLanguage = (t: { english: boolean }) => !plain || t.english === plain.english;
     if (manage?.mapsCode) {
-        const withMaps = pickWhatsAppTemplateSid(`${baseEnvKey}_LINK_MAPS`, language);
+        const withMaps = pickWhatsAppTemplateSid(tenantId, `${baseEnvKey}_LINK_MAPS`, language);
         if (withMaps && sameLanguage(withMaps)) return { ...withMaps, manage, maps: true };
     }
-    const linked = manage ? pickWhatsAppTemplateSid(`${baseEnvKey}_LINK`, language) : undefined;
+    const linked = manage ? pickWhatsAppTemplateSid(tenantId, `${baseEnvKey}_LINK`, language) : undefined;
     if (linked && manage && sameLanguage(linked)) return { ...linked, manage, maps: false };
     return plain ? { ...plain, manage: null, maps: false } : undefined;
 }
@@ -27777,13 +27706,14 @@ function bookingTemplateVariables(
     return vars;
 }
 function buildBookingConfirmedTemplate(
+    tenantId: number,
     customerName: string | null | undefined,
     reservationTime: string | Date,
     guests: number | null | undefined,
     language?: string | null,
     opts?: MsgOpts
 ): WhatsAppTemplateOpts | undefined {
-    const picked = pickBookingTemplateSid('TWILIO_WA_CONTENT_SID_BOOKING_CONFIRMED', language, opts?.manage);
+    const picked = pickBookingTemplateSid(tenantId, 'TWILIO_WA_CONTENT_SID_BOOKING_CONFIRMED', language, opts?.manage);
     if (!picked) return undefined;
     const { dateLabel, timeLabel } = formatBookingDateTime(asUtcInstant(reservationTime), msgTz(opts));
     return {
@@ -27796,13 +27726,14 @@ function buildBookingConfirmedTemplate(
 // non sono impostate (template in approvazione da Meta) i builder tornano
 // undefined e sendBookingConfirmation scende su SMS da sola.
 function buildBookingReminderTemplate(
+    tenantId: number,
     customerName: string | null | undefined,
     reservationTime: string | Date,
     guests: number | null | undefined,
     language?: string | null,
     opts?: MsgOpts
 ): WhatsAppTemplateOpts | undefined {
-    const picked = pickBookingTemplateSid('TWILIO_WA_CONTENT_SID_BOOKING_REMINDER', language, opts?.manage);
+    const picked = pickBookingTemplateSid(tenantId, 'TWILIO_WA_CONTENT_SID_BOOKING_REMINDER', language, opts?.manage);
     if (!picked) return undefined;
     const { dateLabel, timeLabel } = formatBookingDateTime(asUtcInstant(reservationTime), msgTz(opts));
     return {
@@ -27811,13 +27742,14 @@ function buildBookingReminderTemplate(
     };
 }
 function buildBookingUpdatedTemplate(
+    tenantId: number,
     customerName: string | null | undefined,
     reservationTime: string | Date,
     guests: number | null | undefined,
     language?: string | null,
     opts?: MsgOpts
 ): WhatsAppTemplateOpts | undefined {
-    const picked = pickWhatsAppTemplateSid('TWILIO_WA_CONTENT_SID_BOOKING_UPDATED', language);
+    const picked = pickWhatsAppTemplateSid(tenantId, 'TWILIO_WA_CONTENT_SID_BOOKING_UPDATED', language);
     if (!picked) return undefined;
     const { dateLabel, timeLabel } = formatBookingDateTime(asUtcInstant(reservationTime), msgTz(opts));
     return {
@@ -27831,13 +27763,14 @@ function buildBookingUpdatedTemplate(
     };
 }
 function buildBookingDeclinedTemplate(
+    tenantId: number,
     customerName: string | null | undefined,
     reservationTime: string | Date,
     guests: number | null | undefined,
     language?: string | null,
     opts?: MsgOpts
 ): WhatsAppTemplateOpts | undefined {
-    const picked = pickWhatsAppTemplateSid('TWILIO_WA_CONTENT_SID_BOOKING_DECLINED', language);
+    const picked = pickWhatsAppTemplateSid(tenantId, 'TWILIO_WA_CONTENT_SID_BOOKING_DECLINED', language);
     if (!picked) return undefined;
     const { dateLabel, timeLabel } = formatBookingDateTime(asUtcInstant(reservationTime), msgTz(opts));
     return {
@@ -27851,6 +27784,7 @@ function buildBookingDeclinedTemplate(
     };
 }
 function buildBookingDepositConfirmedTemplate(
+    tenantId: number,
     customerName: string | null | undefined,
     reservationTime: string | Date,
     guests: number | null | undefined,
@@ -27858,7 +27792,7 @@ function buildBookingDepositConfirmedTemplate(
     language?: string | null,
     opts?: MsgOpts
 ): WhatsAppTemplateOpts | undefined {
-    const picked = pickWhatsAppTemplateSid('TWILIO_WA_CONTENT_SID_BOOKING_DEPOSIT_CONFIRMED', language);
+    const picked = pickWhatsAppTemplateSid(tenantId, 'TWILIO_WA_CONTENT_SID_BOOKING_DEPOSIT_CONFIRMED', language);
     if (!picked) return undefined;
     const { dateLabel, timeLabel } = formatBookingDateTime(asUtcInstant(reservationTime), msgTz(opts));
     return {
@@ -27893,11 +27827,12 @@ function buildReviewRequestMessage(
     return `${greeting} Grazie per essere stati da ${identity.name}. Se ti va, lasciaci una recensione su Google: ${reviewUrl} — un minuto per te, per noi conta molto. A presto!`;
 }
 function buildReviewRequestTemplate(
+    tenantId: number,
     customerName: string | null | undefined,
     reviewUrl: string,
     language?: string | null
 ): WhatsAppTemplateOpts | undefined {
-    const picked = pickWhatsAppTemplateSid('TWILIO_WA_CONTENT_SID_REVIEW_REQUEST', language);
+    const picked = pickWhatsAppTemplateSid(tenantId, 'TWILIO_WA_CONTENT_SID_REVIEW_REQUEST', language);
     if (!picked) return undefined;
     return {
         contentSid: picked.contentSid,
@@ -27960,6 +27895,7 @@ function templateCoversLabel(covers: number | null | undefined, english: boolean
     return english ? `${n} ${n === 1 ? 'guest' : 'guests'}` : `${n} ${n === 1 ? 'coperto' : 'coperti'}`;
 }
 function buildTableBillLinkTemplate(
+    tenantId: number,
     customerName: string | null | undefined,
     covers: number | null | undefined,
     amountCents: number,
@@ -27970,7 +27906,7 @@ function buildTableBillLinkTemplate(
     if (!shareToken) return undefined;
     const name = templateName(customerName);
     const total = formatMoneyMinor(amountCents, msgCurrency(opts));
-    const cta = pickWhatsAppTemplateSid('TWILIO_WA_CONTENT_SID_TABLE_BILL_LINK_CTA', language);
+    const cta = pickWhatsAppTemplateSid(tenantId, 'TWILIO_WA_CONTENT_SID_TABLE_BILL_LINK_CTA', language);
     if (cta) {
         return {
             contentSid: cta.contentSid,
@@ -27982,7 +27918,7 @@ function buildTableBillLinkTemplate(
             },
         };
     }
-    const card = pickWhatsAppTemplateSid('TWILIO_WA_CONTENT_SID_TABLE_BILL_LINK', language);
+    const card = pickWhatsAppTemplateSid(tenantId, 'TWILIO_WA_CONTENT_SID_TABLE_BILL_LINK', language);
     if (!card) return undefined;
     return {
         contentSid: card.contentSid,
@@ -28001,6 +27937,7 @@ function buildTableBillLinkTemplate(
 // token {{4}}. Senza l'env si torna all'SMS via sendBookingConfirmation —
 // mai riusare il template del tavolo, che parla di coperti e di tavolo.
 function buildTakeawayBillLinkTemplate(
+    tenantId: number,
     customerName: string | null | undefined,
     pickupTime: string | null | undefined,
     amountCents: number,
@@ -28009,7 +27946,7 @@ function buildTakeawayBillLinkTemplate(
     opts?: MsgOpts
 ): WhatsAppTemplateOpts | undefined {
     if (!shareToken) return undefined;
-    const picked = pickWhatsAppTemplateSid('TWILIO_WA_CONTENT_SID_TAKEAWAY_BILL_LINK_CTA', language);
+    const picked = pickWhatsAppTemplateSid(tenantId, 'TWILIO_WA_CONTENT_SID_TAKEAWAY_BILL_LINK_CTA', language);
     if (!picked) return undefined;
     return {
         contentSid: picked.contentSid,
@@ -28049,14 +27986,14 @@ const DEPOSIT_REQUEST_TEMPLATES: Array<{ hosts: Set<string>; envKey: string; tok
         tokenPattern: /\/pay\/([^\/?#]+)/,
     },
 ];
-function resolveDepositRequestTemplate(checkoutUrl: string, language?: string | null): { contentSid: string; token: string; english: boolean } | null {
+function resolveDepositRequestTemplate(tenantId: number, checkoutUrl: string, language?: string | null): { contentSid: string; token: string; english: boolean } | null {
     try {
         const u = new URL(checkoutUrl);
         const entry = DEPOSIT_REQUEST_TEMPLATES.find(t => t.hosts.has(u.hostname.toLowerCase()));
         if (!entry) return null;
         // Stessa regola mai-ibrido di pickWhatsAppTemplateSid, applicata alla
         // envKey scelta dall'host del checkout.
-        const picked = pickWhatsAppTemplateSid(entry.envKey, language);
+        const picked = pickWhatsAppTemplateSid(tenantId, entry.envKey, language);
         if (!picked) return null;
         const match = u.pathname.match(entry.tokenPattern);
         if (!match) return null;
@@ -28066,6 +28003,7 @@ function resolveDepositRequestTemplate(checkoutUrl: string, language?: string | 
     }
 }
 function buildBookingDepositRequestTemplate(
+    tenantId: number,
     customerName: string | null | undefined,
     guestsLabel: string,
     dateLabel: string,
@@ -28076,7 +28014,7 @@ function buildBookingDepositRequestTemplate(
     guestsCount?: number | null,
     opts?: MsgOpts
 ): WhatsAppTemplateOpts | undefined {
-    const resolved = resolveDepositRequestTemplate(checkoutUrl, language);
+    const resolved = resolveDepositRequestTemplate(tenantId, checkoutUrl, language);
     if (!resolved) return undefined;
     // La label ospiti si ricostruisce dentro il builder quando esce la SID
     // inglese: la guestsLabel del chiamante può essere italiana e finirebbe
@@ -28719,288 +28657,9 @@ function determineShift(time: string): Shift {
     return (hour >= 11 && hour < 17) ? Shift.LUNCH : Shift.DINNER;
 }
 
-// Send WhatsApp message via Vonage API
-async function sendVonageWhatsApp(to: string, text: string): Promise<void> {
-    const VONAGE_API_KEY = process.env.VONAGE_API_KEY;
-    const VONAGE_API_SECRET = process.env.VONAGE_API_SECRET;
-    const VONAGE_WHATSAPP_NUMBER = process.env.VONAGE_WHATSAPP_NUMBER;
-
-    if (!VONAGE_API_KEY || !VONAGE_API_SECRET || !VONAGE_WHATSAPP_NUMBER) {
-        console.error('[Vonage] Missing configuration. Set VONAGE_API_KEY, VONAGE_API_SECRET, and VONAGE_WHATSAPP_NUMBER');
-        return;
-    }
-
-    // Ensure phone number is in E.164 format (with + prefix)
-    const formattedTo = to.startsWith('+') ? to : `+${to}`;
-    const formattedFrom = VONAGE_WHATSAPP_NUMBER.startsWith('+') ? VONAGE_WHATSAPP_NUMBER : `+${VONAGE_WHATSAPP_NUMBER}`;
-
-    console.log(`[Vonage] Sending message to ${formattedTo} from ${formattedFrom}`);
-
-    try {
-        const auth = Buffer.from(`${VONAGE_API_KEY}:${VONAGE_API_SECRET}`).toString('base64');
-
-        const response = await fetch('https://messages-sandbox.nexmo.com/v1/messages', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'Authorization': `Basic ${auth}`
-            },
-            body: JSON.stringify({
-                from: formattedFrom,
-                to: formattedTo,
-                message_type: 'text',
-                text: text,
-                channel: 'whatsapp'
-            })
-        });
-
-        if (!response.ok) {
-            const errorBody = await response.text();
-            throw new Error(`Vonage API error: ${response.status} - ${errorBody}`);
-        }
-
-        const result = await response.json();
-        console.log(`[Vonage] ✅ Message sent to ${to}`, result);
-
-    } catch (error) {
-        console.error('[Vonage] ❌ Error sending message:', error);
-        throw error;
-    }
-}
-
-// Twilio WhatsApp — sandbox during testing, business number after porting.
-// Recipients must "join <code>" via WhatsApp once before they can receive
-// messages from the sandbox sender.
-function isTwilioWhatsAppConfigured(): boolean {
-    return !!(process.env.TWILIO_ACCOUNT_SID
-        && process.env.TWILIO_AUTH_TOKEN
-        && process.env.TWILIO_WHATSAPP_FROM);
-}
-
-// Result of an outbound Twilio send. `sid` is undefined for providers that
-// don't return one (e.g. Vonage) — the caller can then skip delivery tracking.
-interface OutboundConfirmationResult {
-    sid?: string;
-    channel: 'sms' | 'whatsapp';
-}
-
-// Pre-approved WhatsApp template — required by Meta for business-initiated
-// messages (no customer inbound within 24h). Freeform WA sends outside that
-// window return errCode 63016 asynchronously, so we don't even attempt WA
-// unless the caller provides a template. `contentVariables` is a numeric-keyed
-// map matching the {{1}} {{2}} ... placeholders in the approved body.
-interface WhatsAppTemplateOpts {
-    contentSid: string;
-    contentVariables: Record<string, string>;
-}
-
-// Persist a row in outbound_messages so the operator can see the full
-// SMS/WhatsApp history per customer without opening the Twilio console.
-// Never lets a logging error break the actual send — errors are just warned.
-// tenantId obbligatorio e threadato lungo tutta la catena di invio
-// (sendBookingConfirmation → sendWhatsAppText/sendTwilioSms → qui): la riga
-// deve finire nella conversazione del ristorante che ha inviato.
-async function logOutboundMessage(params: {
-    tenantId: number;
-    provider: 'twilio' | 'vonage' | 'meta';
-    channel: 'sms' | 'whatsapp';
-    to: string;
-    body: string;
-    sid?: string | null;
-    reservationId?: number | null;
-    status?: string | null;
-    errorMessage?: string | null;
-    /** Che cosa è questo messaggio ('confirmation', 'review_request', …):
-     *  NULL = scritto a mano da un operatore, che è il caso normale. Serve
-     *  all'inbox per non mostrare gli automatismi — vedi INBOX_HIDDEN_KINDS. */
-    kind?: string | null;
-}): Promise<void> {
-    try {
-        const digits = String(params.to).replace(/\D/g, '');
-        const status = params.status
-            ?? (params.errorMessage ? 'failed' : (params.sid ? 'queued' : 'sent'));
-        await queryWithRetry(
-            `INSERT INTO outbound_messages
-             (tenant_id, provider, channel, to_phone, to_phone_digits, body, status, provider_sid, reservation_id, error_message, failed_at, kind)
-             VALUES ($11, $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $12)`,
-            [
-                params.provider,
-                params.channel,
-                params.to,
-                digits,
-                params.body,
-                status,
-                params.sid ?? null,
-                params.reservationId ?? null,
-                params.errorMessage ?? null,
-                params.errorMessage ? new Date() : null,
-                params.tenantId,
-                params.kind ?? null,
-            ]
-        );
-    } catch (err: any) {
-        console.warn('[outbound-log] insert failed:', err?.message || err);
-    }
-}
-
-// Inbound SMS/WhatsApp persistence. Symmetric to logOutboundMessage but
-// with from_phone(_digits) carrying the sender and to_phone(_digits) carrying
-// our own number. Returns the inserted row so the caller can broadcast it via
-// socket for the inbox UI. `to` is the account number the customer wrote to
-// (e.g. our whatsapp:+39389…). Errors are logged but never thrown — a logging
-// failure must not swallow the message.
-// Etichetta leggibile di un allegato, per la notifica push e per la lista
-// conversazioni: "ha inviato una foto" dice piu' di una riga vuota.
-function describeInboundMedia(media?: Array<{ content_type?: string }> | null): string {
-    if (!media || media.length === 0) return '';
-    const t = String(media[0]?.content_type || '');
-    const n = media.length;
-    const kind = t.startsWith('image/') ? (n > 1 ? `${n} foto` : 'una foto')
-        : t.startsWith('video/') ? (n > 1 ? `${n} video` : 'un video')
-        : t.startsWith('audio/') ? 'un messaggio vocale'
-        : t.includes('vcard') || t.includes('contact') ? 'un contatto'
-        : t === 'application/pdf' ? 'un PDF'
-        : n > 1 ? `${n} allegati` : 'un allegato';
-    return `ha inviato ${kind}`;
-}
-
-// Chiave di confronto fra telefoni: il numero NAZIONALE, non le ultime 10
-// cifre. `lastTenDigits` sbaglia sui cellulari vecchio stile a 9 cifre
-// (+39 335 423 066 -> "9335423066": pesca dentro il prefisso 39 e non
-// combacia mai con il "335423066" salvato in prenotazione). Qui il prefisso
-// italiano si toglie solo quando la lunghezza lo rende inequivocabile:
-// 11 cifre = 39 + 9, 12 cifre = 39 + 10. Un nazionale che inizia per 39
-// (prefisso 393…, 10 cifre) resta intatto.
-// phoneMatchKey vive in utils/text.ts (condiviso con l'inbox del frontend).
-
-// Espressione SQL equivalente a phoneMatchKey, per confrontare in query una
-// colonna telefono senza doverla normalizzare a monte.
-/**
- * Prenotazione a cui appartiene un messaggio in arrivo da `phone`.
- *
- * Un cliente abituale ha piu' prenotazioni: quella giusta e' la piu' vicina
- * nel tempo al messaggio — chi scrive alle 19 sta parlando della cena di
- * stasera, non di quella di marzo. Le annullate restano candidabili (spesso
- * il messaggio E' la disdetta), ma perdono contro una prenotazione viva a
- * parita' di distanza.
- *
- * tenantId obbligatorio (quello del messaggio: PUBLIC_TENANT_ID dai webhook,
- * req.tenantId! dalle route autenticate): senza filtro lo stesso numero in
- * due ristoranti aggancerebbe la prenotazione dell'altro.
- */
-async function resolveReservationByPhone(
-    tenantId: number,
-    phone: string,
-    when: Date = new Date()
-): Promise<number | null> {
-    const key = phoneMatchKey(phone);
-    if (key.length < 6) return null;
-    try {
-        const r = await queryWithRetry(
-            `SELECT id
-               FROM reservations
-              WHERE tenant_id = $3
-                AND phone IS NOT NULL AND phone <> ''
-                AND ${PHONE_MATCH_KEY_SQL('phone')} = $1
-              ORDER BY (reservation_status = 'CANCELLED') ASC,
-                       abs(extract(epoch FROM (reservation_time - $2::timestamptz))) ASC
-              LIMIT 1`,
-            [key, when.toISOString(), tenantId]
-        );
-        return r.rows[0]?.id ?? null;
-    } catch (err: any) {
-        console.warn('[inbound-log] lookup prenotazione fallito:', err?.message || err);
-        return null;
-    }
-}
-
-async function logInboundMessage(params: {
-    tenantId: number;
-    provider: 'twilio' | 'vonage' | 'meta';
-    channel: 'sms' | 'whatsapp';
-    from: string;
-    to: string;
-    body: string;
-    sid?: string | null;
-    media?: Array<{ url: string; content_type: string }> | null;
-}): Promise<any | null> {
-    try {
-        const fromDigits = String(params.from).replace(/\D/g, '');
-        const toDigits = String(params.to).replace(/\D/g, '');
-        // Aggancio alla prenotazione: senza, la risposta del cliente resta
-        // solo in Inbox e non compare sulla scheda dove il cameriere guarda.
-        // Se non c'e' nessuna prenotazione (cliente nuovo) resta NULL e il
-        // messaggio vive comunque in Inbox — mai un filtro, solo un'aggiunta.
-        const reservationId = await resolveReservationByPhone(params.tenantId, params.from);
-        const result = await queryWithRetry(
-            `INSERT INTO outbound_messages
-             (tenant_id, provider, channel, direction, from_phone, from_phone_digits,
-              to_phone, to_phone_digits, body, status, provider_sid, reservation_id, media)
-             VALUES ($11, $1, $2, 'inbound', $3, $4, $5, $6, $7, 'received', $8, $9, $10::jsonb)
-             RETURNING *`,
-            [
-                params.provider,
-                params.channel,
-                params.from,
-                fromDigits,
-                params.to,
-                toDigits,
-                params.body,
-                params.sid ?? null,
-                reservationId,
-                params.media && params.media.length > 0 ? JSON.stringify(params.media) : null,
-                params.tenantId,
-            ]
-        );
-        const row = result.rows[0] ?? null;
-
-        // Card #32 — un messaggio WhatsApp è il primo segnale di lingua per
-        // molti clienti che non passano mai dal booking web o dalla voce.
-        // Euristica sul prefisso, solo se il cliente esiste già e non ha
-        // ancora una lingua: non deve sovrascrivere un dato più affidabile
-        // (selettore esplicito sul widget, o quanto rilevato da ElevenLabs).
-        if (params.channel === 'whatsapp') {
-            const detectedLanguage = detectLanguageFromPhonePrefix(params.from);
-            queryWithRetry(
-                `UPDATE customers SET language = $1
-                 WHERE tenant_id = $2
-                   AND language IS NULL
-                   AND regexp_replace(COALESCE(phone, ''), '\\D', '', 'g') = $3`,
-                [detectedLanguage, params.tenantId, fromDigits]
-            ).catch(err => console.warn('[inbound-log] language update failed:', err?.message || err));
-        }
-
-        // Wake up the PWA even a app chiusa: senza una push non arriva mai
-        // il segnale al service worker, e il badge Inbox non si aggiorna.
-        // Best-effort — se la push fallisce la logica del messaggio resta
-        // corretta, solo il badge non si aggiorna finché l'utente non apre
-        // l'app.
-        if (row) {
-            const channelLabel = params.channel === 'whatsapp' ? 'WhatsApp' : 'SMS';
-            const mediaLabel = describeInboundMedia(params.media);
-            const preview = String(params.body || '').replace(/\s+/g, ' ').trim().slice(0, 80)
-                || mediaLabel;
-            const fromDisplay = params.from || 'sconosciuto';
-            pushSendToRoles(
-                params.tenantId,
-                ['OWNER', 'GENERAL_MANAGER', 'MANAGER'],
-                {
-                    category: 'message',
-                    title: `Nuovo messaggio ${channelLabel}`,
-                    body: preview ? `${fromDisplay}: ${preview}` : `Da ${fromDisplay}`,
-                    url: '/?view=MESSAGGI',
-                    tag: `msg-inbound-${row.id}`,
-                },
-                { excludeUserId: null }
-            ).catch(err => console.warn('[inbound-log] push failed:', err?.message || err));
-        }
-
-        return row;
-    } catch (err: any) {
-        console.warn('[inbound-log] insert failed:', err?.message || err);
-        return null;
-    }
-}
+// Invio e registrazione di WhatsApp e SMS (sendWhatsAppText, sendTwilioSms,
+// logOutboundMessage, logInboundMessage, isWhatsAppReady, isSmsReady):
+// in services/whatsapp/, importati in cima al file.
 
 // Email sibling of logOutboundMessage. Same table so the reservation-history
 // timeline surfaces SMS/WhatsApp/Email in one chronological list. to_phone*
@@ -29040,229 +28699,6 @@ async function logOutboundEmail(params: {
     }
 }
 
-// Public URL used as StatusCallback for Twilio outbound messages so Twilio can
-// notify us of delivery/failure. Falls back to VITE_API_URL, then null (no
-// callback attached — messages still send, just no delivery tracking).
-// Base pubblica del BACKEND (questo processo), da non confondere con
-// publicBaseUrl() che punta alla SPA su Vercel. Serve a tutto cio' che un
-// servizio esterno deve poter chiamare o scaricare da noi: callback Twilio e
-// allegati in uscita.
-function backendBaseUrl(): string | null {
-    const base = process.env.PUBLIC_WEBHOOK_BASE_URL || process.env.VITE_API_URL;
-    return base ? base.replace(/\/+$/, '') : null;
-}
-
-function twilioStatusCallbackUrl(): string | null {
-    const base = backendBaseUrl();
-    return base ? `${base}/webhook/twilio-whatsapp-status` : null;
-}
-
-async function sendTwilioWhatsApp(
-    tenantId: number,
-    to: string,
-    text: string,
-    reservationId?: number | null,
-    template?: WhatsAppTemplateOpts,
-    mediaUrls?: string[],
-    kind?: string | null
-): Promise<OutboundConfirmationResult> {
-    const ACCOUNT_SID = process.env.TWILIO_ACCOUNT_SID;
-    const AUTH_TOKEN = process.env.TWILIO_AUTH_TOKEN;
-    const FROM = process.env.TWILIO_WHATSAPP_FROM;
-
-    if (!ACCOUNT_SID || !AUTH_TOKEN || !FROM) {
-        console.error('[Twilio] Missing TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, or TWILIO_WHATSAPP_FROM');
-        throw new Error('Twilio not configured');
-    }
-
-    // Twilio expects "whatsapp:+E164" on both ends. Normalize Italian numbers
-    // that arrive without the country prefix (10 digits starting with 3/0),
-    // Un numero locale senza prefisso è del paese del ristorante, non per
-    // forza italiano: il prefisso di casa arriva da tenantLocale.
-    // otherwise Twilio rejects "+3289630012" as an invalid Belgian number.
-    const formattedTo = `whatsapp:${normalizePhoneE164(String(to), (await getTenantLocale(tenantId)).dialCode)}`;
-    const formattedFrom = FROM.startsWith('whatsapp:') ? FROM : `whatsapp:${FROM.startsWith('+') ? FROM : `+${FROM}`}`;
-
-    console.log(`[Twilio] Sending message to ${formattedTo} from ${formattedFrom}${template ? ` (template ${template.contentSid})` : ''}`);
-
-    const auth = Buffer.from(`${ACCOUNT_SID}:${AUTH_TOKEN}`).toString('base64');
-    const body = new URLSearchParams({
-        From: formattedFrom,
-        To: formattedTo,
-    });
-    if (template) {
-        // Meta business-initiated messages must use an approved template.
-        // Body is ignored by Twilio when ContentSid is set.
-        body.set('ContentSid', template.contentSid);
-        body.set('ContentVariables', JSON.stringify(template.contentVariables));
-    } else {
-        // Con un allegato il testo diventa la didascalia e puo' mancare:
-        // Twilio rifiuta un Body vuoto, quindi lo si mette solo se c'e'.
-        if (text) body.set('Body', text);
-        for (const url of mediaUrls ?? []) body.append('MediaUrl', url);
-    }
-    const callback = twilioStatusCallbackUrl();
-    if (callback) body.set('StatusCallback', callback);
-
-    try {
-        const response = await fetch(`https://api.twilio.com/2010-04-01/Accounts/${ACCOUNT_SID}/Messages.json`, {
-            method: 'POST',
-            headers: {
-                'Authorization': `Basic ${auth}`,
-                'Content-Type': 'application/x-www-form-urlencoded',
-            },
-            body: body.toString(),
-        });
-
-        const result = await response.json().catch(() => ({} as any)) as { sid?: string };
-        if (!response.ok) {
-            console.error('[Twilio] ❌ Error sending message:', result);
-            await logOutboundMessage({
-                tenantId, provider: 'twilio', channel: 'whatsapp', to, body: text,
-                reservationId, kind, errorMessage: `Twilio API error: ${response.status} - ${JSON.stringify(result)}`,
-            });
-            throw new Error(`Twilio API error: ${response.status} - ${JSON.stringify(result)}`);
-        }
-        console.log(`[Twilio] ✅ Message sent to ${to} (sid=${result.sid})`);
-        await logOutboundMessage({
-            tenantId, provider: 'twilio', channel: 'whatsapp', to, body: text,
-            sid: result.sid, reservationId, kind,
-        });
-        return { sid: result.sid, channel: 'whatsapp' };
-    } catch (err: any) {
-        if (err?.message && !err.message.startsWith('Twilio API error')) {
-            await logOutboundMessage({
-                tenantId, provider: 'twilio', channel: 'whatsapp', to, body: text,
-                reservationId, kind, errorMessage: err.message,
-            });
-        }
-        throw err;
-    }
-}
-
-// Plain-text WhatsApp dispatcher. Prefers Twilio when configured, falls back
-// to Vonage. Meta is template-only (separate path) so it isn't in this chain.
-// When `template` is provided, uses Twilio's ContentSid/ContentVariables API
-// (required for business-initiated messages outside the 24h window); Vonage
-// doesn't support templates so it's skipped in that case.
-async function sendWhatsAppText(
-    tenantId: number,
-    to: string,
-    text: string,
-    reservationId?: number | null,
-    template?: WhatsAppTemplateOpts,
-    mediaUrls?: string[],
-    kind?: string | null
-): Promise<OutboundConfirmationResult> {
-    // Sul nodo di sala non si spedisce niente: l'invio è lavoro del cloud, e
-    // un nodo che mandasse WhatsApp dalla propria replica li duplicherebbe.
-    // Si lancia (non si finge il successo): i chiamanti fire-and-forget
-    // loggano, quelli interattivi mostrano l'errore — che è la verità.
-    if (isServiceNode) throw new Error('profilo service-node: gli invii esterni partono solo dal cloud');
-    if (isTwilioWhatsAppConfigured()) {
-        return sendTwilioWhatsApp(tenantId, to, text, reservationId, template, mediaUrls, kind);
-    }
-    if (template) throw new Error('WhatsApp template requires Twilio (Vonage unsupported)');
-    if (mediaUrls?.length) throw new Error('Gli allegati richiedono Twilio (Vonage non supportato)');
-    try {
-        await sendVonageWhatsApp(to, text);
-        await logOutboundMessage({ tenantId, provider: 'vonage', channel: 'whatsapp', to, body: text, reservationId, kind });
-        return { channel: 'whatsapp' };
-    } catch (err: any) {
-        await logOutboundMessage({
-            tenantId, provider: 'vonage', channel: 'whatsapp', to, body: text, reservationId, kind,
-            errorMessage: err?.message || String(err),
-        });
-        throw err;
-    }
-}
-
-// Twilio SMS — temporary stand-in for booking confirmations while Meta
-// WhatsApp Business verification is pending. Same Messages API as
-// sendTwilioWhatsApp, but Twilio bills as SMS. Sender resolves in this order:
-//   1) TWILIO_MESSAGING_SERVICE_SID (required when using an alphanumeric
-//      sender like "V Frantoio", since alpha senders live inside a service)
-//   2) TWILIO_SMS_FROM as literal alphanumeric sender ID (contains letters)
-//   3) TWILIO_SMS_FROM as E.164 phone number
-function isTwilioSmsConfigured(): boolean {
-    return !!(process.env.TWILIO_ACCOUNT_SID
-        && process.env.TWILIO_AUTH_TOKEN
-        && (process.env.TWILIO_MESSAGING_SERVICE_SID || process.env.TWILIO_SMS_FROM));
-}
-
-async function sendTwilioSms(tenantId: number, to: string, text: string, reservationId?: number | null, kind?: string | null): Promise<OutboundConfirmationResult> {
-    const ACCOUNT_SID = process.env.TWILIO_ACCOUNT_SID;
-    const AUTH_TOKEN = process.env.TWILIO_AUTH_TOKEN;
-    const MESSAGING_SERVICE_SID = process.env.TWILIO_MESSAGING_SERVICE_SID;
-    const FROM = process.env.TWILIO_SMS_FROM;
-
-    if (!ACCOUNT_SID || !AUTH_TOKEN || (!MESSAGING_SERVICE_SID && !FROM)) {
-        console.error('[Twilio SMS] Missing TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, or a sender (TWILIO_MESSAGING_SERVICE_SID / TWILIO_SMS_FROM)');
-        throw new Error('Twilio SMS not configured');
-    }
-
-    // Normalize to E.164 assuming Italian numbers when the country code is
-    // missing — a phone like "3289630012" would otherwise be sent as
-    // "+3289630012" and Twilio rejects it as an invalid Belgian number.
-    const formattedTo = normalizePhoneE164(String(to), (await getTenantLocale(tenantId)).dialCode);
-    const body = new URLSearchParams({ To: formattedTo, Body: text });
-
-    let senderDescription: string;
-    if (MESSAGING_SERVICE_SID) {
-        body.set('MessagingServiceSid', MESSAGING_SERVICE_SID);
-        senderDescription = `service ${MESSAGING_SERVICE_SID}`;
-    } else {
-        const isAlphanumeric = /[A-Za-z]/.test(FROM!);
-        const formattedFrom = isAlphanumeric
-            ? FROM!
-            : (FROM!.startsWith('+') ? FROM! : `+${FROM!.replace(/\D/g, '')}`);
-        body.set('From', formattedFrom);
-        senderDescription = `from ${formattedFrom}`;
-    }
-
-    const callback = twilioStatusCallbackUrl();
-    if (callback) body.set('StatusCallback', callback);
-
-    console.log(`[Twilio SMS] Sending message to ${formattedTo} ${senderDescription}`);
-
-    const auth = Buffer.from(`${ACCOUNT_SID}:${AUTH_TOKEN}`).toString('base64');
-
-    try {
-        const response = await fetch(`https://api.twilio.com/2010-04-01/Accounts/${ACCOUNT_SID}/Messages.json`, {
-            method: 'POST',
-            headers: {
-                'Authorization': `Basic ${auth}`,
-                'Content-Type': 'application/x-www-form-urlencoded',
-            },
-            body: body.toString(),
-        });
-
-        const result = await response.json().catch(() => ({} as any)) as { sid?: string };
-        if (!response.ok) {
-            console.error('[Twilio SMS] ❌ Error sending message:', result);
-            await logOutboundMessage({
-                tenantId, provider: 'twilio', channel: 'sms', to, body: text,
-                reservationId, kind, errorMessage: `Twilio SMS API error: ${response.status} - ${JSON.stringify(result)}`,
-            });
-            throw new Error(`Twilio SMS API error: ${response.status} - ${JSON.stringify(result)}`);
-        }
-        console.log(`[Twilio SMS] ✅ Message sent to ${to} (sid=${result.sid})`);
-        await logOutboundMessage({
-            tenantId, provider: 'twilio', channel: 'sms', to, body: text,
-            sid: result.sid, reservationId, kind,
-        });
-        return { sid: result.sid, channel: 'sms' };
-    } catch (err: any) {
-        if (err?.message && !err.message.startsWith('Twilio SMS API error')) {
-            await logOutboundMessage({
-                tenantId, provider: 'twilio', channel: 'sms', to, body: text,
-                reservationId, kind, errorMessage: err.message,
-            });
-        }
-        throw err;
-    }
-}
-
 // Booking-confirmation dispatcher. WhatsApp is preferred (cheaper, richer,
 // higher open rate) BUT only when the caller supplies an approved template:
 // Meta rejects freeform business-initiated messages outside the 24h window
@@ -29291,7 +28727,7 @@ async function sendBookingConfirmation(
     const template = opts?.whatsappTemplate;
     const force = opts?.forceChannel;
     const kind = opts?.kind ?? null;
-    const tryWhatsApp = force === 'sms' ? false : (!!template && isTwilioWhatsAppConfigured());
+    const tryWhatsApp = force === 'sms' ? false : (!!template && await isWhatsAppReady(tenantId));
     if (force === 'whatsapp' && !tryWhatsApp) {
         throw new Error('WhatsApp non configurato o template mancante');
     }
@@ -29301,7 +28737,7 @@ async function sendBookingConfirmation(
             ? await sendWhatsAppText(tenantId, to, text, reservationId, template, undefined, kind)
             : await sendTwilioSms(tenantId, to, text, reservationId, kind);
     } catch (err: any) {
-        if (tryWhatsApp && !force && isTwilioSmsConfigured()) {
+        if (tryWhatsApp && !force && isSmsReady(tenantId)) {
             console.warn('[confirmation] WA send failed, falling back to SMS:', err?.message || err);
             result = await sendTwilioSms(tenantId, to, text, reservationId, kind);
         } else {
@@ -29422,8 +28858,8 @@ async function dispatchBookingNotification(params: {
             hasPhone: !!phone,
             hasEmail: !!email,
             smtpReady,
-            whatsappReady: !!params.whatsappTemplate && isTwilioWhatsAppConfigured(),
-            smsReady: isTwilioSmsConfigured(),
+            whatsappReady: !!params.whatsappTemplate && await isWhatsAppReady(tenantId),
+            smsReady: isSmsReady(tenantId),
         });
 
         if (attempts.length === 0) {
@@ -32936,7 +32372,7 @@ app.post('/takeaway/orders/:id/bill/notify', authenticate, requireFeature('takea
             // il template del tavolo, che parla di coperti e di tavolo.
             const delivery = await sendBookingConfirmation(req.tenantId!, tw.customer_phone, message, null, {
                 whatsappTemplate: buildTakeawayBillLinkTemplate(
-                    tw.customer_name, tw.pickup_time, Number(bill.total_cents), bill.share_token, guestLanguage,
+                    req.tenantId!, tw.customer_name, tw.pickup_time, Number(bill.total_cents), bill.share_token, guestLanguage,
                     { currency: (await getTenantLocale(req.tenantId!)).currency }
                 ),
                 recordConfirmation: false,
@@ -34471,7 +33907,7 @@ app.post('/r/:token/modify', guestPageLimiter, guestActionLimiter, async (req, r
                     email: row.email,
                     reservationId: id,
                     smsText: buildConfirmationMessage(row.customer_name, row.reservation_time, row.guests, roomName, language, { timezone: tz, manage }),
-                    whatsappTemplate: buildBookingConfirmedTemplate(row.customer_name, row.reservation_time, row.guests, language, { timezone: tz, manage }),
+                    whatsappTemplate: buildBookingConfirmedTemplate(tenantId, row.customer_name, row.reservation_time, row.guests, language, { timezone: tz, manage }),
                     buildEmail: () => buildBookingConfirmationEmail({
                         customerName: row.customer_name,
                         reservationTime: row.reservation_time,
@@ -38221,7 +37657,7 @@ const handlePublicReservationCreate = async (tenantId: number, req: express.Requ
         let waTemplate: WhatsAppTemplateOpts | undefined;
         if (depositCheckoutUrl) {
             waTemplate = buildBookingDepositRequestTemplate(
-                toTitleCase(customer_name),
+                tenantId, toTitleCase(customer_name),
                 guestGuestsLabel,
                 dateLabel,
                 time,
@@ -38232,9 +37668,9 @@ const handlePublicReservationCreate = async (tenantId: number, req: express.Requ
                 { currency: valutaMsg }
             );
         } else if (confirmedNow) {
-            waTemplate = buildBookingConfirmedTemplate(customer_name, created.reservation_time, guestsNum, language, { timezone: fusoMsg, manage: ackManage });
+            waTemplate = buildBookingConfirmedTemplate(tenantId, customer_name, created.reservation_time, guestsNum, language, { timezone: fusoMsg, manage: ackManage });
         } else {
-            const pickedReceived = pickWhatsAppTemplateSid('TWILIO_WA_CONTENT_SID_BOOKING_RECEIVED', language);
+            const pickedReceived = pickWhatsAppTemplateSid(tenantId, 'TWILIO_WA_CONTENT_SID_BOOKING_RECEIVED', language);
             if (pickedReceived) {
                 waTemplate = {
                     contentSid: pickedReceived.contentSid,
@@ -38580,34 +38016,27 @@ app.post('/debug/whatsapp-test', authenticate, requireFeature('whatsapp'), requi
 
     if (!to) return res.status(400).json({ error: 'missing_to', message: 'Body must include "to"' });
 
-    const useTwilio = provider === 'twilio' || (provider === 'auto' && isTwilioWhatsAppConfigured());
+    const sender = await getSender(req.tenantId!);
+    const useTwilio = provider === 'twilio' || (provider === 'auto' && sender?.provider === 'twilio');
     const useMeta = !useTwilio && (provider === 'meta' || (provider === 'auto' && isMetaWhatsAppConfigured()));
 
     if (useTwilio) {
-        const ACCOUNT_SID = process.env.TWILIO_ACCOUNT_SID;
-        const AUTH_TOKEN = process.env.TWILIO_AUTH_TOKEN;
-        const FROM = process.env.TWILIO_WHATSAPP_FROM;
-
-        if (!ACCOUNT_SID || !AUTH_TOKEN || !FROM) {
+        // Il mittente è quello del ristorante (services/whatsapp/config.ts):
+        // un locale senza numero proprio non prova più dal numero del Frantoio.
+        if (!sender) {
             return res.status(500).json({
                 error: 'missing_twilio_config',
-                present: {
-                    TWILIO_ACCOUNT_SID: !!ACCOUNT_SID,
-                    TWILIO_AUTH_TOKEN: !!AUTH_TOKEN,
-                    TWILIO_WHATSAPP_FROM: !!FROM,
-                },
+                message: 'Nessun mittente WhatsApp per questo locale',
             });
         }
 
         const formattedTo = `whatsapp:${normalizePhoneE164(String(to), (await getTenantLocale(req.tenantId!)).dialCode)}`;
-        const formattedFrom = FROM.startsWith('whatsapp:') ? FROM : `whatsapp:${FROM.startsWith('+') ? FROM : `+${FROM}`}`;
-        const auth = Buffer.from(`${ACCOUNT_SID}:${AUTH_TOKEN}`).toString('base64');
-        const body = new URLSearchParams({ From: formattedFrom, To: formattedTo, Body: text });
+        const body = new URLSearchParams({ From: sender.from, To: formattedTo, Body: text });
 
         try {
-            const response = await fetch(`https://api.twilio.com/2010-04-01/Accounts/${ACCOUNT_SID}/Messages.json`, {
+            const response = await fetch(`${sender.restBase}/2010-04-01/Accounts/${sender.accountSid}/Messages.json`, {
                 method: 'POST',
-                headers: { 'Authorization': `Basic ${auth}`, 'Content-Type': 'application/x-www-form-urlencoded' },
+                headers: { 'Authorization': twilioMediaAuthHeader(sender), 'Content-Type': 'application/x-www-form-urlencoded' },
                 body: body.toString(),
             });
             const rawBody = await response.text();
@@ -38616,7 +38045,7 @@ app.post('/debug/whatsapp-test', authenticate, requireFeature('whatsapp'), requi
             return res.json({
                 ok: response.ok,
                 provider: 'twilio',
-                request: { from: formattedFrom, to: formattedTo, text, accountSid: ACCOUNT_SID },
+                request: { from: sender.from, to: formattedTo, text, accountSid: sender.accountSid },
                 twilio: { status: response.status, body: parsedBody },
             });
         } catch (err: any) {
@@ -46106,6 +45535,13 @@ app.delete('/sala/profiles/:id', authenticate, requirePermission('settings:full'
 // Aggancio degli strumenti di prenotazione alle funzioni che vivono qui.
 // Iniezione invece di import perché il modulo non può importare server.ts
 // (ciclo) e perché così i tool restano testabili con dipendenze finte.
+// Il modulo WhatsApp (services/whatsapp/) prende da qui solo gli eventi
+// socket: socketService nasce più tardi, all'ascolto, quindi si legge al
+// momento dell'invio.
+configureWhatsApp({
+    broadcastToAll: (tenantId, event, payload) => { socketService?.broadcastToAll(tenantId, event, payload); },
+});
+
 bookingTools.configureBookingTools({
     parseFlexibleDate,
     parseFlexibleTime,
