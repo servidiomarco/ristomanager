@@ -185,6 +185,7 @@
   "reminderSent": "Reminder inviato",
   "guestConfirmed": "L'ospite ha confermato il {{quando}}",
   "guestCancelled": "Annullata dall'ospite il {{quando}}",
+  "guestEta": "Arriva alle {{ora}} · avvisato alle {{quando}}",
   "formSections": "Sezioni della prenotazione",
   "row": {
     "note": "Nota",

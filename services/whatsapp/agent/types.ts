@@ -30,6 +30,11 @@ export interface AgentContext {
     profileName?: string | null;
     /** Numero di telefono in formato leggibile, per i parametri degli strumenti. */
     phone: string;
+    /** Il catalogo allergeni del locale (le pillole del modulo prenotazione). */
+    allergenPresets?: string[];
+    /** Le note rapide del locale; quelle con quantità sono piatti da
+     *  preparare in anticipo che la cucina somma (lo stinco). */
+    notePresets?: Array<{ label: string; has_quantity: boolean; variants: string[] }>;
     knowledge: Array<{ title: string; content: string }>;
     /** Fuso del locale: è l'orologio su cui il modello risolve «domani» e
      *  «venerdì». A Roma per difetto — un default sbagliato qui fa

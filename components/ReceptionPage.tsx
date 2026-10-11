@@ -496,6 +496,9 @@ const ReceptionPage: React.FC<ReceptionPageProps> = ({ globalDate, globalShiftFi
     const seated = isSeated(r);
     const noShow = r.reservation_status === ReservationStatus.NO_SHOW;
     const minsLate = Math.round((nowTick - parseReservationTime(r.reservation_time).getTime()) / 60_000);
+    // L'ospite ha detto a che ora arriva (WhatsApp): sotto l'orario si legge
+    // quello invece di «in ritardo», finché non è arrivato.
+    const eta = !seated && !noShow && typeof r.guest_eta_at === 'string' && r.guest_eta_at ? r.guest_eta_at : null;
 
     const clock =
       band === 'late' ? 'text-[var(--ds-critical-text)]'
@@ -515,7 +518,16 @@ const ReceptionPage: React.FC<ReceptionPageProps> = ({ globalDate, globalShiftFi
           <div className={`text-[15px] font-semibold tabular-nums ${clock}`}>
             {formatHHMM(r.reservation_time)}
           </div>
-          {band !== 'later' && (
+          {eta ? (
+            <div
+              className="flex items-center gap-0.5 whitespace-nowrap text-[11px] font-medium tabular-nums text-[var(--ds-pending-text)]"
+              title={t('etaHint', { ora: formatHHMM(eta) })}
+              aria-label={t('etaHint', { ora: formatHHMM(eta) })}
+            >
+              <Clock className="h-3 w-3 flex-shrink-0" aria-hidden />
+              {formatHHMM(eta)}
+            </div>
+          ) : band !== 'later' && (
             <div className={`text-[11px] font-medium ${clock}`}>
               {t(band === 'late' ? 'late' : 'arriving')}
             </div>

@@ -5,3 +5,5 @@ export { runAgent, isAgentConfigured, MODEL as AGENT_MODEL, WRITE_TOOLS } from '
 export { extractBooking, type ExtractedBooking } from './extract.js';
 export { AgentError } from './types.js';
 export type { AgentContext, AgentProposal, AgentResult, AgentUsage } from './types.js';
+export { findTool as findAgentTool } from './tools/index.js';
+export type { ToolRun } from './tools/index.js';

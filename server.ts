@@ -323,6 +323,7 @@ import { createHaccpRouter, haccpSensorWatchTick, runHaccpExpiryReminder, runHac
 import { createFoodCostRouter } from './services/foodCostRoutes.js';
 import { createFattureFornitoriRouter } from './services/fattureFornitoriRoutes.js';
 import { configureRestaurantInfo } from './services/restaurantInfo.js';
+import { configureGuestUpdates } from './services/reservationGuestUpdates.js';
 import { shoppingReminderBody } from './utils/shoppingReminder.js';
 import { describeShiftChanges, shiftDayLabel, type ShiftDayChange } from './utils/staffShiftChange.js';
 import { buildEReceiptPayload, buildFatturaPaXml, getFiscalDriver, type FiscalSeller, type InvoiceBuyer } from './services/fiscalService.js';
@@ -14378,6 +14379,7 @@ app.post('/messages/agent/run', authenticate, requirePermission('reservations:fu
             customer: await loadCustomerProfileForAi(req.tenantId!, key),
             profileName: profilo?.profile_name ?? null,
             phone,
+            ...(await loadAgentCatalogs(req.tenantId!)),
             knowledge: kb.rows as any,
             largeGroupThreshold: soglia,
             restaurantName: (await publicBusinessIdentity(req.tenantId!)).name,
@@ -14509,6 +14511,31 @@ app.post('/messages/agent/extract-booking', authenticate, requirePermission('res
     }
 });
 
+/** I cataloghi del locale che l'agente usa negli strumenti: allergeni (le
+ *  pillole del modulo) e note rapide, con quantità e varianti. */
+async function loadAgentCatalogs(tenantId: number): Promise<{
+    allergenPresets: string[];
+    notePresets: Array<{ label: string; has_quantity: boolean; variants: string[] }>;
+}> {
+    const [allergeni, note] = await Promise.all([
+        queryWithRetry(`SELECT label FROM reservation_allergen_presets WHERE tenant_id = $1 ORDER BY sort_order, id`, [tenantId]),
+        queryWithRetry(
+            `SELECT p.label, p.has_quantity,
+                    COALESCE(array_agg(v.label ORDER BY v.sort_order, v.id) FILTER (WHERE v.id IS NOT NULL), '{}') AS variants
+               FROM reservation_note_presets p
+               LEFT JOIN reservation_note_preset_variants v ON v.preset_id = p.id
+              WHERE p.tenant_id = $1
+              GROUP BY p.id
+              ORDER BY p.sort_order, p.id`,
+            [tenantId]
+        ),
+    ]);
+    return {
+        allergenPresets: allergeni.rows.map((r: any) => String(r.label)),
+        notePresets: note.rows.map((r: any) => ({ label: String(r.label), has_quantity: r.has_quantity === true, variants: r.variants ?? [] })),
+    };
+}
+
 /**
  * Il messaggio al cliente quando lo staff conferma una proposta dell'agente.
  *
@@ -14594,23 +14621,27 @@ app.post('/messages/agent/proposals/:id/confirm', authenticate, requirePermissio
 
         const prop = (await queryWithRetry(`SELECT * FROM agent_proposals WHERE id=$1 AND tenant_id=$2`, [id, req.tenantId!])).rows[0];
         const args = prop.args || {};
-        const esegui = prop.tool === 'create_reservation' ? bookingTools.createReservation
-            : prop.tool === 'modify_reservation' ? bookingTools.modifyReservation
-            : prop.tool === 'cancel_reservation' ? bookingTools.cancelReservation
-            : null;
-        if (!esegui) {
+        // Lo strumento dal registro dell'agente (services/whatsapp/agent/
+        // tools/): ognuno sa eseguirsi, la route non elenca più i casi.
+        const tool = whatsappAgent.findAgentTool(prop.tool);
+        if (!tool?.execute) {
             await queryWithRetry(`UPDATE agent_proposals SET status='FAILED', resolved_at=CURRENT_TIMESTAMP WHERE id=$1`, [id]);
             return res.status(400).json({ error: 'Strumento non eseguibile', tool: prop.tool });
         }
 
-        // name_confirmed: la proposta la esegue un operatore che l'ha appena
-        // letta e approvata — la conferma umana vale come chiarimento, quindi
-        // il gate name_mismatch di bookingTools non deve bloccarla. Se il nome
-        // differisce dal titolare del numero resta la nota "Numero in
-        // rubrica: ..." sulla prenotazione. Stesso discorso per
-        // existing_booking_confirmed: l'operatore vede la chat e l'agenda, e
-        // da qui non avrebbe modo di rispondere alla domanda del gate.
-        const outcome = await esegui(req.tenantId!, prop.tool === 'create_reservation' ? { ...args, name_confirmed: true, existing_booking_confirmed: true } : args, WHATSAPP_CHANNEL);
+        // approvedByStaff: la proposta la esegue un operatore che l'ha appena
+        // letta e approvata — vale come chiarimento per i controlli che
+        // farebbero una domanda al cliente (nome diverso dalla rubrica,
+        // prenotazione già in agenda): vedi tools/booking.ts.
+        const phone = String(args.phone || `+${prop.phone_digits}`);
+        let body: Record<string, any>;
+        try {
+            body = await tool.execute(args, { tenantId: req.tenantId!, phone, phoneDigits: prop.phone_digits, approvedByStaff: true });
+        } catch (err: any) {
+            console.error('[agent] esecuzione della proposta fallita:', err);
+            body = { success: false, message: 'Errore tecnico durante l\'esecuzione' };
+        }
+        const outcome = { body };
         const riuscito = outcome.body?.success === true;
         await queryWithRetry(
             `UPDATE agent_proposals
@@ -14619,7 +14650,7 @@ app.post('/messages/agent/proposals/:id/confirm', authenticate, requirePermissio
             [id, riuscito ? 'DONE' : 'FAILED', JSON.stringify(outcome.body), req.user?.userId ?? null]);
 
         const followupSent = riuscito ? await sendProposalFollowup(req.tenantId!, prop.tool, args, outcome.body) : false;
-        res.status(outcome.serverError ? 500 : 200).json({ ok: riuscito, tool: prop.tool, result: outcome.body, followup_sent: followupSent });
+        res.json({ ok: riuscito, tool: prop.tool, result: outcome.body, followup_sent: followupSent });
     } catch (err: any) {
         console.error('POST /messages/agent/proposals/:id/confirm error:', err);
         res.status(500).json({ error: 'Internal server error' });
@@ -45692,6 +45723,12 @@ app.delete('/sala/profiles/:id', authenticate, requirePermission('settings:full'
 // momento dell'invio.
 configureWhatsApp({
     broadcastToAll: (tenantId, event, payload) => { socketService?.broadcastToAll(tenantId, event, payload); },
+});
+
+// Quello che l'ospite dice della sua prenotazione (ritardo, note, allergie,
+// conferma): services/reservationGuestUpdates.ts scrive, qui il broadcast.
+configureGuestUpdates({
+    broadcastReservationsUpdatedByIds: ids => broadcastReservationsUpdatedByIds(ids),
 });
 
 // Informazioni sul locale per gli agenti (services/restaurantInfo.ts):

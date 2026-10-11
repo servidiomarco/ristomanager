@@ -313,6 +313,24 @@ const renderGuestAnswerIcon = (res: Reservation, tv: (k: string, o?: Record<stri
   return null;
 };
 
+// L'ospite ha avvisato che arriva più tardi (WhatsApp): orologio in
+// «pending», perché è una cosa da sapere prima che il tavolo vada ad altri.
+// Solo finché non è arrivato: dopo, l'avviso non dice più niente.
+const renderGuestEtaIcon = (res: Reservation, tv: (k: string, o?: Record<string, unknown>) => string): React.ReactNode => {
+  if (typeof res.guest_eta_at !== 'string' || !res.guest_eta_at) return null;
+  if (res.reservation_status === ReservationStatus.CANCELLED) return null;
+  if (res.arrival_status && res.arrival_status !== 'WAITING') return null;
+  const title = tv('guestEta', {
+    ora: formatTime(res.guest_eta_at),
+    quando: typeof res.guest_eta_noted_at === 'string' ? formatTime(res.guest_eta_noted_at) : '—',
+  });
+  return (
+    <span className={`${ATTR_BADGE} bg-[var(--ds-pending-tint)] text-[var(--ds-pending-text)]`} title={title} aria-label={title}>
+      <Clock className="h-3.5 w-3.5" />
+    </span>
+  );
+};
+
 // Payment badge (icon + tooltip) is now a shared component in
 // PaymentBadge.tsx so the Dashboard's pending-reservations card and the
 // Prenotazioni list can render the exact same chip without drift.
@@ -3492,6 +3510,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
         {renderConfirmationIcon(res, tv)}
         {renderReminderIcon(res, tv)}
         {renderGuestAnswerIcon(res, tv)}
+        {renderGuestEtaIcon(res, tv)}
         {matchedNoteIcons.map(m => {
           const Icon = m.Icon!;
           return (

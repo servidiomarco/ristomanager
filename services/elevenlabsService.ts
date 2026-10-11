@@ -872,14 +872,17 @@ export const WHATSAPP_CHANNEL_TAG: ReservationChannelTag = {
 };
 
 /** Una nota in più in coda a quelle che ci sono: le note dello staff non si
- *  perdono mai. */
+ *  perdono mai. Il separatore è quello del modulo prenotazione (« | »): le
+ *  note sono segmenti («Allergie: …», «2× Stinco», testo libero) e un
+ *  separatore diverso farebbe finire la nota dentro il segmento prima — il
+ *  modulo, togliendo il segmento delle allergie, la cancellerebbe. */
 export function appendReservationNote(current: string | null | undefined, extra: string): string {
     const base = (current ?? '').trim();
     const add = extra.trim();
     if (!add) return base;
     if (!base) return add;
     if (base.includes(add)) return base;
-    return `${base} · ${add}`;
+    return `${base} | ${add}`;
 }
 
 export interface VoiceReservationInput {

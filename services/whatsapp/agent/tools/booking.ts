@@ -5,7 +5,7 @@ import * as bookingTools from '../../../bookingTools.js';
 import { WHATSAPP_CHANNEL } from '../../../bookingTools.js';
 import { isoDatesToEuropean } from '../../../../utils/text.js';
 import type { AgentContext } from '../types.js';
-import type { AgentTool } from './types.js';
+import type { AgentTool, ToolRun } from './types.js';
 
 // Il telefono è sempre quello della conversazione: il modello non lo
 // sceglie, e nemmeno il nome su cui cercare una prenotazione esistente (il
@@ -63,6 +63,15 @@ export const createReservationTool: AgentTool = {
         },
     }),
     prepareArgs: conTelefono,
+    execute: async (args, run: ToolRun) => (await bookingTools.createReservation(
+        run.tenantId,
+        // Confermata da una persona che ha letto la chat e l'agenda: i due
+        // controlli che farebbero una domanda al cliente non devono fermarla.
+        // Se il nome differisce dal titolare del numero resta la nota
+        // «Numero in rubrica: …».
+        run.approvedByStaff ? { ...args, phone: run.phone, name_confirmed: true, existing_booking_confirmed: true } : { ...args, phone: run.phone },
+        WHATSAPP_CHANNEL
+    )).body,
     summarize: args => isoDatesToEuropean(
         `Crea prenotazione: ${args.customer_name} · ${args.guests} persone · ${args.date} alle ${args.time}` +
         (args.location_preference ? ` · ${zona(args.location_preference)}` : '')
@@ -74,7 +83,7 @@ export const modifyReservationTool: AgentTool = {
     kind: 'write',
     definition: () => ({
         name: 'modify_reservation',
-        description: `Modifica una prenotazione esistente di questo numero. Passa SOLO i campi new_* che cambiano davvero; il resto resta com'è. Le note nuove si aggiungono a quelle che ci sono, non le sostituiscono.`,
+        description: `Modifica una prenotazione esistente di questo numero: data, ora, persone, zona. Passa SOLO i campi new_* che cambiano davvero; il resto resta com'è. Per una richiesta da annotare usa add_reservation_note.`,
         input_schema: {
             type: 'object',
             properties: {
@@ -85,12 +94,13 @@ export const modifyReservationTool: AgentTool = {
                 new_time: { type: 'string', description: 'HH:MM' },
                 new_guests: { type: 'integer' },
                 new_location_preference: { type: 'string', enum: ['INDOOR', 'OUTDOOR'] },
-                new_notes: { type: 'string', description: 'Una richiesta da aggiungere alle note' },
             },
             required: ['date'],
         },
     }),
     prepareArgs: senzaNome,
+    execute: async (args, run: ToolRun) =>
+        (await bookingTools.modifyReservation(run.tenantId, { ...args, phone: run.phone }, WHATSAPP_CHANNEL)).body,
     summarize: (args, ctx) => {
         const cambi: string[] = [];
         if (args.new_date) cambi.push(`data → ${args.new_date}`);
@@ -119,6 +129,8 @@ export const cancelReservationTool: AgentTool = {
         },
     }),
     prepareArgs: senzaNome,
+    execute: async (args, run: ToolRun) =>
+        (await bookingTools.cancelReservation(run.tenantId, { ...args, phone: run.phone }, WHATSAPP_CHANNEL)).body,
     summarize: args => isoDatesToEuropean(
         `Annulla la prenotazione del ${args.date}${args.time ? ` alle ${args.time}` : ''}`
     ),

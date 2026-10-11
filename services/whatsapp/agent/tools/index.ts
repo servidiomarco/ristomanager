@@ -8,6 +8,7 @@ import { checkAvailabilityTool, createReservationTool, modifyReservationTool, ca
 import { skipReplyTool } from './skip.js';
 import { restaurantInfoTool } from './info.js';
 import { requestCallbackTool } from './callback.js';
+import { lateArrivalTool, reservationNoteTool, allergyTool, attendanceTool } from './guest.js';
 
 export const AGENT_TOOLS: readonly AgentTool[] = [
     checkAvailabilityTool,
@@ -16,6 +17,10 @@ export const AGENT_TOOLS: readonly AgentTool[] = [
     cancelReservationTool,
     restaurantInfoTool,
     requestCallbackTool,
+    lateArrivalTool,
+    reservationNoteTool,
+    allergyTool,
+    attendanceTool,
     skipReplyTool,
 ];
 
@@ -26,5 +31,5 @@ export const findTool = (name: string): AgentTool | undefined => BY_NAME.get(nam
 export const toolDefinitions = (ctx: AgentContext): Anthropic.Beta.BetaTool[] =>
     AGENT_TOOLS.map(t => t.definition(ctx));
 
-export type { AgentTool, ToolDecision, ToolKind, TurnState } from './types.js';
+export type { AgentTool, ToolDecision, ToolKind, TurnState, ToolRun } from './types.js';
 export { defaultDecision } from './types.js';

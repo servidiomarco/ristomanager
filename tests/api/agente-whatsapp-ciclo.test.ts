@@ -195,7 +195,7 @@ describe.runIf(AI_STUB_PORT > 0)('agente WhatsApp: il ciclo', () => {
         expect(conf.status).toBe(200);
         expect(conf.body.ok).toBe(true);
         const r = await db.query(`SELECT notes, reservation_status FROM reservations WHERE id = $1`, [creata.body.id]);
-        expect(r.rows[0].notes).toBe('Nota dello staff · [WhatsApp] Porta il cane');
+        expect(r.rows[0].notes).toBe('Nota dello staff | [WhatsApp] Porta il cane');
         expect(r.rows[0].reservation_status).toBe('PENDING');
     });
 
