@@ -1,7 +1,8 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { relativeTime } from '../utils/relativeTime';
 import { useTranslation } from 'react-i18next';
-import { MessageCircle, Send, Loader2, RefreshCw, AlertTriangle, CheckCircle2, Clock, ArrowRight, Check, CalendarPlus, Paperclip, X as XIcon, Wand2, FolderOpen } from 'lucide-react';
+import { MessageCircle, Send, Loader2, RefreshCw, AlertTriangle, CheckCircle2, Clock, ArrowRight, Check, CalendarPlus, Paperclip, X as XIcon, Wand2, FolderOpen, Undo2, Megaphone } from 'lucide-react';
+import { CampagnePage } from './whatsapp/CampagnePage';
 import { Loader } from './Loader';
 import { SkeletonInboxList } from './SkeletonCards';
 import {
@@ -24,13 +25,15 @@ import { socketClient } from '../services/socketClient';
 import { runAgent, confirmProposal, discardProposal, extractBooking, type AgentProposal, type ExtractedBooking } from '../services/aiMessagesApiService';
 import { listMedia, attachFromLibrary, type MediaFile } from '../services/mediaApiService';
 import { getFeatureFlags } from '../services/apiService';
+import { getAgentThread, pauseAgentThread, markAgentDraft, undoAgentAction, type AgentThreadState } from '../services/whatsappApiService';
 import { toTitleCase, phoneMatchKey, isoDatesToEuropean } from '../utils/text';
 import { Shift, type Reservation } from '../types';
 import {
   SearchField, StatusPill, Callout, SegmentedControl, SplitPane, SectionHeader,
   Avatar, EmptyState, SwipeRow, useFirstRunHint, dsIconButton, PanePlaceholder, CountBadge,
-  PaneHeader, AttachmentRow,
+  PaneHeader, AttachmentRow, ModalShell,
 } from './ds';
+import { useAuth } from '../contexts/AuthContext';
 import type { PillTone } from './ds';
 import { sessionTimeZone } from '../utils/displayTime';
 
@@ -187,10 +190,20 @@ interface InboxPageProps {
    *  quelle che combaciano col numero, così più prenotazioni dello stesso
    *  cliente sono tutte gestibili senza un aggancio manuale. */
   reservations?: Reservation[];
+  /** Apri questa conversazione appena la lista c'è (link da una notifica,
+   *  ?view=MESSAGGI&phone=…). */
+  openPhoneDigits?: string | null;
+  onOpenedPhone?: () => void;
+  /** Il toast dell'app (le campagne lo usano). */
+  showToast?: (msg: string, kind?: 'success' | 'error' | 'info') => void;
 }
 
-const InboxPage: React.FC<InboxPageProps> = ({ onCreateReservationFromContact, onOpenReservation, refreshTick, reservations }) => {
+const InboxPage: React.FC<InboxPageProps> = ({ onCreateReservationFromContact, onOpenReservation, refreshTick, reservations, openPhoneDigits, onOpenedPhone, showToast }) => {
   const { t: tv } = useTranslation('messaggi', { useSuspense: false });
+  // Le campagne WhatsApp: si aprono da qui, per chi può mandarle.
+  const { hasPermission } = useAuth();
+  const canManageCampaigns = hasPermission('campaigns:manage');
+  const [campaignsOpen, setCampaignsOpen] = useState(false);
   // Riparte dall'ultimo stato noto (cache modulo-level): la pagina viene
   // smontata a ogni cambio vista, e senza questo ogni rientro mostrava lo
   // spinner per dati visti dieci secondi prima. Il fetch parte comunque e
@@ -215,6 +228,10 @@ const InboxPage: React.FC<InboxPageProps> = ({ onCreateReservationFromContact, o
   const [suggesting, setSuggesting] = useState(false);
   const [proposal, setProposal] = useState<AgentProposal | null>(null);
   const [proposalBusy, setProposalBusy] = useState(false);
+  // L'agente che lavora da solo su questa conversazione: modalità, pausa,
+  // bozza pronta, proposta in attesa (services/whatsapp/agent/queue.ts).
+  const [agentState, setAgentState] = useState<AgentThreadState | null>(null);
+  const [pauseMenuOpen, setPauseMenuOpen] = useState(false);
   // Libreria: si carica solo quando la apri, non a ogni conversazione.
   const [libreriaAperta, setLibreriaAperta] = useState(false);
   const [libreria, setLibreria] = useState<MediaFile[] | null>(null);
@@ -408,6 +425,7 @@ const InboxPage: React.FC<InboxPageProps> = ({ onCreateReservationFromContact, o
         attached.off('message:outbound', onOutbound);
         attached.off('message:status', onStatus);
         attached.off('message:read', onRead);
+        attached.off('message:updated', onStatus);
       }
       attached = s;
       if (attached) {
@@ -415,6 +433,8 @@ const InboxPage: React.FC<InboxPageProps> = ({ onCreateReservationFromContact, o
         attached.on('message:outbound', onOutbound);
         attached.on('message:status', onStatus);
         attached.on('message:read', onRead);
+        // La trascrizione di un vocale arriva qualche secondo dopo il vocale.
+        attached.on('message:updated', onStatus);
       }
     };
     attach(socketClient.getSocket());
@@ -489,8 +509,99 @@ const InboxPage: React.FC<InboxPageProps> = ({ onCreateReservationFromContact, o
     }
   }, [selected, suggesting]);
 
+  // Una notifica ha chiesto questa conversazione: si apre appena compare
+  // nella lista (che può arrivare dopo il primo render).
+  useEffect(() => {
+    if (!openPhoneDigits) return;
+    const key = phoneMatchKey(openPhoneDigits);
+    if (key && conversations.some(c => c.phone_digits === key)) {
+      setSelectedKey(key);
+      onOpenedPhone?.();
+    }
+  }, [openPhoneDigits, conversations, onOpenedPhone]);
+
   // Cambiando conversazione la proposta non deve seguirti addosso.
   useEffect(() => { setProposal(null); }, [selectedKey]);
+
+  // Lo stato dell'agente sulla conversazione aperta. Una proposta nata da un
+  // giro automatico (non dalla bacchetta) si vede solo così.
+  const loadAgentState = useCallback(async (key: string) => {
+    try {
+      const st = await getAgentThread(key);
+      setAgentState(st);
+      if (st.proposal) setProposal(p => p ?? (st.proposal as unknown as AgentProposal));
+    } catch {
+      setAgentState(null);
+    }
+  }, []);
+  useEffect(() => {
+    setAgentState(null);
+    setPauseMenuOpen(false);
+    if (selectedKey && aiEnabled) loadAgentState(selectedKey);
+  }, [selectedKey, aiEnabled, loadAgentState]);
+  // Il server avvisa quando un giro dell'agente finisce o la pausa cambia.
+  useEffect(() => {
+    if (!selectedKey || !aiEnabled) return;
+    const onActivity = (payload: any) => {
+      const key = payload?.phone_digits ? phoneMatchKey(String(payload.phone_digits)) : '';
+      if (key && key === selectedKey) loadAgentState(selectedKey);
+    };
+    let attached: ReturnType<typeof socketClient.getSocket> = null;
+    const attach = (sock: ReturnType<typeof socketClient.getSocket>) => {
+      if (attached === sock) return;
+      if (attached) attached.off('agent:activity', onActivity);
+      attached = sock;
+      if (attached) attached.on('agent:activity', onActivity);
+    };
+    attach(socketClient.getSocket());
+    const unsub = socketClient.onSocketChange(sock => attach(sock));
+    return () => { unsub(); attach(null); };
+  }, [selectedKey, aiEnabled, loadAgentState]);
+
+  const handlePause = useCallback(async (per: '1h' | 'tomorrow' | 'always' | 'resume') => {
+    if (!selectedKey) return;
+    setPauseMenuOpen(false);
+    try {
+      await pauseAgentThread(selectedKey, per);
+      await loadAgentState(selectedKey);
+    } catch (err: any) {
+      setSendError(err?.data?.error || err?.message || tv('agentPauseFailed'));
+    }
+  }, [selectedKey, loadAgentState]);
+
+  // «Annulla» su un'azione che l'agente ha fatto da solo: la prenotazione
+  // torna com'era, se nessuno l'ha toccata nel frattempo.
+  const [undoingId, setUndoingId] = useState<number | null>(null);
+  const handleUndo = useCallback(async (actionId: number) => {
+    if (!selectedKey) return;
+    setUndoingId(actionId);
+    try {
+      await undoAgentAction(actionId);
+    } catch (err: any) {
+      const code = err?.data?.error;
+      setSendError(
+        code === 'changed' ? tv('agentUndoChanged')
+        : code === 'no_table' ? tv('agentUndoNoTable')
+        : code === 'past' ? tv('agentUndoPast')
+        : code === 'already_undone' ? null
+        : (err?.message || tv('agentUndoFailed'))
+      );
+    } finally {
+      setUndoingId(null);
+      await loadAgentState(selectedKey);
+    }
+  }, [selectedKey, loadAgentState]);
+
+  const handleDraft = useCallback(async (use: boolean) => {
+    const d = agentState?.draft;
+    if (!d) return;
+    if (use) {
+      setComposerText(d.text);
+      composerRef.current?.focus();
+    }
+    setAgentState(st => (st ? { ...st, draft: null } : st));
+    markAgentDraft(d.run_id, use ? 'used' : 'discarded').catch(() => {});
+  }, [agentState]);
 
   // "Crea prenotazione" dalla chat: precompila il modulo coi campi estratti dal
   // messaggio (data/ora/coperti/zona/note, anche in inglese). Usa l'estrazione
@@ -727,434 +838,576 @@ const InboxPage: React.FC<InboxPageProps> = ({ onCreateReservationFromContact, o
   };
 
   return (
-    <SplitPane
-      detailOpen={!!selectedKey}
-      toolbar={
-        <div className="space-y-3">
-          {/* No visible page title: the sidebar and the mobile switcher both
-              name this screen, and both already carry the unread count. */}
-          <h2 className="sr-only">{tv('title')}{totalUnread > 0 ? `, ${tv('unreadCount', { count: totalUnread })}` : ''}</h2>
-          <div className="flex items-center gap-2">
-            <SearchField
-              className="min-w-0 flex-1"
-              value={searchQuery}
-              onChange={setSearchQuery}
-              placeholder={tv('searchPlaceholder')}
-            />
-            <button
-              onClick={() => { setConvLoading(true); loadConversations(); }}
-              className={dsIconButton}
-              title={tv('refresh')}
-              aria-label={tv('refresh')}
-            >
-              <RefreshCw className="h-4 w-4" />
-            </button>
+    <>
+      <SplitPane
+        detailOpen={!!selectedKey}
+        toolbar={
+          <div className="space-y-3">
+            {/* No visible page title: the sidebar and the mobile switcher both
+                name this screen, and both already carry the unread count. */}
+            <h2 className="sr-only">{tv('title')}{totalUnread > 0 ? `, ${tv('unreadCount', { count: totalUnread })}` : ''}</h2>
+            <div className="flex items-center gap-2">
+              <SearchField
+                className="min-w-0 flex-1"
+                value={searchQuery}
+                onChange={setSearchQuery}
+                placeholder={tv('searchPlaceholder')}
+              />
+              <button
+                onClick={() => { setConvLoading(true); loadConversations(); }}
+                className={dsIconButton}
+                title={tv('refresh')}
+                aria-label={tv('refresh')}
+              >
+                <RefreshCw className="h-4 w-4" />
+              </button>
+              {/* Le campagne WhatsApp: solo per chi può mandarle. */}
+              {canManageCampaigns && (
+                <button onClick={() => setCampaignsOpen(true)} className={dsIconButton} title={tv('campaigns')} aria-label={tv('campaigns')}>
+                  <Megaphone className="h-4 w-4" />
+                </button>
+              )}
+            </div>
           </div>
-        </div>
-      }
-      list={
-        convLoading ? (
-          <SkeletonInboxList count={7} className="overflow-hidden rounded-[var(--ds-radius)] bg-[var(--ds-surface)]" />
-        ) : convError ? (
-          <Callout tone="critical" icon={AlertTriangle}>{convError}</Callout>
-        ) : conversations.length === 0 ? (
-          <EmptyState icon={MessageCircle}>
-            {tv('emptyList')}
-          </EmptyState>
-        ) : filteredConversations.length === 0 ? (
-          <EmptyState icon={MessageCircle}>
-            Nessun risultato per "{searchQuery.trim()}".
-          </EmptyState>
-        ) : (
-          <div className="space-y-1">
-            {replyQueue.length > 0 && (
-              <>
-                <SectionHeader tone="positive">{tv('tabToAnswer')}</SectionHeader>
-                <div className="space-y-2 pb-2">
-                  {replyQueue.map((c, i) => renderConversation(c, swipeHint && i === 0))}
-                </div>
-              </>
-            )}
-            {restOfInbox.length > 0 && (
-              <>
-                <SectionHeader>{tv('tabAll')}</SectionHeader>
-                <div className="space-y-2">
-                  {restOfInbox.map((c, i) => renderConversation(c, swipeHint && replyQueue.length === 0 && i === 0))}
-                </div>
-              </>
-            )}
-          </div>
-        )
-      }
-      detail={
-        !selected ? (
-          <PanePlaceholder icon={MessageCircle}>{tv('pickConversation')}</PanePlaceholder>
-        ) : (
-          <>
-            <PaneHeader
-              onBack={() => setSelectedKey(null)}
-              backLabel="Torna alle conversazioni"
-              title={displayName(selected)}
-              subtitle={selected.phone || undefined}
-              badge={
-                <StatusPill tone={channelTone(selected.last_channel)}>
-                  {selected.last_channel === 'whatsapp' ? 'WhatsApp' : 'SMS'}
-                </StatusPill>
-              }
-              actions={
-                <div className="flex items-center gap-2">
-                  {waWindowOpen && preferredChannel === 'whatsapp' && (
-                    <StatusPill tone="positive" className="hidden sm:inline-flex">
-                      <Clock className="h-3 w-3" aria-hidden /> Finestra WA: {windowRemaining}
-                    </StatusPill>
-                  )}
-                  {/* Prenotazioni del numero (N) in un menu, ciascuna apribile
-                      per modificarla — supporta più prenotazioni nella stessa
-                      chat. "Crea prenotazione" resta sempre disponibile per
-                      aggiungerne una nuova. */}
-                  {onOpenReservation && reservationsForPhone.length > 0 && (
-                    <div className="relative">
+        }
+        list={
+          convLoading ? (
+            <SkeletonInboxList count={7} className="overflow-hidden rounded-[var(--ds-radius)] bg-[var(--ds-surface)]" />
+          ) : convError ? (
+            <Callout tone="critical" icon={AlertTriangle}>{convError}</Callout>
+          ) : conversations.length === 0 ? (
+            <EmptyState icon={MessageCircle}>
+              {tv('emptyList')}
+            </EmptyState>
+          ) : filteredConversations.length === 0 ? (
+            <EmptyState icon={MessageCircle}>
+              Nessun risultato per "{searchQuery.trim()}".
+            </EmptyState>
+          ) : (
+            <div className="space-y-1">
+              {replyQueue.length > 0 && (
+                <>
+                  <SectionHeader tone="positive">{tv('tabToAnswer')}</SectionHeader>
+                  <div className="space-y-2 pb-2">
+                    {replyQueue.map((c, i) => renderConversation(c, swipeHint && i === 0))}
+                  </div>
+                </>
+              )}
+              {restOfInbox.length > 0 && (
+                <>
+                  <SectionHeader>{tv('tabAll')}</SectionHeader>
+                  <div className="space-y-2">
+                    {restOfInbox.map((c, i) => renderConversation(c, swipeHint && replyQueue.length === 0 && i === 0))}
+                  </div>
+                </>
+              )}
+            </div>
+          )
+        }
+        detail={
+          !selected ? (
+            <PanePlaceholder icon={MessageCircle}>{tv('pickConversation')}</PanePlaceholder>
+          ) : (
+            <>
+              <PaneHeader
+                onBack={() => setSelectedKey(null)}
+                backLabel="Torna alle conversazioni"
+                title={displayName(selected)}
+                subtitle={selected.phone || undefined}
+                badge={
+                  <StatusPill tone={channelTone(selected.last_channel)}>
+                    {selected.last_channel === 'whatsapp' ? 'WhatsApp' : 'SMS'}
+                  </StatusPill>
+                }
+                actions={
+                  <div className="flex items-center gap-2">
+                    {aiEnabled && agentState && agentState.mode !== 'off' && (
+                      <div className="relative">
+                        <button
+                          type="button"
+                          onClick={() => setPauseMenuOpen(o => !o)}
+                          aria-haspopup="menu"
+                          aria-expanded={pauseMenuOpen}
+                          className={`inline-flex h-9 items-center gap-1.5 rounded-[var(--ds-radius-control)] px-3 text-[13px] font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] ${
+                            agentState.paused
+                              ? 'bg-[var(--ds-pending-tint)] text-[var(--ds-pending-text)]'
+                              : 'bg-[var(--ds-arriving-tint)] text-[var(--ds-arriving-text)]'
+                          }`}
+                        >
+                          <Wand2 className="h-4 w-4" aria-hidden />
+                          <span className="hidden sm:inline">
+                            {agentState.paused
+                              ? (agentState.pause_reason === 'bot_suspected'
+                                ? tv('agentBotStopped')
+                                : agentState.paused_until
+                                  ? tv('agentPausedUntil', { ora: formatTime(agentState.paused_until) })
+                                  : tv('agentPaused'))
+                              : (agentState.mode === 'actions' ? tv('agentChipActions')
+                                : agentState.mode === 'reply' ? tv('agentChipReply') : tv('agentChipDraft'))}
+                          </span>
+                        </button>
+                        {pauseMenuOpen && (
+                          <>
+                            <div className="fixed inset-0 z-40" onClick={() => setPauseMenuOpen(false)} aria-hidden />
+                            <div role="menu" className="absolute right-0 z-50 mt-1 w-56 overflow-hidden rounded-[var(--ds-radius)] bg-[var(--ds-surface)] py-1 shadow-[var(--ds-shadow-card)] ring-1 ring-[var(--ds-border)]">
+                              {agentState.paused ? (
+                                <button type="button" role="menuitem" onClick={() => handlePause('resume')} className="block w-full px-3.5 py-2.5 text-left text-[14px] text-[var(--ds-text-primary)] hover:bg-[var(--ds-surface-row)]">
+                                  {tv('agentResume')}
+                                </button>
+                              ) : (
+                                (['1h', 'tomorrow', 'always'] as const).map(per => (
+                                  <button key={per} type="button" role="menuitem" onClick={() => handlePause(per)} className="block w-full px-3.5 py-2.5 text-left text-[14px] text-[var(--ds-text-primary)] hover:bg-[var(--ds-surface-row)]">
+                                    {tv(per === '1h' ? 'agentPause1h' : per === 'tomorrow' ? 'agentPauseTomorrow' : 'agentPauseAlways')}
+                                  </button>
+                                ))
+                              )}
+                            </div>
+                          </>
+                        )}
+                      </div>
+                    )}
+                    {waWindowOpen && preferredChannel === 'whatsapp' && (
+                      <StatusPill tone="positive" className="hidden sm:inline-flex">
+                        <Clock className="h-3 w-3" aria-hidden /> Finestra WA: {windowRemaining}
+                      </StatusPill>
+                    )}
+                    {/* Prenotazioni del numero (N) in un menu, ciascuna apribile
+                        per modificarla — supporta più prenotazioni nella stessa
+                        chat. "Crea prenotazione" resta sempre disponibile per
+                        aggiungerne una nuova. */}
+                    {onOpenReservation && reservationsForPhone.length > 0 && (
+                      <div className="relative">
+                        <button
+                          type="button"
+                          onClick={() => setResMenuOpen(o => !o)}
+                          aria-haspopup="menu"
+                          aria-expanded={resMenuOpen}
+                          className="inline-flex h-9 items-center gap-1.5 rounded-[var(--ds-radius-control)] border border-[var(--ds-border)] px-3.5 text-[13px] font-semibold text-[var(--ds-text-primary)] transition-colors hover:bg-[var(--ds-surface-row)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+                        >
+                          <ArrowRight className="h-4 w-4" aria-hidden />
+                          <span className="hidden sm:inline">{tv('bookings')}</span>
+                          <CountBadge count={reservationsForPhone.length} />
+                        </button>
+                        {resMenuOpen && (
+                          <>
+                            {/* Backdrop invisibile: un click fuori chiude il menu. */}
+                            <div className="fixed inset-0 z-40" onClick={() => setResMenuOpen(false)} aria-hidden />
+                            <div
+                              role="menu"
+                              className="absolute right-0 z-50 mt-1.5 max-h-[60vh] w-[19rem] max-w-[85vw] overflow-y-auto rounded-[var(--ds-radius)] border border-[var(--ds-border)] bg-[var(--ds-surface)] p-1.5 shadow-lg"
+                            >
+                              {reservationsForPhone.map(res => {
+                                const badge = reservationStatusPill(res.reservation_status ?? null, tv);
+                                return (
+                                  <button
+                                    key={res.id}
+                                    type="button"
+                                    role="menuitem"
+                                    onClick={() => { setResMenuOpen(false); onOpenReservation(res.id); }}
+                                    className="flex w-full flex-col gap-0.5 rounded-[var(--ds-radius)] px-2.5 py-2 text-left transition-colors hover:bg-[var(--ds-surface-row)]"
+                                  >
+                                    <span className="flex items-center gap-2 text-[14px] text-[var(--ds-text-primary)]">
+                                      <span className="truncate font-medium">{toTitleCase(res.customer_name) || 'Prenotazione'}</span>
+                                      {badge && <StatusPill tone={badge.tone}>{badge.label}</StatusPill>}
+                                    </span>
+                                    <span className="text-[12px] text-[var(--ds-text-muted)]">
+                                      {formatReservationWhen(res.reservation_time)}
+                                      {res.guests != null && ` · ${res.guests} ospiti`}
+                                    </span>
+                                  </button>
+                                );
+                              })}
+                            </div>
+                          </>
+                        )}
+                      </div>
+                    )}
+                    {onCreateReservationFromContact && (
                       <button
                         type="button"
-                        onClick={() => setResMenuOpen(o => !o)}
-                        aria-haspopup="menu"
-                        aria-expanded={resMenuOpen}
-                        className="inline-flex h-9 items-center gap-1.5 rounded-[var(--ds-radius-control)] border border-[var(--ds-border)] px-3.5 text-[13px] font-semibold text-[var(--ds-text-primary)] transition-colors hover:bg-[var(--ds-surface-row)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+                        onClick={handleCreateReservation}
+                        disabled={suggesting}
+                        className="inline-flex h-9 items-center gap-1.5 rounded-[var(--ds-radius-control)] bg-[var(--ds-action-bg)] px-3.5 text-[13px] font-semibold text-[var(--ds-action-fg)] transition-colors hover:bg-[var(--ds-action-bg-hover)] disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
                       >
-                        <ArrowRight className="h-4 w-4" aria-hidden />
-                        <span className="hidden sm:inline">{tv('bookings')}</span>
-                        <CountBadge count={reservationsForPhone.length} />
+                        {suggesting ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> : <CalendarPlus className="h-4 w-4" aria-hidden />}
+                        <span className="hidden sm:inline">{tv('createBooking')}</span>
                       </button>
-                      {resMenuOpen && (
-                        <>
-                          {/* Backdrop invisibile: un click fuori chiude il menu. */}
-                          <div className="fixed inset-0 z-40" onClick={() => setResMenuOpen(false)} aria-hidden />
-                          <div
-                            role="menu"
-                            className="absolute right-0 z-50 mt-1.5 max-h-[60vh] w-[19rem] max-w-[85vw] overflow-y-auto rounded-[var(--ds-radius)] border border-[var(--ds-border)] bg-[var(--ds-surface)] p-1.5 shadow-lg"
-                          >
-                            {reservationsForPhone.map(res => {
-                              const badge = reservationStatusPill(res.reservation_status ?? null, tv);
-                              return (
-                                <button
-                                  key={res.id}
-                                  type="button"
-                                  role="menuitem"
-                                  onClick={() => { setResMenuOpen(false); onOpenReservation(res.id); }}
-                                  className="flex w-full flex-col gap-0.5 rounded-[var(--ds-radius)] px-2.5 py-2 text-left transition-colors hover:bg-[var(--ds-surface-row)]"
-                                >
-                                  <span className="flex items-center gap-2 text-[14px] text-[var(--ds-text-primary)]">
-                                    <span className="truncate font-medium">{toTitleCase(res.customer_name) || 'Prenotazione'}</span>
-                                    {badge && <StatusPill tone={badge.tone}>{badge.label}</StatusPill>}
+                    )}
+                  </div>
+                }
+              />
+
+              <div className="min-h-0 flex-1 overflow-y-auto bg-[var(--ds-canvas)]">
+              <div className="px-4 pb-4 sm:px-6 lg:px-8">
+                {msgLoading ? (
+                  <div className="flex h-32 items-center justify-center"><Loader /></div>
+                ) : msgError ? (
+                  <Callout tone="critical" icon={AlertTriangle}>{msgError}</Callout>
+                ) : messages.length === 0 ? (
+                  <p className="mt-8 text-center text-[14px] text-[var(--ds-text-muted)]">
+                    {tv('noMessagesYet')}
+                  </p>
+                ) : (
+                  <div className="mx-auto max-w-3xl space-y-4">
+                    {grouped.map(g => (
+                      <div key={g.day} className="space-y-2">
+                        <div className="flex justify-center">
+                          <span className="rounded-[var(--ds-radius-control)] bg-[var(--ds-surface)] px-2.5 py-1 text-[12px] text-[var(--ds-text-muted)]">
+                            {formatDayHeader(g.day)}
+                          </span>
+                        </div>
+                        {g.items.map(m => {
+                          const outbound = m.direction === 'outbound';
+                          return (
+                            <div key={m.id} className={`flex ${outbound ? 'justify-end' : 'justify-start'}`}>
+                              {/* Ours is the filled bubble, theirs is plain
+                                  surface — the same side assignment the page
+                                  already used, now on tokens. */}
+                              <div
+                                className={`max-w-[80%] rounded-[var(--ds-radius)] px-3.5 py-2 ${
+                                  outbound
+                                    ? 'rounded-br-[var(--ds-radius)] bg-[var(--ds-seated-solid)] text-white'
+                                    : 'rounded-bl-[var(--ds-radius)] bg-[var(--ds-surface)] text-[var(--ds-text-primary)]'
+                                }`}
+                              >
+                                {Array.isArray(m.media) && m.media.length > 0 && (
+                                  <div className="mb-1.5 space-y-1.5">
+                                    {m.media.map((att, i) => (
+                                      <MediaAttachment key={i} messageId={m.id} index={i} media={att} />
+                                    ))}
+                                  </div>
+                                )}
+                                {/* Il vocale scritto (Impostazioni › WhatsApp › Vocali e foto). */}
+                                {m.transcript_status === 'done' && m.transcript && (
+                                  <p className="mb-1 whitespace-pre-wrap break-words text-[14px] italic leading-snug text-[var(--ds-text-secondary)]">
+                                    <span className="sr-only">{tv('transcriptLabel')}: </span>«{m.transcript}»
+                                  </p>
+                                )}
+                                {m.transcript_status === 'pending' && (
+                                  <p className="mb-1 flex items-center gap-1.5 text-[13px] text-[var(--ds-text-muted)]">
+                                    <Loader2 className="h-3.5 w-3.5 animate-spin" /> {tv('transcriptPending')}
+                                  </p>
+                                )}
+                                {m.transcript_status === 'failed' && (
+                                  <p className="mb-1 text-[13px] italic text-[var(--ds-text-muted)]">{tv('transcriptFailed')}</p>
+                                )}
+                                {m.body && (
+                                  <p className="whitespace-pre-wrap break-words text-[15px] leading-snug">{m.body}</p>
+                                )}
+                                <div className={`mt-1 flex items-center justify-end gap-1.5 text-[12px] ${outbound ? 'text-white/75' : 'text-[var(--ds-text-muted)]'}`}>
+                                  <span className="tabular-nums">{formatTime(m.sent_at)}</span>
+                                  {statusIcon(m, tv)}
+                                  {/* Scritto dall'agente, non da una persona. */}
+                                  {(m.kind === 'agent' || m.kind === 'agent_followup') && (
+                                    <span className="inline-flex items-center gap-0.5 rounded-[var(--ds-radius-control)] bg-white/20 px-1.5 text-[11px]" title={tv('agentWrote')}>
+                                      <Wand2 className="h-3 w-3" aria-hidden /> {tv('agentLabel')}
+                                    </span>
+                                  )}
+                                  <span className={`rounded-[var(--ds-radius-control)] px-1.5 text-[11px] ${outbound ? 'bg-white/20' : 'bg-[var(--ds-surface-row)]'}`}>
+                                    {m.channel === 'whatsapp' ? 'WA' : 'SMS'}
                                   </span>
-                                  <span className="text-[12px] text-[var(--ds-text-muted)]">
-                                    {formatReservationWhen(res.reservation_time)}
-                                    {res.guests != null && ` · ${res.guests} ospiti`}
-                                  </span>
-                                </button>
-                              );
-                            })}
-                          </div>
-                        </>
+                                </div>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    ))}
+                    <div ref={messagesEndRef} />
+                  </div>
+                )}
+              </div>
+              </div>
+
+              <div className="flex-shrink-0 px-4 pb-4 pt-3 sm:px-6 lg:px-8">
+                <div className="mx-auto max-w-3xl space-y-2">
+                  {!waWindowOpen && preferredChannel === 'whatsapp' && (
+                    <Callout
+                      tone="pending"
+                      icon={AlertTriangle}
+                      action={
+                        <button
+                          onClick={() => setPreferredChannel('sms')}
+                          className="whitespace-nowrap font-semibold underline underline-offset-4 hover:no-underline"
+                        >
+                          {tv('switchToSms')}
+                        </button>
+                      }
+                    >
+                      Finestra 24h WhatsApp chiusa: il cliente deve scrivere per primo.
+                    </Callout>
+                  )}
+                  {sendError && <Callout tone="critical" icon={AlertTriangle}>{sendError}</Callout>}
+
+                  {/* La libreria: l'elenco dei file già caricati in Impostazioni.
+                      Sta qui e non in un dialogo perché allegare il menù è un
+                      gesto da due secondi in mezzo a una conversazione. */}
+                  {libreriaAperta && (
+                    <div className="rounded-[var(--ds-radius)] border border-[var(--ds-border)] bg-[var(--ds-surface-row)] px-3 py-2.5">
+                      {libreria === null ? (
+                        <p className="flex items-center gap-2 py-1 text-[13px] text-[var(--ds-text-muted)]">
+                          <Loader2 className="h-3.5 w-3.5 animate-spin" /> Carico la libreria…
+                        </p>
+                      ) : libreria.length === 0 ? (
+                        <p className="py-1 text-[13px] text-[var(--ds-text-muted)]">
+                          Nessun file in libreria. Si caricano da Impostazioni → Media.
+                        </p>
+                      ) : (
+                        <ul className="max-h-44 space-y-0.5 overflow-y-auto">
+                          {libreria.map(f => (
+                            <li key={f.id}>
+                              <button
+                                type="button"
+                                onClick={() => handleAllegaDallaLibreria(f)}
+                                disabled={uploading}
+                                className="flex w-full items-center gap-2.5 rounded-[var(--ds-radius)] px-2 py-2 text-left transition-colors hover:bg-[var(--ds-surface)] disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+                              >
+                                <Paperclip className="h-3.5 w-3.5 flex-shrink-0 text-[var(--ds-text-muted)]" aria-hidden />
+                                <span className="min-w-0 flex-1 truncate text-[14px] text-[var(--ds-text-primary)]">{f.title}</span>
+                                <span className="flex-shrink-0 text-[12px] text-[var(--ds-text-subtle)]">
+                                  {f.size_bytes >= 1024 * 1024
+                                    ? `${(f.size_bytes / 1024 / 1024).toFixed(1)} MB`
+                                    : `${Math.max(1, Math.round(f.size_bytes / 1024))} KB`}
+                                </span>
+                              </button>
+                            </li>
+                          ))}
+                        </ul>
                       )}
                     </div>
                   )}
-                  {onCreateReservationFromContact && (
-                    <button
-                      type="button"
-                      onClick={handleCreateReservation}
-                      disabled={suggesting}
-                      className="inline-flex h-9 items-center gap-1.5 rounded-[var(--ds-radius-control)] bg-[var(--ds-action-bg)] px-3.5 text-[13px] font-semibold text-[var(--ds-action-fg)] transition-colors hover:bg-[var(--ds-action-bg-hover)] disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
-                    >
-                      {suggesting ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> : <CalendarPlus className="h-4 w-4" aria-hidden />}
-                      <span className="hidden sm:inline">{tv('createBooking')}</span>
-                    </button>
-                  )}
-                </div>
-              }
-            />
 
-            <div className="min-h-0 flex-1 overflow-y-auto bg-[var(--ds-canvas)]">
-            <div className="px-4 pb-4 sm:px-6 lg:px-8">
-              {msgLoading ? (
-                <div className="flex h-32 items-center justify-center"><Loader /></div>
-              ) : msgError ? (
-                <Callout tone="critical" icon={AlertTriangle}>{msgError}</Callout>
-              ) : messages.length === 0 ? (
-                <p className="mt-8 text-center text-[14px] text-[var(--ds-text-muted)]">
-                  {tv('noMessagesYet')}
-                </p>
-              ) : (
-                <div className="mx-auto max-w-3xl space-y-4">
-                  {grouped.map(g => (
-                    <div key={g.day} className="space-y-2">
-                      <div className="flex justify-center">
-                        <span className="rounded-[var(--ds-radius-control)] bg-[var(--ds-surface)] px-2.5 py-1 text-[12px] text-[var(--ds-text-muted)]">
-                          {formatDayHeader(g.day)}
-                        </span>
-                      </div>
-                      {g.items.map(m => {
-                        const outbound = m.direction === 'outbound';
-                        return (
-                          <div key={m.id} className={`flex ${outbound ? 'justify-end' : 'justify-start'}`}>
-                            {/* Ours is the filled bubble, theirs is plain
-                                surface — the same side assignment the page
-                                already used, now on tokens. */}
-                            <div
-                              className={`max-w-[80%] rounded-[var(--ds-radius)] px-3.5 py-2 ${
-                                outbound
-                                  ? 'rounded-br-[var(--ds-radius)] bg-[var(--ds-seated-solid)] text-white'
-                                  : 'rounded-bl-[var(--ds-radius)] bg-[var(--ds-surface)] text-[var(--ds-text-primary)]'
-                              }`}
-                            >
-                              {Array.isArray(m.media) && m.media.length > 0 && (
-                                <div className="mb-1.5 space-y-1.5">
-                                  {m.media.map((att, i) => (
-                                    <MediaAttachment key={i} messageId={m.id} index={i} media={att} />
-                                  ))}
-                                </div>
-                              )}
-                              {m.body && (
-                                <p className="whitespace-pre-wrap break-words text-[15px] leading-snug">{m.body}</p>
-                              )}
-                              <div className={`mt-1 flex items-center justify-end gap-1.5 text-[12px] ${outbound ? 'text-white/75' : 'text-[var(--ds-text-muted)]'}`}>
-                                <span className="tabular-nums">{formatTime(m.sent_at)}</span>
-                                {statusIcon(m, tv)}
-                                <span className={`rounded-[var(--ds-radius-control)] px-1.5 text-[11px] ${outbound ? 'bg-white/20' : 'bg-[var(--ds-surface-row)]'}`}>
-                                  {m.channel === 'whatsapp' ? 'WA' : 'SMS'}
-                                </span>
-                              </div>
-                            </div>
+                  {/* Quello che l'agente ha fatto da solo (modalità Azioni)
+                      negli ultimi due giorni, ciascuna col suo «Annulla». Le
+                      azioni già annullate restano, spente, a fare da storia. */}
+                  {(agentState?.actions ?? []).length > 0 && (
+                    <ul className="space-y-1.5">
+                      {(agentState?.actions ?? []).map(a => (
+                        <li key={a.id} className="flex items-center gap-2.5 rounded-[var(--ds-radius-sm)] bg-[var(--ds-arriving-tint)] px-3 py-2">
+                          <Wand2 className="h-4 w-4 flex-shrink-0 text-[var(--ds-arriving-text)]" aria-hidden />
+                          <div className="min-w-0 flex-1">
+                            <p className={`text-[13px] font-semibold ${a.undone_at ? 'text-[var(--ds-text-muted)] line-through' : 'text-[var(--ds-text-primary)]'}`}>
+                              {tv(`agentDid.${a.tool}`, { defaultValue: tv('agentDidOther') })} · {formatTime(a.at)}
+                            </p>
+                            <p className="truncate text-[12px] text-[var(--ds-text-secondary)]">{a.summary}</p>
                           </div>
-                        );
-                      })}
-                    </div>
-                  ))}
-                  <div ref={messagesEndRef} />
-                </div>
-              )}
-            </div>
-            </div>
-
-            <div className="flex-shrink-0 px-4 pb-4 pt-3 sm:px-6 lg:px-8">
-              <div className="mx-auto max-w-3xl space-y-2">
-                {!waWindowOpen && preferredChannel === 'whatsapp' && (
-                  <Callout
-                    tone="pending"
-                    icon={AlertTriangle}
-                    action={
-                      <button
-                        onClick={() => setPreferredChannel('sms')}
-                        className="whitespace-nowrap font-semibold underline underline-offset-4 hover:no-underline"
-                      >
-                        {tv('switchToSms')}
-                      </button>
-                    }
-                  >
-                    Finestra 24h WhatsApp chiusa: il cliente deve scrivere per primo.
-                  </Callout>
-                )}
-                {sendError && <Callout tone="critical" icon={AlertTriangle}>{sendError}</Callout>}
-
-                {/* La libreria: l'elenco dei file già caricati in Impostazioni.
-                    Sta qui e non in un dialogo perché allegare il menù è un
-                    gesto da due secondi in mezzo a una conversazione. */}
-                {libreriaAperta && (
-                  <div className="rounded-[var(--ds-radius)] border border-[var(--ds-border)] bg-[var(--ds-surface-row)] px-3 py-2.5">
-                    {libreria === null ? (
-                      <p className="flex items-center gap-2 py-1 text-[13px] text-[var(--ds-text-muted)]">
-                        <Loader2 className="h-3.5 w-3.5 animate-spin" /> Carico la libreria…
-                      </p>
-                    ) : libreria.length === 0 ? (
-                      <p className="py-1 text-[13px] text-[var(--ds-text-muted)]">
-                        Nessun file in libreria. Si caricano da Impostazioni → Media.
-                      </p>
-                    ) : (
-                      <ul className="max-h-44 space-y-0.5 overflow-y-auto">
-                        {libreria.map(f => (
-                          <li key={f.id}>
+                          {a.undoable && (
                             <button
                               type="button"
-                              onClick={() => handleAllegaDallaLibreria(f)}
-                              disabled={uploading}
-                              className="flex w-full items-center gap-2.5 rounded-[var(--ds-radius)] px-2 py-2 text-left transition-colors hover:bg-[var(--ds-surface)] disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+                              onClick={() => handleUndo(a.id)}
+                              disabled={undoingId === a.id}
+                              className="inline-flex h-9 flex-shrink-0 items-center gap-1.5 rounded-[var(--ds-radius-control)] bg-[var(--ds-surface)] px-3 text-[13px] font-medium text-[var(--ds-text-primary)] ring-1 ring-[var(--ds-border)] transition-colors hover:bg-[var(--ds-surface-row)] disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
                             >
-                              <Paperclip className="h-3.5 w-3.5 flex-shrink-0 text-[var(--ds-text-muted)]" aria-hidden />
-                              <span className="min-w-0 flex-1 truncate text-[14px] text-[var(--ds-text-primary)]">{f.title}</span>
-                              <span className="flex-shrink-0 text-[12px] text-[var(--ds-text-subtle)]">
-                                {f.size_bytes >= 1024 * 1024
-                                  ? `${(f.size_bytes / 1024 / 1024).toFixed(1)} MB`
-                                  : `${Math.max(1, Math.round(f.size_bytes / 1024))} KB`}
-                              </span>
+                              {undoingId === a.id ? <Loader2 className="h-4 w-4 animate-spin" /> : <Undo2 className="h-4 w-4" />} {tv('agentUndo')}
                             </button>
-                          </li>
-                        ))}
-                      </ul>
-                    )}
-                  </div>
-                )}
+                          )}
+                          {a.undone_at && <span className="flex-shrink-0 text-[12px] text-[var(--ds-text-muted)]">{tv('agentUndone')}</span>}
+                        </li>
+                      ))}
+                    </ul>
+                  )}
 
-                {/* La proposta dell'agente. Sta sopra il campo di scrittura e
-                    non parte da sola: l'agente ha capito cosa fare, la
-                    decisione resta di chi legge. */}
-                {proposal && (
-                  <div className="ds-ai-frame">
-                    <div className="ds-ai-card flex items-start gap-2.5 px-3.5 py-3">
-                      <Wand2 className="mt-0.5 h-4 w-4 flex-shrink-0 text-[var(--ds-text-secondary)]" aria-hidden />
-                      <div className="min-w-0 flex-1">
-                        <p className="text-[13px] font-semibold text-[var(--ds-text-primary)]">
-                          {tv('agentProposal')}
-                        </p>
-                        {/* Riformattata anche qui: le proposte salvate prima
-                            della correzione hanno ancora le date ISO. */}
-                        <p className="mt-0.5 text-[14px] text-[var(--ds-text-primary)]">{isoDatesToEuropean(proposal.summary)}</p>
-                        <p className="mt-1 text-[12px] text-[var(--ds-text-muted)]">
-                          {tv('nothingChangedYet')}
-                        </p>
-                        <div className="mt-2.5 flex flex-wrap items-center gap-2">
-                          <button
-                            type="button"
-                            onClick={handleConfirmProposal}
-                            disabled={proposalBusy}
-                            className="inline-flex h-9 items-center gap-1.5 rounded-[var(--ds-radius-control)] bg-[var(--ds-action-bg)] px-3.5 text-[13px] font-semibold text-[var(--ds-action-fg)] transition-colors hover:bg-[var(--ds-action-bg-hover)] disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
-                          >
-                            {proposalBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}
-                            {tv('confirmAndRun')}
-                          </button>
-                          <button
-                            type="button"
-                            onClick={handleDiscardProposal}
-                            disabled={proposalBusy}
-                            className="inline-flex h-9 items-center gap-1.5 rounded-[var(--ds-radius-control)] px-3 text-[13px] font-medium text-[var(--ds-text-muted)] transition-colors hover:bg-[var(--ds-surface-row)] hover:text-[var(--ds-text-primary)] disabled:opacity-50"
-                          >
-                            <XIcon className="h-4 w-4" /> Scarta
-                          </button>
+                  {/* La bozza che l'agente ha preparato da solo (modalità
+                      Bozze, o una risposta che non è partita): si usa nel campo
+                      di scrittura, dove si corregge prima di inviarla. */}
+                  {agentState?.draft && !composerText.trim() && (
+                    <div className="ds-ai-frame">
+                      <div className="ds-ai-card flex items-start gap-2.5 px-3.5 py-3">
+                        <Wand2 className="mt-0.5 h-4 w-4 flex-shrink-0 text-[var(--ds-text-secondary)]" aria-hidden />
+                        <div className="min-w-0 flex-1">
+                          <p className="text-[13px] font-semibold text-[var(--ds-text-primary)]">{tv('agentDraftTitle')}</p>
+                          <p className="mt-0.5 whitespace-pre-wrap text-[14px] text-[var(--ds-text-primary)]">{agentState.draft.text}</p>
+                          <div className="mt-2.5 flex flex-wrap items-center gap-2">
+                            <button
+                              type="button"
+                              onClick={() => handleDraft(true)}
+                              className="inline-flex h-9 items-center gap-1.5 rounded-[var(--ds-radius-control)] bg-[var(--ds-action-bg)] px-3.5 text-[13px] font-semibold text-[var(--ds-action-fg)] transition-colors hover:bg-[var(--ds-action-bg-hover)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+                            >
+                              <Check className="h-4 w-4" /> {tv('agentDraftUse')}
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => handleDraft(false)}
+                              className="inline-flex h-9 items-center gap-1.5 rounded-[var(--ds-radius-control)] px-3 text-[13px] font-medium text-[var(--ds-text-muted)] transition-colors hover:bg-[var(--ds-surface-row)] hover:text-[var(--ds-text-primary)]"
+                            >
+                              <XIcon className="h-4 w-4" /> {tv('agentDraftDiscard')}
+                            </button>
+                          </div>
                         </div>
                       </div>
                     </div>
-                  </div>
-                )}
-
-                {/* Channel toggle. The raised-pill treatment is the app's
-                    segmented control; the coloured dot keeps the channel
-                    legible without repainting the whole pill. */}
-                <div className="flex items-center gap-2">
-                  <SegmentedControl
-                    value={preferredChannel}
-                    onChange={next => setPreferredChannel(next)}
-                    ariaLabel={tv('sendChannel')}
-                    equalWidth={false}
-                    size="sm"
-                    options={[
-                      { value: 'whatsapp' as MessageChannel, label: 'WhatsApp', icon: <span className="h-1.5 w-1.5 flex-shrink-0 rounded-full bg-[var(--ds-seated-solid)]" aria-hidden /> },
-                      { value: 'sms' as MessageChannel, label: 'SMS', icon: <span className="h-1.5 w-1.5 flex-shrink-0 rounded-full bg-[var(--ds-arriving-solid)]" aria-hidden /> },
-                    ]}
-                  />
-                  {preferredChannel === 'whatsapp' && waWindowOpen && (
-                    <span className="flex items-center gap-1 text-[13px] text-[var(--ds-text-muted)]">
-                      <Clock className="h-3.5 w-3.5" aria-hidden /> {windowRemaining} rimanenti
-                    </span>
                   )}
-                </div>
 
-                {/* Composer: one card, send button inside the field. */}
-                <div className="rounded-[var(--ds-radius)] bg-[var(--ds-surface)] p-2 shadow-[var(--ds-shadow-card)] transition-shadow focus-within:ring-2 focus-within:ring-[var(--ds-border-focus)]">
-                  {/* Allegati pronti: si vedono prima di premere invia, e si
-                      tolgono uno per uno se si sbaglia file. Stanno dentro la
-                      scheda perche' appartengono al messaggio in scrittura;
-                      fuori finivano su canvas e sparivano contro lo sfondo.
-                      Niente anteprima: il file caricato qui ha un URL solo dopo
-                      l'invio, quindi la targhetta dice di che tipo e'. */}
-                  {attachments.length > 0 && (
-                    <div className="mb-2 flex flex-wrap gap-1.5">
-                      {attachments.map(a => (
-                        <AttachmentRow
-                          key={a.token}
-                          filename={a.filename}
-                          contentType={a.content_type}
-                          sizeBytes={a.size_bytes}
-                          onRemove={() => setAttachments(prev => prev.filter(x => x.token !== a.token))}
-                        />
-                      ))}
+                  {/* La proposta dell'agente. Sta sopra il campo di scrittura e
+                      non parte da sola: l'agente ha capito cosa fare, la
+                      decisione resta di chi legge. */}
+                  {proposal && (
+                    <div className="ds-ai-frame">
+                      <div className="ds-ai-card flex items-start gap-2.5 px-3.5 py-3">
+                        <Wand2 className="mt-0.5 h-4 w-4 flex-shrink-0 text-[var(--ds-text-secondary)]" aria-hidden />
+                        <div className="min-w-0 flex-1">
+                          <p className="text-[13px] font-semibold text-[var(--ds-text-primary)]">
+                            {tv('agentProposal')}
+                          </p>
+                          {/* Riformattata anche qui: le proposte salvate prima
+                              della correzione hanno ancora le date ISO. */}
+                          <p className="mt-0.5 text-[14px] text-[var(--ds-text-primary)]">{isoDatesToEuropean(proposal.summary)}</p>
+                          <p className="mt-1 text-[12px] text-[var(--ds-text-muted)]">
+                            {tv('nothingChangedYet')}
+                          </p>
+                          <div className="mt-2.5 flex flex-wrap items-center gap-2">
+                            <button
+                              type="button"
+                              onClick={handleConfirmProposal}
+                              disabled={proposalBusy}
+                              className="inline-flex h-9 items-center gap-1.5 rounded-[var(--ds-radius-control)] bg-[var(--ds-action-bg)] px-3.5 text-[13px] font-semibold text-[var(--ds-action-fg)] transition-colors hover:bg-[var(--ds-action-bg-hover)] disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+                            >
+                              {proposalBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}
+                              {tv('confirmAndRun')}
+                            </button>
+                            <button
+                              type="button"
+                              onClick={handleDiscardProposal}
+                              disabled={proposalBusy}
+                              className="inline-flex h-9 items-center gap-1.5 rounded-[var(--ds-radius-control)] px-3 text-[13px] font-medium text-[var(--ds-text-muted)] transition-colors hover:bg-[var(--ds-surface-row)] hover:text-[var(--ds-text-primary)] disabled:opacity-50"
+                            >
+                              <XIcon className="h-4 w-4" /> Scarta
+                            </button>
+                          </div>
+                        </div>
+                      </div>
                     </div>
                   )}
 
-                  <div className="flex items-end gap-2">
-                  <input
-                    ref={fileInputRef}
-                    type="file"
-                    accept="image/jpeg,image/png,image/webp,image/gif,video/mp4,audio/mpeg,audio/ogg,application/pdf"
-                    multiple
-                    hidden
-                    onChange={e => handlePickFiles(e.target.files)}
-                  />
-                  {aiEnabled && (
+                  {/* Channel toggle. The raised-pill treatment is the app's
+                      segmented control; the coloured dot keeps the channel
+                      legible without repainting the whole pill. */}
+                  <div className="flex items-center gap-2">
+                    <SegmentedControl
+                      value={preferredChannel}
+                      onChange={next => setPreferredChannel(next)}
+                      ariaLabel={tv('sendChannel')}
+                      equalWidth={false}
+                      size="sm"
+                      options={[
+                        { value: 'whatsapp' as MessageChannel, label: 'WhatsApp', icon: <span className="h-1.5 w-1.5 flex-shrink-0 rounded-full bg-[var(--ds-seated-solid)]" aria-hidden /> },
+                        { value: 'sms' as MessageChannel, label: 'SMS', icon: <span className="h-1.5 w-1.5 flex-shrink-0 rounded-full bg-[var(--ds-arriving-solid)]" aria-hidden /> },
+                      ]}
+                    />
+                    {preferredChannel === 'whatsapp' && waWindowOpen && (
+                      <span className="flex items-center gap-1 text-[13px] text-[var(--ds-text-muted)]">
+                        <Clock className="h-3.5 w-3.5" aria-hidden /> {windowRemaining} rimanenti
+                      </span>
+                    )}
+                  </div>
+
+                  {/* Composer: one card, send button inside the field. */}
+                  <div className="rounded-[var(--ds-radius)] bg-[var(--ds-surface)] p-2 shadow-[var(--ds-shadow-card)] transition-shadow focus-within:ring-2 focus-within:ring-[var(--ds-border-focus)]">
+                    {/* Allegati pronti: si vedono prima di premere invia, e si
+                        tolgono uno per uno se si sbaglia file. Stanno dentro la
+                        scheda perche' appartengono al messaggio in scrittura;
+                        fuori finivano su canvas e sparivano contro lo sfondo.
+                        Niente anteprima: il file caricato qui ha un URL solo dopo
+                        l'invio, quindi la targhetta dice di che tipo e'. */}
+                    {attachments.length > 0 && (
+                      <div className="mb-2 flex flex-wrap gap-1.5">
+                        {attachments.map(a => (
+                          <AttachmentRow
+                            key={a.token}
+                            filename={a.filename}
+                            contentType={a.content_type}
+                            sizeBytes={a.size_bytes}
+                            onRemove={() => setAttachments(prev => prev.filter(x => x.token !== a.token))}
+                          />
+                        ))}
+                      </div>
+                    )}
+
+                    <div className="flex items-end gap-2">
+                    <input
+                      ref={fileInputRef}
+                      type="file"
+                      accept="image/jpeg,image/png,image/webp,image/gif,video/mp4,audio/mpeg,audio/ogg,application/pdf"
+                      multiple
+                      hidden
+                      onChange={e => handlePickFiles(e.target.files)}
+                    />
+                    {aiEnabled && (
+                      <button
+                        type="button"
+                        onClick={handleSuggest}
+                        disabled={suggesting || sending}
+                        aria-label={tv('suggestReply')}
+                        title={tv('suggestReplyHint')}
+                        className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-[var(--ds-radius-control)] text-[var(--ds-text-secondary)] transition-colors hover:bg-[var(--ds-surface-row)] hover:text-[var(--ds-text-primary)] disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+                      >
+                        {suggesting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Wand2 className="h-4 w-4" />}
+                      </button>
+                    )}
                     <button
                       type="button"
-                      onClick={handleSuggest}
-                      disabled={suggesting || sending}
-                      aria-label={tv('suggestReply')}
-                      title={tv('suggestReplyHint')}
-                      className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-[var(--ds-radius-control)] text-[var(--ds-text-secondary)] transition-colors hover:bg-[var(--ds-surface-row)] hover:text-[var(--ds-text-primary)] disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+                      onClick={() => fileInputRef.current?.click()}
+                      disabled={uploading || sending}
+                      aria-label={tv('attachFile')}
+                      title={tv('attachFileHint')}
+                      className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-[var(--ds-radius-control)] text-[var(--ds-text-muted)] transition-colors hover:bg-[var(--ds-surface-row)] hover:text-[var(--ds-text-primary)] disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
                     >
-                      {suggesting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Wand2 className="h-4 w-4" />}
+                      {uploading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Paperclip className="h-4 w-4" />}
                     </button>
-                  )}
-                  <button
-                    type="button"
-                    onClick={() => fileInputRef.current?.click()}
-                    disabled={uploading || sending}
-                    aria-label={tv('attachFile')}
-                    title={tv('attachFileHint')}
-                    className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-[var(--ds-radius-control)] text-[var(--ds-text-muted)] transition-colors hover:bg-[var(--ds-surface-row)] hover:text-[var(--ds-text-primary)] disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
-                  >
-                    {uploading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Paperclip className="h-4 w-4" />}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={handleApriLibreria}
-                    disabled={uploading || sending}
-                    aria-label={tv('attachFromLibrary')}
-                    title={tv('attachFromLibraryHint')}
-                    className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-[var(--ds-radius-control)] text-[var(--ds-text-muted)] transition-colors hover:bg-[var(--ds-surface-row)] hover:text-[var(--ds-text-primary)] disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
-                  >
-                    <FolderOpen className="h-4 w-4" />
-                  </button>
-                  <textarea
-                    ref={composerRef}
-                    value={composerText}
-                    onChange={e => setComposerText(e.target.value)}
-                    onKeyDown={handleComposerKeyDown}
-                    placeholder={preferredChannel === 'whatsapp' && !waWindowOpen
-                      ? 'Finestra chiusa — passa a SMS'
-                      : tv('composerPlaceholder')}
-                    rows={1}
-                    disabled={preferredChannel === 'whatsapp' && !waWindowOpen}
-                    className="max-h-40 min-w-0 flex-1 resize-none border-0 bg-transparent px-3 py-2 text-[15px] leading-snug text-[var(--ds-text-primary)] placeholder:text-[var(--ds-text-muted)] focus:outline-none disabled:opacity-60"
-                  />
-                  <button
-                    onClick={handleSend}
-                    disabled={(!composerText.trim() && attachments.length === 0) || sending || uploading || (preferredChannel === 'whatsapp' && !waWindowOpen)}
-                    aria-label={tv('sendMessage')}
-                    className={`flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-[var(--ds-radius-control)] text-white transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] disabled:cursor-not-allowed disabled:bg-[var(--ds-surface-row)] disabled:text-[var(--ds-text-subtle)] ${
-                      preferredChannel === 'whatsapp'
-                        ? 'bg-[var(--ds-seated-solid)] hover:brightness-95 active:scale-95'
-                        : 'bg-[var(--ds-arriving-solid)] hover:brightness-95 active:scale-95'
-                    }`}
-                  >
-                    {sending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
-                  </button>
+                    <button
+                      type="button"
+                      onClick={handleApriLibreria}
+                      disabled={uploading || sending}
+                      aria-label={tv('attachFromLibrary')}
+                      title={tv('attachFromLibraryHint')}
+                      className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-[var(--ds-radius-control)] text-[var(--ds-text-muted)] transition-colors hover:bg-[var(--ds-surface-row)] hover:text-[var(--ds-text-primary)] disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+                    >
+                      <FolderOpen className="h-4 w-4" />
+                    </button>
+                    <textarea
+                      ref={composerRef}
+                      value={composerText}
+                      onChange={e => setComposerText(e.target.value)}
+                      onKeyDown={handleComposerKeyDown}
+                      placeholder={preferredChannel === 'whatsapp' && !waWindowOpen
+                        ? 'Finestra chiusa — passa a SMS'
+                        : tv('composerPlaceholder')}
+                      rows={1}
+                      disabled={preferredChannel === 'whatsapp' && !waWindowOpen}
+                      className="max-h-40 min-w-0 flex-1 resize-none border-0 bg-transparent px-3 py-2 text-[15px] leading-snug text-[var(--ds-text-primary)] placeholder:text-[var(--ds-text-muted)] focus:outline-none disabled:opacity-60"
+                    />
+                    <button
+                      onClick={handleSend}
+                      disabled={(!composerText.trim() && attachments.length === 0) || sending || uploading || (preferredChannel === 'whatsapp' && !waWindowOpen)}
+                      aria-label={tv('sendMessage')}
+                      className={`flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-[var(--ds-radius-control)] text-white transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] disabled:cursor-not-allowed disabled:bg-[var(--ds-surface-row)] disabled:text-[var(--ds-text-subtle)] ${
+                        preferredChannel === 'whatsapp'
+                          ? 'bg-[var(--ds-seated-solid)] hover:brightness-95 active:scale-95'
+                          : 'bg-[var(--ds-arriving-solid)] hover:brightness-95 active:scale-95'
+                      }`}
+                    >
+                      {sending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
+                    </button>
+                    </div>
                   </div>
+                  <p className="px-1 text-[12px] text-[var(--ds-text-muted)]">
+                    {tv('sendWith')} <kbd className="rounded bg-[var(--ds-surface-row)] px-1.5 py-0.5 font-mono text-[11px]">Enter</kbd>{tv('newLineWith')} <kbd className="rounded bg-[var(--ds-surface-row)] px-1.5 py-0.5 font-mono text-[11px]">Shift+Enter</kbd>
+                  </p>
                 </div>
-                <p className="px-1 text-[12px] text-[var(--ds-text-muted)]">
-                  {tv('sendWith')} <kbd className="rounded bg-[var(--ds-surface-row)] px-1.5 py-0.5 font-mono text-[11px]">Enter</kbd>{tv('newLineWith')} <kbd className="rounded bg-[var(--ds-surface-row)] px-1.5 py-0.5 font-mono text-[11px]">Shift+Enter</kbd>
-                </p>
               </div>
-            </div>
-          </>
-        )
-      }
-    />
+            </>
+          )
+        }
+      />
+      <ModalShell
+        open={campaignsOpen}
+        onClose={() => setCampaignsOpen(false)}
+        title={tv('campaigns')}
+        size="md"
+      >
+        <CampagnePage showToast={showToast ?? (() => {})} />
+      </ModalShell>
+    </>
   );
 };
 

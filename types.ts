@@ -301,6 +301,10 @@ export interface Reservation {
   // che non li conosce ancora.
   guest_confirmed_at?: string | null;
   guest_cancelled_at?: string | null;
+  /** L'ora a cui l'ospite ha detto che arriverà (WhatsApp: «15 minuti di
+   *  ritardo»), e quando l'ha detto. Assenti su un backend più vecchio. */
+  guest_eta_at?: string | null;
+  guest_eta_noted_at?: string | null;
   arrival_status?: ArrivalStatus;
   source?: ReservationSource;
   requires_review?: boolean;

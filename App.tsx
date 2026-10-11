@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
-import { LayoutDashboard, Grid, Settings, ChevronRight, ChevronDown, ChevronUp, ChefHat, PanelLeft, Calendar, CalendarDays, Bell, X, AlertTriangle, LogOut, Users, UserCheck, FileText, UsersRound, Sun, Moon, Sunset, MoreHorizontal, Search, UtensilsCrossed, Plus, BookUser, Boxes, Clock, ShoppingCart, ListChecks, ShieldCheck, Phone, ConciergeBell, Zap, PartyPopper, DoorClosed, StickyNote, CreditCard, MessageCircle, Mail, Kanban, ClipboardList, CookingPot, BellRing, MessagesSquare, Gauge, Building2, Milestone, Ban, Sparkles, Landmark, Percent, Calculator, BarChart3, Star, ShoppingBag, LifeBuoy, PlugZap, Radio, Thermometer, SlidersHorizontal, Tag, Scale, CalendarCheck, CalendarClock } from 'lucide-react';
+import { LayoutDashboard, Grid, Settings, ChevronRight, ChevronDown, ChevronUp, ChefHat, PanelLeft, Calendar, CalendarDays, Bell, X, AlertTriangle, LogOut, Users, UserCheck, FileText, UsersRound, Sun, Moon, Sunset, MoreHorizontal, Search, UtensilsCrossed, Plus, BookUser, Boxes, Clock, ShoppingCart, ListChecks, ShieldCheck, Phone, ConciergeBell, Zap, PartyPopper, DoorClosed, StickyNote, CreditCard, MessageCircle, Mail, Kanban, ClipboardList, CookingPot, BellRing, MessagesSquare, Gauge, Building2, Milestone, Ban, Sparkles, Landmark, Percent, Calculator, BarChart3, Star, ShoppingBag, LifeBuoy, PlugZap, Radio, Thermometer, SlidersHorizontal, Tag, Scale, CalendarCheck, CalendarClock, Wand2, QrCode, AudioLines, Megaphone } from 'lucide-react';
 import { ViewState, Room, Table, Dish, RestaurantMenu, Reservation, TableStatus, TableShape, BanquetMenu, PaymentStatus, Shift, UserRole, ReservationStatus } from './types';
 import { Dashboard } from './components/Dashboard';
 import { FloorPlan } from './components/FloorPlan';
@@ -69,6 +69,15 @@ import { PayAtTableSettingsManager } from './components/PayAtTableSettingsManage
 import { FiscalSettingsManager } from './components/FiscalSettingsManager';
 import { SalaCucinaSettingsManager } from './components/SalaCucinaSettingsManager';
 import { AiMessagesSettingsManager } from './components/AiMessagesSettingsManager';
+import { WhatsAppStatusCard } from './components/whatsapp/WhatsAppStatusCard';
+import { WhatsAppTemplatesCard } from './components/whatsapp/WhatsAppTemplatesCard';
+import { WhatsAppUsageCard } from './components/whatsapp/WhatsAppUsageCard';
+import { WhatsAppAgentCard } from './components/whatsapp/WhatsAppAgentCard';
+import { WhatsAppRemindersCard } from './components/whatsapp/WhatsAppRemindersCard';
+import { WhatsAppEntryCard } from './components/whatsapp/WhatsAppEntryCard';
+import { WhatsAppMediaCard } from './components/whatsapp/WhatsAppMediaCard';
+import { WhatsAppTakeawayCard } from './components/whatsapp/WhatsAppTakeawayCard';
+import { WhatsAppCampaignsCard } from './components/whatsapp/WhatsAppCampaignsCard';
 import { ReviewSettingsCard } from './components/ReviewSettingsCard';
 import { RecensioniPage } from './components/RecensioniPage';
 import { MediaLibraryManager } from './components/MediaLibraryManager';
@@ -365,7 +374,7 @@ const SETTINGS_GROUPS: {
   labelKey: string;
   label: string;
   Icon: React.ComponentType<{ size?: number; className?: string }>;
-  guard?: 'admin' | 'pay_at_table' | 'reviews' | 'takeaway' | 'passepartout' | 'haccp';
+  guard?: 'admin' | 'pay_at_table' | 'reviews' | 'takeaway' | 'passepartout' | 'haccp' | 'whatsapp';
 }[] = [
   { id: 'imp-profilo', labelKey: 'settings.tabProfile', label: 'Profilo', Icon: UserCheck },
   { id: 'imp-ristorante', labelKey: 'settings.tabRestaurant', label: 'Ristorante', Icon: Clock },
@@ -377,6 +386,7 @@ const SETTINGS_GROUPS: {
   { id: 'imp-passepartout', labelKey: 'settings.tabPassepartout', label: 'Passepartout', Icon: PlugZap, guard: 'passepartout' },
   { id: 'imp-haccp', labelKey: 'settings.tabHaccp', label: 'HACCP', Icon: ShieldCheck, guard: 'haccp' },
   { id: 'imp-comunicazioni', labelKey: 'nav.groups.communications', label: 'Comunicazioni', Icon: MessagesSquare },
+  { id: 'imp-whatsapp', labelKey: 'settings.tabWhatsapp', label: 'WhatsApp', Icon: MessageCircle, guard: 'whatsapp' },
   { id: 'imp-recensioni', labelKey: 'nav.items.reviews', label: 'Recensioni', Icon: Star, guard: 'reviews' },
   { id: 'imp-ai', labelKey: 'settings.tabAi', label: 'AI', Icon: Sparkles },
   { id: 'imp-amministrazione', labelKey: 'settings.tabAdmin', label: 'Amministrazione', Icon: Users, guard: 'admin' },
@@ -730,6 +740,13 @@ const App: React.FC = () => {
   const [pendingPlatformSupportId, setPendingPlatformSupportId] = useState<number | null>(null);
   // ?salute=1: la push di un avviso di salute apre la tab Salute del pannello.
   const [pendingPlatformHealth, setPendingPlatformHealth] = useState(false);
+  // ?view=SETTINGS&section=imp-whatsapp: la sezione delle Impostazioni da
+  // portare in vista appena la pagina è montata (link da una push o da un
+  // avviso). Solo gli id dei blocchi della pagina, mai un selettore libero.
+  const [pendingSettingsSection, setPendingSettingsSection] = useState<string | null>(null);
+  // ?view=MESSAGGI&phone=…: la conversazione da aprire (push dell'agente
+  // WhatsApp, «Da confermare» e «Bozza da controllare»).
+  const [pendingInboxPhone, setPendingInboxPhone] = useState<string | null>(null);
 
   // Global command palette (Cmd/Ctrl+K). Lets the operator find a
   // reservation without knowing its date — the daily list stays intact.
@@ -1297,6 +1314,10 @@ const App: React.FC = () => {
     const requestedSupport = Number(params.get('support'));
     if (Number.isInteger(requestedSupport) && requestedSupport > 0) setPendingPlatformSupportId(requestedSupport);
     if (params.get('salute') === '1') setPendingPlatformHealth(true);
+    const requestedSection = params.get('section');
+    if (requestedSection && SETTINGS_GROUPS.some(g => g.id === requestedSection)) setPendingSettingsSection(requestedSection);
+    const requestedPhone = params.get('phone');
+    if (requestedPhone && /^\+?\d{6,15}$/.test(requestedPhone)) setPendingInboxPhone(requestedPhone);
     if (requestedView && (Object.values(ViewState) as string[]).includes(requestedView)) {
       const target = requestedView as ViewState;
       if (accessibleViews.includes(target)) {
@@ -1309,6 +1330,8 @@ const App: React.FC = () => {
       params.delete('ticket');
       params.delete('support');
       params.delete('salute');
+      params.delete('section');
+      params.delete('phone');
       const search = params.toString();
       window.history.replaceState({}, '', window.location.pathname + (search ? `?${search}` : '') + window.location.hash);
       if (accessibleViews.includes(target)) return;
@@ -1388,6 +1411,10 @@ const App: React.FC = () => {
           const requestedSupport = Number(url.searchParams.get('support'));
           if (Number.isInteger(requestedSupport) && requestedSupport > 0) setPendingPlatformSupportId(requestedSupport);
           if (url.searchParams.get('salute') === '1') setPendingPlatformHealth(true);
+          const requestedSection = url.searchParams.get('section');
+          if (requestedSection && SETTINGS_GROUPS.some(g => g.id === requestedSection)) setPendingSettingsSection(requestedSection);
+          const requestedPhone = url.searchParams.get('phone');
+          if (requestedPhone && /^\+?\d{6,15}$/.test(requestedPhone)) setPendingInboxPhone(requestedPhone);
           setView(target);
         }
       } catch {
@@ -1397,6 +1424,19 @@ const App: React.FC = () => {
     navigator.serviceWorker.addEventListener('message', handler);
     return () => navigator.serviceWorker.removeEventListener('message', handler);
   }, [isAuthenticated, user, getAccessibleViews]);
+
+  useEffect(() => {
+    if (view !== ViewState.SETTINGS || !pendingSettingsSection) return;
+    // Le card sopra il blocco caricano i loro dati dopo il montaggio e
+    // crescono: un solo salto finiva a metà strada (un'animazione fluida
+    // veniva anche interrotta). Si salta subito, senza animazione, e si
+    // corregge quando le card hanno finito di caricare.
+    const id = pendingSettingsSection;
+    const jump = () => document.getElementById(id)?.scrollIntoView({ block: 'start' });
+    const timers = [100, 700, 1500].map(ms => window.setTimeout(jump, ms));
+    const done = window.setTimeout(() => setPendingSettingsSection(null), 1600);
+    return () => { timers.forEach(t => window.clearTimeout(t)); window.clearTimeout(done); };
+  }, [view, pendingSettingsSection]);
 
   const [rooms, setRooms] = useState<Room[]>([]);
   const [tables, setTables] = useState<Table[]>([]);
@@ -2318,6 +2358,7 @@ const App: React.FC = () => {
     : g.guard === 'takeaway' ? hasFeature('takeaway')
     : g.guard === 'passepartout' ? (hasFeature('passepartout') && hasPermission('settings:full'))
     : g.guard === 'haccp' ? hasPermission('haccp:manage')
+    : g.guard === 'whatsapp' ? hasFeature('whatsapp')
     : true
   );
 
@@ -3243,6 +3284,9 @@ const App: React.FC = () => {
           <InboxPage
             refreshTick={inboxRefreshTick}
             reservations={reservations}
+            openPhoneDigits={pendingInboxPhone}
+            onOpenedPhone={() => setPendingInboxPhone(null)}
+            showToast={addToast}
             onCreateReservationFromContact={({ phone_digits, ...prefill }) => {
               // Remember which conversation to link the new booking back to,
               // so it becomes reopenable from the chat after creation.
@@ -3917,6 +3961,100 @@ const App: React.FC = () => {
               </div>
             </SettingsSection>
 
+            {/* WhatsApp: il numero del locale, i template approvati da Meta,
+                l'agente che legge i messaggi e i consumi del mese. L'agente
+                stava in AI: qui sta col canale su cui lavora. */}
+            {hasFeature('whatsapp') && (
+              <SettingsSection id="imp-whatsapp" label={t('settings.tabWhatsapp', 'WhatsApp')}>
+                <div className="space-y-3" data-imp-lista="">
+                  <SettingsDisclosure
+                    icon={Phone}
+                    title={t('settings.waNumber', 'Numero e stato')}
+                    description={t('settings.waNumberHint', 'Da quale numero scrive il locale, e se manda')}
+                  >
+                    <CardErrorBoundary label={t('settings.waNumber', 'Numero e stato')}>
+                      <WhatsAppStatusCard />
+                    </CardErrorBoundary>
+                  </SettingsDisclosure>
+                  <SettingsDisclosure
+                    icon={FileText}
+                    title={t('settings.waTemplates', 'Template')}
+                    description={t('settings.waTemplatesHint', 'I messaggi approvati da Meta, uno per tipo')}
+                  >
+                    <CardErrorBoundary label={t('settings.waTemplates', 'Template')}>
+                      <WhatsAppTemplatesCard />
+                    </CardErrorBoundary>
+                  </SettingsDisclosure>
+                  <CardErrorBoundary label={t('settings.aiMessages')}>
+                    <AiMessagesSettingsManager showToast={addToast} />
+                  </CardErrorBoundary>
+                  <SettingsDisclosure
+                    icon={Wand2}
+                    title={t('settings.waAgent', 'Agente automatico')}
+                    description={t('settings.waAgentHint', 'Bozze, risposte o azioni da solo sui messaggi in arrivo')}
+                  >
+                    <CardErrorBoundary label={t('settings.waAgent', 'Agente automatico')}>
+                      <WhatsAppAgentCard showToast={addToast} />
+                    </CardErrorBoundary>
+                  </SettingsDisclosure>
+                  <SettingsDisclosure
+                    icon={BellRing}
+                    title={t('settings.waReminders', 'Promemoria con tasti')}
+                    description={t('settings.waRemindersHint', '«Ci saremo», «Devo modificare», «Annulla» nel promemoria')}
+                  >
+                    <CardErrorBoundary label={t('settings.waReminders', 'Promemoria con tasti')}>
+                      <WhatsAppRemindersCard showToast={addToast} />
+                    </CardErrorBoundary>
+                  </SettingsDisclosure>
+                  <SettingsDisclosure
+                    icon={AudioLines}
+                    title={t('settings.waMedia', 'Vocali e foto')}
+                    description={t('settings.waMediaHint', 'Trascrivi i vocali, fai guardare le foto all\'agente')}
+                  >
+                    <CardErrorBoundary label={t('settings.waMedia', 'Vocali e foto')}>
+                      <WhatsAppMediaCard showToast={addToast} />
+                    </CardErrorBoundary>
+                  </SettingsDisclosure>
+                  <SettingsDisclosure
+                    icon={ShoppingBag}
+                    title={t('settings.waTakeaway', 'Asporto in chat')}
+                    description={t('settings.waTakeawayHint', "Ordini d'asporto su WhatsApp e avviso «pronto»")}
+                  >
+                    <CardErrorBoundary label={t('settings.waTakeaway', 'Asporto in chat')}>
+                      <WhatsAppTakeawayCard showToast={addToast} />
+                    </CardErrorBoundary>
+                  </SettingsDisclosure>
+                  <SettingsDisclosure
+                    icon={Megaphone}
+                    title={t('settings.waCampaigns', 'Campagne')}
+                    description={t('settings.waCampaignsHint', 'Promozioni ai clienti col consenso: orari, pause, tetto di spesa')}
+                  >
+                    <CardErrorBoundary label={t('settings.waCampaigns', 'Campagne')}>
+                      <WhatsAppCampaignsCard showToast={addToast} />
+                    </CardErrorBoundary>
+                  </SettingsDisclosure>
+                  <SettingsDisclosure
+                    icon={QrCode}
+                    title={t('settings.waEntry', 'Farsi trovare')}
+                    description={t('settings.waEntryHint', 'Link e QR del tuo WhatsApp, su /prenota e nel menu')}
+                  >
+                    <CardErrorBoundary label={t('settings.waEntry', 'Farsi trovare')}>
+                      <WhatsAppEntryCard showToast={addToast} />
+                    </CardErrorBoundary>
+                  </SettingsDisclosure>
+                  <SettingsDisclosure
+                    icon={BarChart3}
+                    title={t('settings.waUsage', 'Consumi del mese')}
+                    description={t('settings.waUsageHint', 'Messaggi ricevuti e inviati, spesa dell\'AI')}
+                  >
+                    <CardErrorBoundary label={t('settings.waUsage', 'Consumi del mese')}>
+                      <WhatsAppUsageCard />
+                    </CardErrorBoundary>
+                  </SettingsDisclosure>
+                </div>
+              </SettingsSection>
+            )}
+
             {/* La reputazione su Google: richiesta di recensione dopo la
                 visita e — col profilo collegato — risposte dalla pagina
                 Recensioni. Visibile solo col modulo venduto. */}
@@ -3948,9 +4086,6 @@ const App: React.FC = () => {
                     <PhoneRoutingCard showToast={addToast} />
                   </CardErrorBoundary>
                 )}
-                <CardErrorBoundary label={t('settings.aiMessages')}>
-                  <AiMessagesSettingsManager showToast={addToast} />
-                </CardErrorBoundary>
                 {/* Istruzioni testuali per una futura assegnazione tavoli
                     guidata da AI; oggi il testo è solo salvato. */}
                 <CardErrorBoundary label={t('settings.aiTablePrompt')}>
