@@ -7,13 +7,24 @@ import express from 'express';
 import type { Request, Response, NextFunction } from 'express';
 import { authenticate, requirePermission } from '../../auth/authMiddleware.js';
 import { isFeatureEnabledForTenant } from '../entitlements.js';
-import { envTenantIds, getSender, isSmsReady } from './config.js';
+import { envTenantIds, getSender, invalidateSenderCache, isSmsReady, metaGraphBase, twilioEnvSender } from './config.js';
+import { metaPhoneInfo, metaSubscribeApp } from './providers/meta.js';
+import { encryptSecret, isSecretsConfigured } from '../../utils/secrets.js';
 import { tenantWebhookToken } from './callbacks.js';
 import { templateStatus } from './templates/status.js';
 import { whatsappUsage } from './usage.js';
 import { queryWithRetry } from '../../db.js';
 import { phoneDigitsVariants, phoneMatchKey } from '../../utils/text.js';
-import { getAgentPolicy, normalizeAgentPolicy, saveAgentPolicy } from './settings.js';
+import {
+    getAgentPolicy, normalizeAgentPolicy, saveAgentPolicy,
+    getRemindersPolicy, normalizeRemindersPolicy, saveRemindersPolicy,
+    getEntryPolicy, normalizeEntryPolicy, saveEntryPolicy,
+    getMediaPolicy, normalizeMediaPolicy, saveMediaPolicy,
+    getTakeawayPolicy, normalizeTakeawayPolicy, saveTakeawayPolicy,
+    getCampaignsPolicy, normalizeCampaignsPolicy, saveCampaignsPolicy,
+} from './settings.js';
+import { createCampaignsRouter } from './campaigns/routes.js';
+import { isTranscriptionConfigured } from './media/transcribe.js';
 import { simulateRun } from './agent/queue.js';
 import { undoAutoAction, UNDOABLE_TOOLS } from './agent/autonomy.js';
 import { whatsappDeps } from './deps.js';
@@ -21,6 +32,11 @@ import { LogService, ActivityAction, ResourceType } from '../../activityLogs/log
 
 // L'add-on WhatsApp, chiuso se non si riesce a leggerlo: queste rotte
 // mostrano numeri e costi di un canale che il locale potrebbe non avere.
+// Il locale scrive davvero dal numero Twilio in env (il Frantoio): lì il
+// numero Meta non serve e getSender non lo userebbe. Un locale elencato ma
+// senza mittente in env (i test, un ambiente senza Twilio) può collegarlo.
+const writesFromEnvSender = (tenantId: number) => envTenantIds().has(tenantId) && twilioEnvSender() != null;
+
 const requireWhatsApp = async (req: Request, res: Response, next: NextFunction) => {
     try {
         if (await isFeatureEnabledForTenant(req.tenantId!, 'whatsapp')) return next();
@@ -43,21 +59,129 @@ export function createWhatsAppRouter(): express.Router {
             // Come /settings/webhook-info: dietro il proxy l'host della
             // richiesta è il dominio del backend che i provider chiamano.
             const base = `${req.protocol}://${req.get('host')}`;
+            const sharedEnv = envTenantIds().has(tenantId);
+            const meta = sender?.provider === 'meta' ? sender : null;
             res.json({
                 connected: sender != null,
                 provider: sender?.provider ?? null,
                 source: sender?.source ?? null,
                 phone: sender ? sender.from.replace(/^whatsapp:/, '') : null,
-                shared_env_sender: envTenantIds().has(tenantId),
+                shared_env_sender: sharedEnv,
                 sms_ready: isSmsReady(tenantId),
-                webhooks: token ? {
-                    inbound: `${base}/webhook/t/${token}/twilio-whatsapp`,
-                    status: `${base}/webhook/t/${token}/twilio-whatsapp-status`,
+                // Il numero Meta del locale: nome mostrato ai clienti, qualità
+                // e limite d'invio come li dà Meta al collegamento.
+                meta: meta ? {
+                    display_name: meta.displayName,
+                    quality_rating: meta.qualityRating,
+                    messaging_limit: meta.messagingLimit,
+                    phone_number_id: meta.phoneNumberId,
+                    waba_id: meta.wabaId,
                 } : null,
+                // Si può collegare un numero Meta: il locale non scrive dal
+                // numero in env e il server sa cifrare il token.
+                meta_connect_available: !writesFromEnvSender(tenantId) && isSecretsConfigured(),
+                // Gli indirizzi Twilio servono solo a chi scrive da Twilio: a un
+                // locale senza numero darebbero un'idea sbagliata di dove collegarsi.
+                webhooks: meta
+                    ? { inbound: `${base}/webhook/meta-whatsapp`, status: `${base}/webhook/meta-whatsapp` }
+                    : sharedEnv && token ? {
+                        inbound: `${base}/webhook/t/${token}/twilio-whatsapp`,
+                        status: `${base}/webhook/t/${token}/twilio-whatsapp-status`,
+                    } : null,
             });
         } catch (err: any) {
             console.error('GET /whatsapp/status error:', err);
             res.status(500).json({ error: 'Errore nel leggere lo stato di WhatsApp' });
+        }
+    });
+
+    // ── Il numero sull'API Cloud di Meta (Fase 12a) ─────────────────────
+    //
+    // Collegamento a mano: id del numero, id dell'account WhatsApp Business
+    // e un token d'accesso (di un utente di sistema), dalla console di Meta.
+    // Serve alle demo col numero di prova di Meta e ai primi locali finché
+    // l'Embedded Signup (Fase 12c) non lo fa con un clic. Il token si
+    // controlla chiedendo a Meta il numero, poi si salva cifrato: non torna
+    // mai indietro al browser.
+
+    const manage = [authenticate, requirePermission('settings:full'), requireWhatsApp];
+
+    router.post('/meta/connect', ...manage, async (req, res) => {
+        try {
+            const tenantId = req.tenantId!;
+            if (writesFromEnvSender(tenantId)) {
+                return res.status(409).json({ error: 'Questo locale scrive dal numero Twilio principale: il numero Meta non si collega qui' });
+            }
+            if (!isSecretsConfigured()) {
+                return res.status(503).json({ error: 'Il server non ha la chiave per cifrare il token (INTEGRATION_SECRETS_KEY)' });
+            }
+            const clean = (v: unknown, max: number) => typeof v === 'string' ? v.trim().slice(0, max) : '';
+            const phoneNumberId = clean(req.body?.phone_number_id, 40);
+            const wabaId = clean(req.body?.waba_id, 40);
+            const accessToken = clean(req.body?.access_token, 1000);
+            if (!/^\d{5,40}$/.test(phoneNumberId) || !/^\d{5,40}$/.test(wabaId)) {
+                return res.status(400).json({ error: "Id del numero e dell'account WhatsApp Business: solo cifre, come nella console di Meta" });
+            }
+            if (accessToken.length < 20) return res.status(400).json({ error: "Manca il token d'accesso" });
+
+            const base = metaGraphBase();
+            const info = await metaPhoneInfo(base, phoneNumberId, accessToken);
+            if (info.ok === false) {
+                return res.status(400).json({ error: `Meta non riconosce numero e token: ${info.error}` });
+            }
+            // L'iscrizione dell'app all'account fa arrivare i webhook; se Meta
+            // la rifiuta il numero manda lo stesso, e la card lo dice.
+            const subscribed = await metaSubscribeApp(base, wabaId, accessToken).catch(() => false);
+            try {
+                await queryWithRetry(
+                    `INSERT INTO whatsapp_senders
+                        (tenant_id, provider, phone_e164, phone_number_id, waba_id, display_name, quality_rating, messaging_limit, access_token_enc, connected_by_user_id)
+                     VALUES ($1, 'meta', $2, $3, $4, $5, $6, $7, $8, $9)
+                     ON CONFLICT (tenant_id) DO UPDATE SET
+                        phone_e164 = EXCLUDED.phone_e164, phone_number_id = EXCLUDED.phone_number_id, waba_id = EXCLUDED.waba_id,
+                        display_name = EXCLUDED.display_name, quality_rating = EXCLUDED.quality_rating,
+                        messaging_limit = EXCLUDED.messaging_limit, access_token_enc = EXCLUDED.access_token_enc,
+                        connected_by_user_id = EXCLUDED.connected_by_user_id, updated_at = NOW()`,
+                    [tenantId, info.phone, phoneNumberId, wabaId, info.displayName, info.quality, info.limit,
+                        encryptSecret(accessToken), req.user?.userId ?? null]
+                );
+            } catch (err: any) {
+                // phone_number_id è unico su tutta la piattaforma: il webhook
+                // ricava il locale da lì, due locali sullo stesso numero no.
+                if (err?.code === '23505') return res.status(409).json({ error: 'Questo numero è già collegato a un altro locale' });
+                throw err;
+            }
+            invalidateSenderCache(tenantId);
+            LogService.logActivity(
+                tenantId, req.user?.userId ?? null, req.user?.email ?? '', req.user?.email ?? '',
+                ActivityAction.UPDATE, ResourceType.SETTINGS, undefined, 'WhatsApp',
+                { whatsapp_meta: 'connect', phone: info.phone, phone_number_id: phoneNumberId, waba_id: wabaId, subscribed }
+            ).catch(() => {});
+            res.json({ ok: true, phone: info.phone, display_name: info.displayName, quality_rating: info.quality, messaging_limit: info.limit, subscribed });
+        } catch (err: any) {
+            console.error('POST /whatsapp/meta/connect error:', err);
+            res.status(500).json({ error: 'Errore nel collegare il numero' });
+        }
+    });
+
+    router.delete('/meta/connect', ...manage, async (req, res) => {
+        try {
+            const tenantId = req.tenantId!;
+            const r = await queryWithRetry(
+                `DELETE FROM whatsapp_senders WHERE tenant_id = $1 RETURNING phone_e164`, [tenantId]
+            );
+            invalidateSenderCache(tenantId);
+            if (r.rowCount) {
+                LogService.logActivity(
+                    tenantId, req.user?.userId ?? null, req.user?.email ?? '', req.user?.email ?? '',
+                    ActivityAction.DELETE, ResourceType.SETTINGS, undefined, 'WhatsApp',
+                    { whatsapp_meta: 'disconnect', phone: r.rows[0].phone_e164 }
+                ).catch(() => {});
+            }
+            res.json({ ok: true, removed: (r.rowCount ?? 0) > 0 });
+        } catch (err: any) {
+            console.error('DELETE /whatsapp/meta/connect error:', err);
+            res.status(500).json({ error: 'Errore nello scollegare il numero' });
         }
     });
 
@@ -83,9 +207,20 @@ export function createWhatsAppRouter(): express.Router {
 
     // ── L'agente che parte da solo ──────────────────────────────────────
 
+    const allSettings = async (tenantId: number) => {
+        const [agent, reminders, entry, media, takeaway, takeawayAddon, campaigns] = await Promise.all([
+            getAgentPolicy(tenantId), getRemindersPolicy(tenantId), getEntryPolicy(tenantId), getMediaPolicy(tenantId),
+            getTakeawayPolicy(tenantId), isFeatureEnabledForTenant(tenantId, 'takeaway').catch(() => false),
+            getCampaignsPolicy(tenantId),
+        ]);
+        // transcription_ready: c'è la chiave ElevenLabs per trascrivere.
+        // takeaway_available: il locale ha l'add-on asporto.
+        return { agent, reminders, entry, media, takeaway, campaigns, transcription_ready: isTranscriptionConfigured(), takeaway_available: takeawayAddon };
+    };
+
     router.get('/settings', ...read, async (req, res) => {
         try {
-            res.json({ agent: await getAgentPolicy(req.tenantId!) });
+            res.json(await allSettings(req.tenantId!));
         } catch (err: any) {
             console.error('GET /whatsapp/settings error:', err);
             res.status(500).json({ error: 'Errore nel leggere le impostazioni' });
@@ -94,11 +229,26 @@ export function createWhatsAppRouter(): express.Router {
 
     router.put('/settings', authenticate, requirePermission('settings:full'), requireWhatsApp, async (req, res) => {
         try {
-            const current = await getAgentPolicy(req.tenantId!);
-            const next = normalizeAgentPolicy(req.body?.agent ?? {}, current);
-            if (!next) return res.status(400).json({ error: 'invalid_policy', message: 'Valori fuori dai limiti' });
-            await saveAgentPolicy(req.tenantId!, next);
-            res.json({ agent: next });
+            // Ogni sezione si salva solo se c'è: la card dell'agente non
+            // tocca i promemoria, e viceversa. Prima si valida tutto.
+            const tenantId = req.tenantId!;
+            const body = req.body ?? {};
+            const agent = body.agent !== undefined ? normalizeAgentPolicy(body.agent, await getAgentPolicy(tenantId)) : undefined;
+            const reminders = body.reminders !== undefined ? normalizeRemindersPolicy(body.reminders, await getRemindersPolicy(tenantId)) : undefined;
+            const entry = body.entry !== undefined ? normalizeEntryPolicy(body.entry, await getEntryPolicy(tenantId)) : undefined;
+            const media = body.media !== undefined ? normalizeMediaPolicy(body.media, await getMediaPolicy(tenantId)) : undefined;
+            const takeaway = body.takeaway !== undefined ? normalizeTakeawayPolicy(body.takeaway, await getTakeawayPolicy(tenantId)) : undefined;
+            const campaigns = body.campaigns !== undefined ? normalizeCampaignsPolicy(body.campaigns, await getCampaignsPolicy(tenantId)) : undefined;
+            if (agent === null || reminders === null || entry === null || media === null || takeaway === null || campaigns === null) {
+                return res.status(400).json({ error: 'invalid_policy', message: 'Valori fuori dai limiti' });
+            }
+            if (agent) await saveAgentPolicy(tenantId, agent);
+            if (reminders) await saveRemindersPolicy(tenantId, reminders);
+            if (entry) await saveEntryPolicy(tenantId, entry);
+            if (media) await saveMediaPolicy(tenantId, media);
+            if (takeaway) await saveTakeawayPolicy(tenantId, takeaway);
+            if (campaigns) await saveCampaignsPolicy(tenantId, campaigns);
+            res.json(await allSettings(tenantId));
         } catch (err: any) {
             console.error('PUT /whatsapp/settings error:', err);
             res.status(500).json({ error: 'Errore nel salvare le impostazioni' });
@@ -301,6 +451,9 @@ export function createWhatsAppRouter(): express.Router {
             res.status(500).json({ error: 'Errore del simulatore' });
         }
     });
+
+    // Le campagne (services/whatsapp/campaigns/), con lo stesso add-on.
+    router.use('/campaigns', createCampaignsRouter(requireWhatsApp));
 
     return router;
 }

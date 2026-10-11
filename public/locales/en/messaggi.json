@@ -70,7 +70,8 @@
     "modify_reservation": "The agent changed a booking",
     "cancel_reservation": "The agent cancelled",
     "add_reservation_note": "The agent added a note",
-    "record_allergy": "The agent recorded an allergy"
+    "record_allergy": "The agent recorded an allergy",
+    "create_takeaway_order": "The agent took a takeaway order"
   },
   "agentDidOther": "The agent acted",
   "agentUndo": "Undo",
@@ -78,5 +79,9 @@
   "agentUndoChanged": "The booking has changed in the meantime: fix it from its card.",
   "agentUndoNoTable": "The previous table is no longer free and there is no other: restore it by hand.",
   "agentUndoPast": "That time has already passed.",
-  "agentUndoFailed": "Not undone"
+  "agentUndoFailed": "Not undone",
+  "transcriptPending": "Transcribing…",
+  "transcriptFailed": "Transcription failed",
+  "transcriptLabel": "Transcript",
+  "campaigns": "Campaigns"
 }

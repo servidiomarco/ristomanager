@@ -123,6 +123,8 @@ export default async function globalSetup(): Promise<() => Promise<void>> {
             // solo per un locale con l'agente acceso (di serie è spento).
             WA_AGENT_DEBOUNCE_MS: '300',
             WA_AGENT_TICK_MS: '250',
+            // Le campagne (Fase 11): lo sweep ogni 300 ms invece che al minuto.
+            WA_CAMPAIGN_TICK_MS: '300',
             JWT_REFRESH_SECRET: 'test-jwt-refresh-secret',
             // Telefono (Fase 2): i webhook voce verificano la firma Twilio, e
             // register-call va a uno stub locale che il test della voce
@@ -144,6 +146,20 @@ export default async function globalSetup(): Promise<() => Promise<void>> {
             TWILIO_SIP_DOMAIN: 'sympotia-test.sip.twilio.com',
             TWILIO_SIP_CREDENTIAL_LIST_SID: 'CLtest00000000000000000000000000',
             TWILIO_REST_URL: `http://127.0.0.1:${port + 12}`,
+            // Vocali WhatsApp (Fase 9): la speech-to-text di ElevenLabs su uno
+            // stub che il test dei vocali accende da sé (porta del server + 13),
+            // con una chiave sua: la chiave di Sofia nei test non c'è.
+            ELEVENLABS_STT_URL: `http://127.0.0.1:${port + 13}/v1/speech-to-text`,
+            ELEVENLABS_STT_KEY: 'test-stt-key',
+            // Il numero di un locale sull'API Cloud di Meta (Fase 12a): la
+            // Graph API su uno stub che il test di Meta accende da sé (porta
+            // del server + 14), il segreto dell'app che firma i webhook, il
+            // token della verifica dell'indirizzo e la chiave che cifra i
+            // token dei locali nel database.
+            META_GRAPH_URL: `http://127.0.0.1:${port + 14}`,
+            META_APP_SECRET: 'test-meta-app-secret',
+            META_WEBHOOK_VERIFY_TOKEN: 'test-meta-verify-token',
+            INTEGRATION_SECRETS_KEY: '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef',
             DEFAULT_OWNER_PASSWORD: OWNER_PASSWORD,
             // Gate degli endpoint /admin/tenants (Fase D1): senza questo i
             // test di provisioning riceverebbero solo 503.

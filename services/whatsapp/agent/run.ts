@@ -27,7 +27,7 @@
 
 import Anthropic from '@anthropic-ai/sdk';
 import { buildSystem } from './prompt.js';
-import { AGENT_TOOLS, defaultDecision, findTool, toolDefinitions, type ToolDecision } from './tools/index.js';
+import { AGENT_TOOLS, defaultDecision, findTool, isToolAvailable, toolDefinitions, type ToolDecision } from './tools/index.js';
 import { clearPendingConfirmation, modifyArgsForAuto, snapshotReservation } from './autonomy.js';
 import { AgentError, type AgentAction, type AgentContext, type AgentProposal, type AgentResult, type AgentUsage } from './types.js';
 
@@ -80,12 +80,23 @@ export function echoable(content: Anthropic.Beta.BetaContentBlock[]): Anthropic.
  *  detto cosa, non un blocco di testo indistinto. */
 export function historyOf(messages: AgentContext['messages']): Anthropic.Beta.BetaMessageParam[] {
     const out: Anthropic.Beta.BetaMessageParam[] = messages
-        .filter(m => (m.body || '').trim())
+        .filter(m => (m.body || '').trim() || (m.images?.length ?? 0) > 0)
         .slice(-15)
-        .map(m => ({
-            role: (m.direction === 'inbound' ? 'user' : 'assistant') as 'user' | 'assistant',
-            content: m.body.trim(),
-        }));
+        .map(m => {
+            const role = (m.direction === 'inbound' ? 'user' : 'assistant') as 'user' | 'assistant';
+            const text = (m.body || '').trim();
+            // Le foto del cliente prima del testo, come le ha mandate.
+            if (role === 'user' && m.images?.length) {
+                return {
+                    role,
+                    content: [
+                        ...m.images.map(img => ({ type: 'image' as const, source: { type: 'base64' as const, media_type: img.media_type, data: img.data } })),
+                        { type: 'text' as const, text: text || '[Foto del cliente]' },
+                    ],
+                };
+            }
+            return { role, content: text };
+        });
     // La storia deve iniziare E finire con un messaggio del cliente: il modello
     // rifiuta un prefill dell'assistant come ultimo turno ("The conversation
     // must end with a user message", 400). Quando lo staff ha già risposto per
@@ -163,7 +174,8 @@ export async function runAgent(ctx: AgentContext): Promise<AgentResult> {
         let skipped: string | undefined;
 
         for (const use of uses) {
-            const tool = findTool(use.name);
+            const found = findTool(use.name);
+            const tool = found && isToolAvailable(found, ctx) ? found : undefined;
             const raw = (use.input && typeof use.input === 'object' ? use.input : {}) as Record<string, any>;
             if (!tool) {
                 results.push({ type: 'tool_result', tool_use_id: use.id, is_error: true, content: result({ error: `Strumento sconosciuto: ${use.name}` }) });

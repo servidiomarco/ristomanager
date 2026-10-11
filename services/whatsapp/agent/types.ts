@@ -8,8 +8,10 @@ export interface AgentContext {
      *  e gli strumenti di prenotazione lo esigono come primo parametro (C2). */
     tenantId: number;
     phoneDigits: string;
-    /** Messaggi della conversazione, dal più vecchio al più recente. */
-    messages: Array<{ direction: 'inbound' | 'outbound'; body: string }>;
+    /** Messaggi della conversazione, dal più vecchio al più recente. Un
+     *  vocale arriva già trascritto nel testo; le foto del turno del
+     *  cliente, se il locale le fa leggere, come immagini ridotte. */
+    messages: Array<{ direction: 'inbound' | 'outbound'; body: string; images?: Array<{ media_type: 'image/jpeg'; data: string }> }>;
     reservation?: {
         id?: number | null;
         customer_name?: string | null;
@@ -56,6 +58,9 @@ export interface AgentContext {
      *  no (né le prenotazioni né le richiamate), ma il modello le vede
      *  riuscite come le vedrebbe sul numero vero. */
     dryRun?: boolean;
+    /** L'asporto in chat è acceso (add-on e Impostazioni › WhatsApp):
+     *  gli strumenti dell'asporto ci sono solo allora. */
+    takeaway?: { orderPageUrl: string | null } | null;
 }
 
 export interface AgentAutonomy {
@@ -63,6 +68,7 @@ export interface AgentAutonomy {
     modify: boolean;
     cancel: boolean;
     notes: boolean;
+    takeaway: boolean;
     /** Prima di annullare chiede conferma al cliente. */
     confirmCancel: boolean;
 }

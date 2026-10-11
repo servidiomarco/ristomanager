@@ -214,12 +214,16 @@ export async function logInboundMessage(params: {
 }
 
 /** Chi vuole fare qualcosa di un messaggio appena registrato. Gli agganci
- *  girano dopo la risposta al provider e non devono mai lanciare. */
-export type InboundHook = (tenantId: number, row: any, message: InboundMessage) => Promise<void> | void;
+ *  girano dopo la risposta al provider e non devono mai lanciare. Uno che
+ *  risponde 'handled' ha già risposto al cliente: quelli dopo (la coda
+ *  dell'agente) non lo vedono. */
+export type InboundHook = (tenantId: number, row: any, message: InboundMessage) => Promise<void | 'handled'> | void | 'handled';
 const hooks: InboundHook[] = [];
 
-export function onInbound(hook: InboundHook): void {
-    hooks.push(hook);
+/** `first`: prima degli altri (i tasti del promemoria, prima dell'agente). */
+export function onInbound(hook: InboundHook, opts: { first?: boolean } = {}): void {
+    if (opts.first) hooks.unshift(hook);
+    else hooks.push(hook);
 }
 
 /** Registra un messaggio in arrivo e lo passa all'inbox e agli agganci. */
@@ -250,7 +254,7 @@ export async function processInbound(tenantId: number, message: InboundMessage):
     }
     for (const hook of hooks) {
         try {
-            await hook(tenantId, row, message);
+            if ((await hook(tenantId, row, message)) === 'handled') break;
         } catch (err: any) {
             console.warn('[inbound] aggancio fallito:', err?.message || err);
         }
