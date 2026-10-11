@@ -11,6 +11,7 @@
 // blocco su web e voce, avviso su manuale e WhatsApp — così nessun tenant
 // cambia condotta al deploy.
 import { queryWithRetry } from '../db.js';
+import { policySourceOf } from '../utils/reservationSource.js';
 
 export type BlacklistBehavior = 'block' | 'warn';
 export type BlacklistSource = 'MANUAL' | 'GOOGLE' | 'VOICE' | 'WHATSAPP';
@@ -65,3 +66,8 @@ export async function saveBlacklistPolicy(tenantId: number, policy: BlacklistPol
 }
 
 export const isBlacklistBehavior = isBehavior;
+
+/** Il comportamento per la fonte di una prenotazione ('WEB' segue il web). */
+export function blacklistBehaviorFor(policy: BlacklistPolicyMap, source: unknown): BlacklistBehavior {
+    return policy[policySourceOf(source)];
+}

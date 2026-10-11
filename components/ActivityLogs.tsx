@@ -1,10 +1,10 @@
 import React, { useState, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
-import { displayLocale } from '../utils/formatLocale';
-import { X, ChevronLeft, ChevronRight, RefreshCw, Filter, Search } from 'lucide-react';
-import { ModalShell, dsInput, dsSelect, dsIconButton, dsStepArrow } from './ds';
-import { ActivityLog, ActivityAction, ResourceType, LogFilters } from '../types';
+import { X, ChevronLeft, ChevronRight, RefreshCw, Search, FileText, SlidersHorizontal } from 'lucide-react';
+import { ModalShell, SegmentedControl, EmptyState, dsInput, dsSelect, dsIconButton, dsStepArrow } from './ds';
+import { ActivityLog, ActivityAction, ResourceType, LogFilters, LogRefs } from '../types';
 import { logApiService, LogUser } from '../services/logApiService';
+import { LogList, ReservationHistory } from './registro/LogList';
 import { Loader } from './Loader';
 
 interface ActivityLogsProps {
@@ -37,7 +37,11 @@ const RESOURCE_LABELS: Record<ResourceType, string> = {
   [ResourceType.STAFF_TIME_OFF]: 'Permesso Personale',
   [ResourceType.CUSTOMER]: 'Cliente',
   [ResourceType.ORDER]: 'Comanda',
-  [ResourceType.SETTINGS]: 'Impostazioni'
+  [ResourceType.SETTINGS]: 'Impostazioni',
+  [ResourceType.INVENTORY_LOCATION]: 'Magazzino',
+  [ResourceType.INVENTORY_CATEGORY]: 'Categoria magazzino',
+  [ResourceType.INVENTORY_PRODUCT]: 'Prodotto magazzino',
+  [ResourceType.INVENTORY_MOVEMENT]: 'Movimento magazzino'
 };
 
 const actionLabel = (a: ActivityAction, t?: TFunc): string =>
@@ -46,17 +50,40 @@ const actionLabel = (a: ActivityAction, t?: TFunc): string =>
 const resourceLabel = (r: ResourceType, t?: TFunc): string =>
   t ? t(`res.${r}`, RESOURCE_LABELS[r]) : RESOURCE_LABELS[r];
 
-const ACTION_COLORS: Record<ActivityAction, string> = {
-  [ActivityAction.CREATE]: 'bg-[var(--ds-seated-tint)] text-[var(--ds-seated-text)]',
-  [ActivityAction.UPDATE]: 'bg-[var(--ds-arriving-tint)] text-[var(--ds-arriving-text)]',
-  [ActivityAction.DELETE]: 'bg-[var(--ds-critical-tint)] text-[var(--ds-critical-text)]',
-  [ActivityAction.LOGIN]: 'bg-[var(--ds-surface-row)] text-[var(--ds-text-secondary)]',
-  [ActivityAction.LOGOUT]: 'bg-[var(--ds-surface-row)] text-[var(--ds-text-muted)]'
+// Quasi ogni indagine parte da «stasera» o «ieri»: il periodo è un tocco,
+// le date a mano restano per il resto.
+type Period = 'all' | 'today' | 'yesterday' | 'week' | 'custom';
+
+const startOfDay = (offsetDays: number): Date => {
+  const d = new Date();
+  d.setHours(0, 0, 0, 0);
+  d.setDate(d.getDate() - offsetDays);
+  return d;
 };
+
+const periodRange = (period: Period, fromDate: string, toDate: string): { from?: string; to?: string } => {
+  switch (period) {
+    case 'today': return { from: startOfDay(0).toISOString() };
+    case 'yesterday': return { from: startOfDay(1).toISOString(), to: new Date(startOfDay(0).getTime() - 1).toISOString() };
+    case 'week': return { from: startOfDay(6).toISOString() };
+    case 'custom':
+      // Mezzanotte LOCALE: new Date('2026-10-11') è mezzanotte UTC, e
+      // tagliava fuori le prime due ore del giorno.
+      return {
+        from: fromDate ? new Date(`${fromDate}T00:00:00`).toISOString() : undefined,
+        to: toDate ? new Date(`${toDate}T23:59:59.999`).toISOString() : undefined,
+      };
+    default: return {};
+  }
+};
+
+const EMPTY_REFS: LogRefs = { tables: {}, rooms: {}, reservations: {}, merge_reservations: {} };
+const PAGE_SIZE = 50;
 
 export const ActivityLogs: React.FC<ActivityLogsProps> = ({ isOpen, onClose }) => {
   const { t } = useTranslation('log', { useSuspense: false });
   const [logs, setLogs] = useState<ActivityLog[]>([]);
+  const [refs, setRefs] = useState<LogRefs>(EMPTY_REFS);
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -66,14 +93,20 @@ export const ActivityLogs: React.FC<ActivityLogsProps> = ({ isOpen, onClose }) =
   const [selectedUserId, setSelectedUserId] = useState<number | undefined>();
   const [selectedResourceType, setSelectedResourceType] = useState<ResourceType | undefined>();
   const [selectedAction, setSelectedAction] = useState<ActivityAction | undefined>();
+  const [period, setPeriod] = useState<Period>('all');
   const [fromDate, setFromDate] = useState('');
   const [toDate, setToDate] = useState('');
   const [search, setSearch] = useState('');
   const [debouncedSearch, setDebouncedSearch] = useState('');
 
+  // La prenotazione di cui si sta guardando la storia, aperta da un nome.
+  const [focus, setFocus] = useState<{ id: number; name: string } | null>(null);
+  // Su telefono i tre menu impilati prendevano mezzo schermo prima della
+  // prima riga: stanno dietro «Filtri», da sm in su restano sempre visibili.
+  const [showFilters, setShowFilters] = useState(false);
+
   // Pagination
   const [page, setPage] = useState(1);
-  const [limit] = useState(20);
 
   // Debounce search input to avoid hammering the API on every keystroke
   useEffect(() => {
@@ -89,19 +122,21 @@ export const ActivityLogs: React.FC<ActivityLogsProps> = ({ isOpen, onClose }) =
     setError(null);
 
     try {
+      const range = periodRange(period, fromDate, toDate);
       const filters: LogFilters = {
         user_id: selectedUserId,
         resource_type: selectedResourceType,
         action: selectedAction,
-        from_date: fromDate ? new Date(fromDate).toISOString() : undefined,
-        to_date: toDate ? new Date(toDate + 'T23:59:59').toISOString() : undefined,
+        from_date: range.from,
+        to_date: range.to,
         search: debouncedSearch || undefined,
-        limit,
-        offset: (page - 1) * limit
+        limit: PAGE_SIZE,
+        offset: (page - 1) * PAGE_SIZE
       };
 
       const response = await logApiService.getActivityLogs(filters);
       setLogs(response.logs);
+      setRefs(response.refs);
       setTotal(response.total);
     } catch (err) {
       setError(err instanceof Error ? err.message : t('errLoad', 'Errore nel caricamento dei log'));
@@ -120,16 +155,18 @@ export const ActivityLogs: React.FC<ActivityLogsProps> = ({ isOpen, onClose }) =
   };
 
   useEffect(() => {
-    if (isOpen) {
-      fetchLogs();
-      fetchUsers();
-    }
-  }, [isOpen, page, selectedUserId, selectedResourceType, selectedAction, fromDate, toDate, debouncedSearch]);
+    if (isOpen) fetchUsers();
+  }, [isOpen]);
+
+  useEffect(() => {
+    if (isOpen) fetchLogs();
+  }, [isOpen, page, selectedUserId, selectedResourceType, selectedAction, period, fromDate, toDate, debouncedSearch]);
 
   const resetFilters = () => {
     setSelectedUserId(undefined);
     setSelectedResourceType(undefined);
     setSelectedAction(undefined);
+    setPeriod('all');
     setFromDate('');
     setToDate('');
     setSearch('');
@@ -137,32 +174,42 @@ export const ActivityLogs: React.FC<ActivityLogsProps> = ({ isOpen, onClose }) =
     setPage(1);
   };
 
-  const totalPages = Math.ceil(total / limit);
-
-  const formatDate = (dateString: string) => {
-    const date = new Date(dateString);
-    return date.toLocaleString(displayLocale(), {
-      day: '2-digit',
-      month: '2-digit',
-      year: 'numeric',
-      hour: '2-digit',
-      minute: '2-digit'
-    });
-  };
-
-  const formatDetails = (details: Record<string, any> | undefined): string => {
-    if (!details) return '-';
-    const entries = Object.entries(details)
-      .filter(([_, v]) => v !== null && v !== undefined)
-      .slice(0, 3);
-    if (entries.length === 0) return '-';
-    return entries.map(([k, v]) => `${k}: ${v}`).join(', ');
-  };
+  const totalPages = Math.ceil(total / PAGE_SIZE);
 
   if (!isOpen) return null;
 
-  const hasFilters = !!(selectedUserId || selectedResourceType || selectedAction || fromDate || toDate || search);
-  const th = 'px-4 py-3 text-left text-[13px] font-semibold text-[var(--ds-text-secondary)]';
+  const hasFilters = !!(selectedUserId || selectedResourceType || selectedAction || period !== 'all' || search);
+  const hasSelectFilters = !!(selectedUserId || selectedResourceType || selectedAction);
+
+  if (focus) {
+    return (
+      <ModalShell
+        open={isOpen}
+        onClose={onClose}
+        title={focus.name}
+        subtitle={t('historyTitle', 'Cronologia della prenotazione')}
+        size="fluid"
+        fixedHeight
+        bodyClassName="px-5 pb-5 sm:px-6"
+        subheader={
+          <button
+            type="button"
+            onClick={() => setFocus(null)}
+            className="-ml-2 inline-flex min-h-[44px] items-center gap-1 rounded-[var(--ds-radius-control)] px-2 text-[14px] font-medium text-[var(--ds-text-primary)] hover:bg-[var(--ds-surface-row)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+          >
+            <ChevronLeft className="h-4 w-4" aria-hidden />
+            {t('backToLog', 'Registro')}
+          </button>
+        }
+      >
+        <ReservationHistory
+          key={focus.id}
+          reservationId={focus.id}
+          onOpenReservation={(id, name) => setFocus({ id, name })}
+        />
+      </ModalShell>
+    );
+  }
 
   return (
     <ModalShell
@@ -174,55 +221,73 @@ export const ActivityLogs: React.FC<ActivityLogsProps> = ({ isOpen, onClose }) =
       fixedHeight
       bodyClassName="px-5 pb-5 sm:px-6"
       subheader={
-        <div>
-          <div className="mb-3 flex items-center gap-2">
-            <Filter className="h-3.5 w-3.5 text-[var(--ds-text-muted)]" aria-hidden />
-            <span className="text-[13px] font-semibold text-[var(--ds-text-secondary)]">{t('filters', 'Filtri')}</span>
-            {hasFilters && (
-              <button
-                type="button"
-                onClick={resetFilters}
-                className="ml-2 rounded-[var(--ds-radius-control)] text-[13px] text-[var(--ds-text-primary)] underline underline-offset-2 hover:no-underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
-              >
-                {t('clearFilters', 'Azzera filtri')}
-              </button>
-            )}
+        <div className="space-y-3">
+          <div className="flex items-center gap-2">
+            <div className="relative min-w-0 flex-1">
+              <Search className="pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-[var(--ds-text-muted)]" aria-hidden />
+              <label htmlFor="log-search" className="sr-only">{t('searchAria', 'Cerca nei log')}</label>
+              <input
+                id="log-search"
+                type="text"
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                placeholder={t('searchPlaceholder', 'Cerca un cliente, un utente, un piatto…')}
+                className={`${dsInput} bg-[var(--ds-surface)] pl-11 pr-11`}
+              />
+              {search && (
+                <button
+                  type="button"
+                  onClick={() => setSearch('')}
+                  className="absolute right-3 top-1/2 flex h-8 w-8 -translate-y-1/2 items-center justify-center rounded-[var(--ds-radius-control)] text-[var(--ds-text-muted)] transition-colors hover:bg-[var(--ds-surface-row)] hover:text-[var(--ds-text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+                  title={t('clearSearch', 'Cancella ricerca')}
+                  aria-label={t('clearSearch', 'Cancella ricerca')}
+                >
+                  <X className="h-3.5 w-3.5" aria-hidden />
+                </button>
+              )}
+            </div>
+            <button
+              type="button"
+              onClick={() => setShowFilters(v => !v)}
+              aria-expanded={showFilters || hasSelectFilters}
+              className={`${dsIconButton} relative sm:hidden`}
+              title={t('filters', 'Filtri')}
+              aria-label={t('filters', 'Filtri')}
+            >
+              <SlidersHorizontal className="h-4 w-4" aria-hidden />
+              {hasSelectFilters && (
+                <span className="absolute right-2 top-2 h-2 w-2 rounded-full bg-[var(--ds-action-bg)]" aria-hidden />
+              )}
+            </button>
             {/* L'aggiornamento sta con i filtri, non nella testata: è la
-                stessa azione — cambiare cosa mostra la tabella. */}
+                stessa azione — cambiare cosa mostra la lista. */}
             <button
               type="button"
               onClick={fetchLogs}
-              className={`${dsIconButton} ml-auto`}
+              className={dsIconButton}
               title={t('reload', 'Aggiorna')}
               aria-label={t('reload', 'Aggiorna')}
             >
               <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} aria-hidden />
             </button>
           </div>
-          <div className="relative mb-3">
-            <Search className="pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-[var(--ds-text-muted)]" aria-hidden />
-            <label htmlFor="log-search" className="sr-only">{t('searchAria', 'Cerca nei log')}</label>
-            <input
-              id="log-search"
-              type="text"
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              placeholder={t('searchPlaceholder', 'Cerca in tutte le prenotazioni (nome, email, dettagli)...')}
-              className={`${dsInput} bg-[var(--ds-surface)] pl-11 pr-11`}
-            />
-            {search && (
-              <button
-                type="button"
-                onClick={() => setSearch('')}
-                className="absolute right-3 top-1/2 flex h-8 w-8 -translate-y-1/2 items-center justify-center rounded-[var(--ds-radius-control)] text-[var(--ds-text-muted)] transition-colors hover:bg-[var(--ds-surface-row)] hover:text-[var(--ds-text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
-                title={t('clearSearch', 'Cancella ricerca')}
-                aria-label={t('clearSearch', 'Cancella ricerca')}
-              >
-                <X className="h-3.5 w-3.5" aria-hidden />
-              </button>
-            )}
-          </div>
-          <div className="grid grid-cols-1 gap-3 md:grid-cols-5">
+
+          <SegmentedControl<Period>
+            value={period}
+            onChange={(p) => { setPeriod(p); setPage(1); }}
+            ariaLabel={t('period', 'Periodo')}
+            overflow="scroll"
+            equalWidth={false}
+            options={[
+              { value: 'all', label: t('periodAll', 'Tutto') },
+              { value: 'today', label: t('today', 'Oggi') },
+              { value: 'yesterday', label: t('yesterday', 'Ieri') },
+              { value: 'week', label: t('periodWeek', '7 giorni') },
+              { value: 'custom', label: t('periodCustom', 'Date') },
+            ]}
+          />
+
+          <div className={`grid grid-cols-1 gap-3 sm:grid-cols-3 ${showFilters || hasSelectFilters ? '' : 'max-sm:hidden'}`}>
             <select
               value={selectedUserId || ''}
               onChange={(e) => {
@@ -267,33 +332,42 @@ export const ActivityLogs: React.FC<ActivityLogsProps> = ({ isOpen, onClose }) =
                 <option key={action} value={action}>{actionLabel(action, t)}</option>
               ))}
             </select>
-
-            <label htmlFor="log-from" className="sr-only">{t('from', 'Da')}</label>
-            <input
-              id="log-from"
-              type="date"
-              value={fromDate}
-              onChange={(e) => {
-                setFromDate(e.target.value);
-                setPage(1);
-              }}
-              placeholder={t('from', 'Da')}
-              className={`${dsInput} bg-[var(--ds-surface)]`}
-            />
-
-            <label htmlFor="log-to" className="sr-only">{t('to', 'A')}</label>
-            <input
-              id="log-to"
-              type="date"
-              value={toDate}
-              onChange={(e) => {
-                setToDate(e.target.value);
-                setPage(1);
-              }}
-              placeholder={t('to', 'A')}
-              className={`${dsInput} bg-[var(--ds-surface)]`}
-            />
           </div>
+
+          {period === 'custom' && (
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label htmlFor="log-from" className="mb-1 block text-[13px] text-[var(--ds-text-muted)]">{t('from', 'Da')}</label>
+                <input
+                  id="log-from"
+                  type="date"
+                  value={fromDate}
+                  onChange={(e) => { setFromDate(e.target.value); setPage(1); }}
+                  className={`${dsInput} bg-[var(--ds-surface)]`}
+                />
+              </div>
+              <div>
+                <label htmlFor="log-to" className="mb-1 block text-[13px] text-[var(--ds-text-muted)]">{t('to', 'A')}</label>
+                <input
+                  id="log-to"
+                  type="date"
+                  value={toDate}
+                  onChange={(e) => { setToDate(e.target.value); setPage(1); }}
+                  className={`${dsInput} bg-[var(--ds-surface)]`}
+                />
+              </div>
+            </div>
+          )}
+
+          {hasFilters && (
+            <button
+              type="button"
+              onClick={resetFilters}
+              className="rounded-[var(--ds-radius-control)] text-[13px] text-[var(--ds-text-primary)] underline underline-offset-2 hover:no-underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+            >
+              {t('clearFilters', 'Azzera filtri')}
+            </button>
+          )}
         </div>
       }
       footerStart={totalPages > 1 ? t('page', 'Pagina {{n}} di {{totale}}', { n: page, totale: totalPages }) : undefined}
@@ -330,62 +404,9 @@ export const ActivityLogs: React.FC<ActivityLogsProps> = ({ isOpen, onClose }) =
           <Loader size={40} />
         </div>
       ) : logs.length === 0 ? (
-        <div className="rounded-[var(--ds-radius)] bg-[var(--ds-surface)] px-6 py-12 text-center text-[14px] text-[var(--ds-text-muted)] shadow-[var(--ds-shadow-card)]">
-          {t('empty', 'Nessun log trovato')}
-        </div>
+        <EmptyState icon={FileText}>{t('empty', 'Nessun log trovato')}</EmptyState>
       ) : (
-        <div className="overflow-x-auto rounded-[var(--ds-radius)] bg-[var(--ds-surface)] shadow-[var(--ds-shadow-card)]">
-          <table className="w-full">
-            <thead className="sticky top-0 bg-[var(--ds-surface-row)]">
-              <tr>
-                <th className={th}>{t('col.when', 'Data/Ora')}</th>
-                <th className={th}>{t('col.user', 'Utente')}</th>
-                <th className={th}>{t('col.action', 'Azione')}</th>
-                <th className={th}>{t('col.resource', 'Risorsa')}</th>
-                <th className={th}>{t('col.name', 'Nome')}</th>
-                <th className={th}>{t('col.details', 'Dettagli')}</th>
-                <th className={th}>{t('col.status', 'Stato')}</th>
-              </tr>
-            </thead>
-            <tbody>
-              {logs.map(log => (
-                <tr key={log.id} className="border-t border-[var(--ds-border)] transition-colors hover:bg-[var(--ds-surface-row)]">
-                  <td className="whitespace-nowrap px-4 py-3 text-[14px] tabular-nums text-[var(--ds-text-muted)]">
-                    {formatDate(log.created_at)}
-                  </td>
-                  <td className="px-4 py-3 text-[14px] text-[var(--ds-text-primary)]">
-                    {log.user_name || log.user_email || '-'}
-                  </td>
-                  <td className="px-4 py-3">
-                    <span className={`inline-flex items-center gap-1 rounded-[var(--ds-radius-control)] px-2 py-0.5 text-[11px] font-medium ${ACTION_COLORS[log.action]}`}>
-                      <span className="h-1.5 w-1.5 rounded-full bg-current opacity-60" />
-                      {actionLabel(log.action, t)}
-                    </span>
-                  </td>
-                  <td className="px-4 py-3 text-[14px] text-[var(--ds-text-muted)]">
-                    {resourceLabel(log.resource_type, t)}
-                  </td>
-                  <td className="max-w-[150px] truncate px-4 py-3 text-[14px] text-[var(--ds-text-primary)]" title={log.resource_name || '-'}>
-                    {log.resource_name || '-'}
-                  </td>
-                  <td className="max-w-[200px] truncate px-4 py-3 text-[14px] text-[var(--ds-text-muted)]" title={formatDetails(log.details)}>
-                    {formatDetails(log.details)}
-                  </td>
-                  <td className="px-4 py-3">
-                    <span className={`inline-flex items-center gap-1 rounded-[var(--ds-radius-control)] px-2 py-0.5 text-[11px] font-medium ${
-                      log.status === 'SUCCESS'
-                        ? 'bg-[var(--ds-seated-tint)] text-[var(--ds-seated-text)]'
-                        : 'bg-[var(--ds-critical-tint)] text-[var(--ds-critical-text)]'
-                    }`}>
-                      <span className="h-1.5 w-1.5 rounded-full bg-current opacity-60" />
-                      {log.status === 'SUCCESS' ? t('ok', 'OK') : t('failed', 'Errore')}
-                    </span>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+        <LogList logs={logs} refs={refs} onOpenReservation={(id, name) => setFocus({ id, name })} />
       )}
     </ModalShell>
   );
