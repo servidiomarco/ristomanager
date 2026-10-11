@@ -98,7 +98,8 @@
     "notesPlaceholder": "Special occasion, high chair, a quiet table…"
   },
   "consent": {
-    "html": "I've read the <a href=\"/privacy\" target=\"_blank\" rel=\"noopener\">privacy notice</a> and consent to my data being used to manage this booking, including any allergies I choose to share (GDPR art. 9)."
+    "html": "I've read the <a href=\"/privacy\" target=\"_blank\" rel=\"noopener\">privacy notice</a> and consent to my data being used to manage this booking, including any allergies I choose to share (GDPR art. 9).",
+    "marketing": "I'd like to receive the restaurant's offers and news on WhatsApp. I can stop at any time by replying STOP."
   },
   "terms": {
     "summary": "Deposits & cancellations",

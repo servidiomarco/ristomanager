@@ -5,7 +5,7 @@
 // quella logica: la legge, insieme allo stato reale del servizio, e PROPONE
 // un'assegnazione — mai un'azione automatica silenziosa (card dev board #26).
 //
-// Stesso pattern di services/whatsappAgent.ts: uno strumento a scrittura
+// Stesso pattern dell'agente WhatsApp (services/whatsapp/agent/): uno strumento a scrittura
 // forzata, mai eseguito qui dentro. Il chiamante salva la proposta e la
 // esegue solo dopo un tocco dello staff.
 

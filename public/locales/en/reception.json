@@ -32,6 +32,7 @@
   },
   "late": "late",
   "arriving": "arriving",
+  "etaHint": "Arriving at {{ora}}, as the guest told us",
   "noName": "No name",
   "hasNote": "Has a note",
   "tableTooSmall": "Table {{tavolo}}: {{posti}} seats for {{coperti}} covers",

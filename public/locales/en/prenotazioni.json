@@ -185,6 +185,7 @@
   "reminderSent": "Reminder sent",
   "guestConfirmed": "The guest confirmed on {{quando}}",
   "guestCancelled": "Cancelled by the guest on {{quando}}",
+  "guestEta": "Arriving at {{ora}} · told us at {{quando}}",
   "formSections": "Booking sections",
   "row": {
     "note": "Note",

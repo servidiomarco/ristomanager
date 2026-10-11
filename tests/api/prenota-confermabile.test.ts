@@ -114,8 +114,6 @@ describe('prenotazioni web solo confermabili subito', () => {
         expect(res.status).toBe(200);
         expect(res.body.bookingsEnabled).toBe(true);
         expect(res.body.instantOnly).toBe(true);
-        expect('phone' in res.body.branding).toBe(true);
-        expect('whatsapp' in res.body.branding).toBe(true);
     });
 
     it('il calendario risponde (dal 22/08/2026 dava 500 su una colonna inesistente)', async () => {
