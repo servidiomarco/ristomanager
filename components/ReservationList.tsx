@@ -52,6 +52,7 @@ import { BookingChannelsBar } from './BookingChannelsBar';
 import { ConfirmDeleteModal } from './ConfirmDeleteModal';
 import { DateNavigator } from './DateNavigator';
 import { useAuth } from '../contexts/AuthContext';
+import { isWebSource } from '../utils/reservationSource';
 import { moneySymbol } from '../utils/displayMoney';
 import { money } from '../utils/displayMoney';
 
@@ -207,7 +208,7 @@ const renderChannelIcon = (res: Reservation, tv: (k: string) => string): React.R
       </span>
     );
   }
-  if (source === ReservationSource.GOOGLE) {
+  if (isWebSource(source)) {
     return (
       <span className={ATTR_BADGE} title={tv('filters.channelWeb')} aria-label={tv('channel.web')}>
         <Globe className="h-3.5 w-3.5" />
@@ -1680,8 +1681,11 @@ export const ReservationList: React.FC<ReservationListProps> = ({
       const matchesAllergens = !filterHasAllergens || (typeof r.notes === 'string' && /(Allergie|Intolleranze):/i.test(r.notes));
       const matchesNotes = !filterHasNotes || (typeof r.notes === 'string' && r.notes.trim().length > 0);
       const matchesNoTable = !filterNoTable || !r.table_id;
+      // Il filtro «Web» tiene la chiave storica GOOGLE e prende anche WEB.
       const matchesSource = filterSource === 'ALL'
         ? true
+        : filterSource === ReservationSource.GOOGLE
+        ? isWebSource(r.source)
         : (r.source ?? ReservationSource.MANUAL) === filterSource;
       const trimmedSearch = searchTerm.trim().toLowerCase();
       let matchesSearch = true;

@@ -243,6 +243,7 @@ import {
     saveBookingChannelPolicy,
     normalizeSourcePolicy,
     resolveBookingChannels,
+    policyForSource,
     BOOKING_SOURCES,
     type BookingSource,
     type BookingChannelPolicyMap,
@@ -293,6 +294,7 @@ import {
     getBlacklistPolicy,
     saveBlacklistPolicy,
     isBlacklistBehavior,
+    blacklistBehaviorFor,
     BLACKLIST_SOURCES,
     type BlacklistPolicyMap,
     type BlacklistSource,
@@ -13969,6 +13971,11 @@ const requireReportsAccess = (req: any, res: any, next: any) => {
     return requirePermission('reports:view')(req, res, next);
 };
 
+// Il canale nei report: le prenotazioni dal form pubblico sono un solo canale
+// con la fonte vecchia ('GOOGLE') e la nuova ('WEB'). La chiave resta 'GOOGLE'
+// perché è quella che i frontend già pubblicati sanno chiamare per nome.
+const CHANNEL_KEY_SQL = `CASE WHEN source = 'WEB' THEN 'GOOGLE' ELSE COALESCE(source, 'MANUAL') END`;
+
 app.post('/reports/ai-summary', authenticate, requireReportsAccess, async (req, res) => {
     try {
         if (!aiReport.isReportConfigured()) {
@@ -14029,7 +14036,7 @@ app.post('/reports/ai-summary', authenticate, requireReportsAccess, async (req, 
                     AND reservation_status NOT IN ('CANCELLED','DECLINED')
                   GROUP BY 1 HAVING COUNT(*) > 2 ORDER BY 1`, [`${giorni} days`, tenantId]),
             queryWithRetry(
-                `SELECT COALESCE(source, 'MANUAL') AS canale, COUNT(*)::int AS prenotazioni
+                `SELECT ${CHANNEL_KEY_SQL} AS canale, COUNT(*)::int AS prenotazioni
                    FROM reservations
                   WHERE tenant_id = $2
                     AND reservation_time >= NOW() - $1::interval AND reservation_time < NOW()
@@ -29125,7 +29132,7 @@ async function recordConfirmationSent(
 // affidabile, quindi non viene promessa. I chiamanti lanciano e proseguono.
 async function dispatchBookingNotification(params: {
     tenantId: number;
-    /** reservations.source; fonte ignota → policy MANUAL. */
+    /** reservations.source; 'WEB' → policy del web, fonte ignota → MANUAL. */
     source: string | null | undefined;
     phone?: string | null;
     email?: string | null;
@@ -29179,12 +29186,9 @@ async function dispatchBookingNotification(params: {
 
     try {
         const policyMap = await getBookingChannelPolicy(tenantId);
-        const src: BookingSource = (BOOKING_SOURCES as readonly string[]).includes(String(params.source))
-            ? params.source as BookingSource
-            : 'MANUAL';
         const smtpReady = !!params.buildEmail && !!email
             && await isSmtpConfigured(tenantId).catch(() => false);
-        const { attempts, emailCopy } = resolveBookingChannels(policyMap[src], {
+        const { attempts, emailCopy } = resolveBookingChannels(policyForSource(policyMap, params.source), {
             hasPhone: !!phone,
             hasEmail: !!email,
             smtpReady,
@@ -37036,8 +37040,15 @@ app.put('/settings/reservation-notes', authenticate, requirePermission('settings
 // against abuse:
 //   - express-rate-limit caps each IP to 5 reservation POSTs per minute
 //   - a hidden honeypot field (`website`) — bots fill every field, humans don't
-// Submissions always land as source=GOOGLE + reservation_status=PENDING so staff
-// review them before they become confirmed bookings.
+// Submissions land as source=PUBLIC_BOOKING_SOURCE: CONFIRMED with a table when
+// the room is under its cap, otherwise PENDING for staff review.
+
+// La fonte scritta dal form pubblico. Resta 'GOOGLE' finché tutto il CRM
+// (filtri, icone, report, policy) non riconosce 'WEB': un valore che il
+// frontend già pubblicato non conosce comparirebbe come prenotazione manuale.
+// Le policy si leggono con policySourceOf, così il passaggio a 'WEB' non
+// cambia né la blacklist né i canali di risposta.
+const PUBLIC_BOOKING_SOURCE: 'GOOGLE' | 'WEB' = 'GOOGLE';
 
 const publicBookingLimiter = rateLimit({
     windowMs: 60 * 1000,
@@ -37498,7 +37509,7 @@ const handlePublicReservationCreate = async (tenantId: number, req: express.Requ
         // e decide. Con la policy su 'warn' la prenotazione entra e lo staff
         // la trova col badge in lista.
         if (phoneE164
-            && (await getBlacklistPolicy(tenantId)).GOOGLE === 'block'
+            && blacklistBehaviorFor(await getBlacklistPolicy(tenantId), PUBLIC_BOOKING_SOURCE) === 'block'
             && await isPhoneBlacklisted(tenantId, phoneE164)) {
             return res.status(503).json({
                 error: 'customer_blacklisted',
@@ -37556,7 +37567,7 @@ const handlePublicReservationCreate = async (tenantId: number, req: express.Requ
                 reservation_status, source, requires_review,
                 consent_data_health, consent_updated_at, tenant_id, language
             )
-            VALUES ($1, $2, $3, $4, $14, $10, $5, $6, $7, 'PENDING', 'WAITING', $11, 'GOOGLE', $12, $8, $9, $13, $15)
+            VALUES ($1, $2, $3, $4, $14, $10, $5, $6, $7, 'PENDING', 'WAITING', $11, $16, $12, $8, $9, $13, $15)
             RETURNING *`,
             [customer_name, reservation_time, shift, Math.trunc(guestsNum), notes, emailNormalized, phoneE164,
              consentHealth, consentUpdatedAt,
@@ -37565,7 +37576,8 @@ const handlePublicReservationCreate = async (tenantId: number, req: express.Requ
              !autoConfirmed,
              tenantId,
              childrenNum,
-             language]
+             language,
+             PUBLIC_BOOKING_SOURCE]
             );
             if (insRes.rows[0]) {
                 await outboxEnqueueInTx(txClient, tenantId, 'reservation:created', `reservation:${insRes.rows[0].id}`,
@@ -37779,14 +37791,14 @@ const handlePublicReservationCreate = async (tenantId: number, req: express.Requ
             }
         }
 
-        // Ack all'ospite sui canali decisi dalla policy per fonte GOOGLE
+        // Ack all'ospite sui canali decisi dalla policy del web
         // (Impostazioni → Canali di risposta). L'email — quando è il canale
         // scelto o è in copia — ricalca la priorità dell'ackText SMS: prima
         // la caparra (il link deve viaggiare nel canale che parte davvero),
         // poi la conferma, poi la semplice ricevuta.
         dispatchBookingNotification({
             tenantId,
-            source: 'GOOGLE',
+            source: PUBLIC_BOOKING_SOURCE,
             phone: phoneE164,
             email: emailNormalized,
             reservationId: created.id,
@@ -43720,7 +43732,7 @@ app.get('/reports/reservations', authenticate, requireReportsAccess, async (req,
                    FROM reservations WHERE ${trendWhere}
                   GROUP BY 1 ORDER BY 1`, params),
             queryWithRetry(
-                `SELECT COALESCE(source, 'MANUAL') AS canale,
+                `SELECT ${CHANNEL_KEY_SQL} AS canale,
                         COUNT(*)::int AS prenotazioni, COALESCE(SUM(guests),0)::int AS coperti
                    FROM reservations
                   WHERE tenant_id = $1 AND ${ROME_DAY('reservation_time', TZ)} BETWEEN $2 AND $3

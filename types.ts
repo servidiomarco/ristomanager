@@ -244,7 +244,8 @@ export enum ReservationSource {
   MANUAL = 'MANUAL',        // Created via CRM UI
   WHATSAPP = 'WHATSAPP',    // Created from Vonage WhatsApp inbound
   VOICE = 'VOICE',          // Created from ElevenLabs voice agent
-  GOOGLE = 'GOOGLE'         // Created from the public booking page (Google Business link)
+  GOOGLE = 'GOOGLE',        // Created from the public booking page (Google Business link)
+  WEB = 'WEB'               // Public booking page, new value: same rules as GOOGLE (utils/reservationSource.ts)
 }
 
 export enum ReservationStatus {

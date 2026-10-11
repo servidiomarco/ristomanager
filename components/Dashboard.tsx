@@ -26,6 +26,7 @@ import { useTodos } from '../contexts/TodosContext';
 import { Loader } from './Loader';
 import { ArrivalsTimeline } from './ArrivalsTimeline';
 import { sessionTimeZone } from '../utils/displayTime';
+import { isWebSource } from '../utils/reservationSource';
 
 /* Tinte categoriali, non famiglie di stato: qui il colore non vuol dire
    niente, serve solo a distinguere una categoria dall'altra. Mapparle su
@@ -1410,7 +1411,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
             {pendingReservations.map(res => {
               const source = res.source || ReservationSource.MANUAL;
               const channelLabel = source === ReservationSource.WHATSAPP ? 'WhatsApp'
-                : source === ReservationSource.GOOGLE ? 'Google'
+                : isWebSource(source) ? t('channelWeb')
                 : source === ReservationSource.VOICE ? t('channelVoice')
                 : t('channelPhone');
               // reservation_time is timestamptz; read it in Europe/Rome or a
@@ -2380,7 +2381,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
           const source = res.source || ReservationSource.MANUAL;
           const channel = source === ReservationSource.WHATSAPP
             ? { Icon: MessageCircle, label: 'WhatsApp' }
-            : source === ReservationSource.GOOGLE
+            : isWebSource(source)
             ? { Icon: Globe, label: t('channelWeb') }
             : source === ReservationSource.VOICE
             ? { Icon: Mic, label: t('channelVoice') }
