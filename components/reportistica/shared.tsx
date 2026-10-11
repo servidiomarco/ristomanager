@@ -206,6 +206,7 @@ export const CHANNEL_LABELS: Record<string, string> = {
   WHATSAPP: 'WhatsApp',
   VOICE: 'Sofia (telefono)',
   GOOGLE: 'Pagina di prenotazione',
+  WEB: 'Pagina di prenotazione',
 };
 export const channelLabel = (key: string, t?: TFunc): string => {
   const it = CHANNEL_LABELS[key];

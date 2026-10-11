@@ -141,7 +141,7 @@ import { publicKeysForNodes } from './auth/jwtKeys.js';
 import { serviceWriteRoute } from './services/serviceWrites.js';
 import { RolePermissionService, isReportsAdmin, ALL_PERMISSIONS, ALL_PERMISSION_KEYS, clearPermissionCaches, type Permission } from './auth/permissionService.js';
 import { canAssignToRole } from './auth/permissions.js';
-import { LogService, ActivityAction, ResourceType } from './activityLogs/logService.js';
+import { LogService, ActivityAction, ResourceType, reservationChanges } from './activityLogs/logService.js';
 import { isPushConfigured, getVapidPublicKey, sendToUser as pushSendToUser, sendToRoles as pushSendToRoles, sendToPlatformAdmins as pushSendToPlatformAdmins, setNotificationPersistListener } from './services/pushService.js';
 import { channelsForRole, rolesForChannel, parseThreadKey, channelThreadKey, dmThreadKey, mentionThreadKey, STAFF_CHANNEL_UNREAD_FROM, isStaffPresetKey, STAFF_MESSAGE_MAX_LENGTH, STAFF_MAX_MENTIONS, STAFF_MESSAGE_PRESETS, STAFF_MAX_ATTACHMENTS, staffMessagePreview } from './services/staffChat.js';
 import {
@@ -243,6 +243,7 @@ import {
     saveBookingChannelPolicy,
     normalizeSourcePolicy,
     resolveBookingChannels,
+    policyForSource,
     BOOKING_SOURCES,
     type BookingSource,
     type BookingChannelPolicyMap,
@@ -293,6 +294,7 @@ import {
     getBlacklistPolicy,
     saveBlacklistPolicy,
     isBlacklistBehavior,
+    blacklistBehaviorFor,
     BLACKLIST_SOURCES,
     type BlacklistPolicyMap,
     type BlacklistSource,
@@ -3996,7 +3998,14 @@ app.put('/reservations/:id', authenticate, requirePermission('reservations:full'
             const updRes = await txClient.query(
             `WITH old AS (
                 SELECT reservation_status AS prev_status, table_id AS prev_table_id,
-                       reservation_time AS prev_reservation_time, guests AS prev_guests
+                       reservation_time AS prev_reservation_time, guests AS prev_guests,
+                       jsonb_build_object(
+                           'customer_name', customer_name, 'reservation_time', reservation_time,
+                           'shift', shift, 'guests', guests, 'children', children, 'table_id', table_id,
+                           'reservation_status', reservation_status, 'arrival_status', arrival_status,
+                           'payment_status', payment_status, 'duration_minutes', duration_minutes,
+                           'banquet_menu_id', banquet_menu_id, 'phone', phone, 'email', email, 'notes', notes
+                       ) AS prev_snapshot
                 FROM reservations WHERE id = $14 AND tenant_id = $18
             ), upd AS (
                 UPDATE reservations
@@ -4024,6 +4033,7 @@ app.put('/reservations/:id', authenticate, requirePermission('reservations:full'
                    (SELECT prev_table_id FROM old) AS prev_table_id,
                    (SELECT prev_reservation_time FROM old) AS prev_reservation_time,
                    (SELECT prev_guests FROM old) AS prev_guests,
+                   (SELECT prev_snapshot FROM old) AS prev_snapshot,
                    c.is_vip AS customer_is_vip,
                    c.is_blacklisted AS customer_is_blacklisted,
                    c.blacklist_reason AS customer_blacklist_reason,
@@ -4085,9 +4095,16 @@ app.put('/reservations/:id', authenticate, requirePermission('reservations:full'
         if (updatedReservation && 'prev_table_id' in updatedReservation) {
             delete (updatedReservation as any).prev_table_id;
         }
+        const previousSnapshot = updatedReservation?.prev_snapshot ?? null;
+        if (updatedReservation && 'prev_snapshot' in updatedReservation) {
+            delete (updatedReservation as any).prev_snapshot;
+        }
 
         // Log activity. table_id/prev_table_id compresi: senza, i cambi di
         // tavolo erano invisibili all'audit (indagine tavolo 56, 04/08).
+        // changes: prima → dopo dei campi toccati. Il log scriveva solo lo
+        // stato nuovo, e «chi ha cambiato l'orario» voleva dire confrontare
+        // a mano due righe consecutive.
         if (req.user) {
             LogService.logActivity(
                 req.tenantId!,
@@ -4102,10 +4119,12 @@ app.put('/reservations/:id', authenticate, requirePermission('reservations:full'
                     const prevT = previousTableId == null ? null : Number(previousTableId);
                     const storedT = updatedReservation?.table_id ?? effectiveTableId;
                     const newT = storedT == null ? null : Number(storedT);
+                    const diff = reservationChanges(previousSnapshot, updatedReservation);
                     return {
                         guests, reservation_time, shift, payment_status, arrival_status, reservation_status,
                         table_id: newT,
                         ...(prevT !== newT ? { prev_table_id: prevT } : {}),
+                        ...(diff ?? {}),
                     };
                 })()
             );
@@ -13961,6 +13980,11 @@ const requireReportsAccess = (req: any, res: any, next: any) => {
     return requirePermission('reports:view')(req, res, next);
 };
 
+// Il canale nei report: le prenotazioni dal form pubblico sono un solo canale
+// con la fonte vecchia ('GOOGLE') e la nuova ('WEB'). La chiave resta 'GOOGLE'
+// perché è quella che i frontend già pubblicati sanno chiamare per nome.
+const CHANNEL_KEY_SQL = `CASE WHEN source = 'WEB' THEN 'GOOGLE' ELSE COALESCE(source, 'MANUAL') END`;
+
 app.post('/reports/ai-summary', authenticate, requireReportsAccess, async (req, res) => {
     try {
         if (!aiReport.isReportConfigured()) {
@@ -14021,7 +14045,7 @@ app.post('/reports/ai-summary', authenticate, requireReportsAccess, async (req, 
                     AND reservation_status NOT IN ('CANCELLED','DECLINED')
                   GROUP BY 1 HAVING COUNT(*) > 2 ORDER BY 1`, [`${giorni} days`, tenantId]),
             queryWithRetry(
-                `SELECT COALESCE(source, 'MANUAL') AS canale, COUNT(*)::int AS prenotazioni
+                `SELECT ${CHANNEL_KEY_SQL} AS canale, COUNT(*)::int AS prenotazioni
                    FROM reservations
                   WHERE tenant_id = $2
                     AND reservation_time >= NOW() - $1::interval AND reservation_time < NOW()
@@ -17143,7 +17167,9 @@ app.delete('/table-merges', authenticate, requirePermission('floorplan:full'), a
                 ResourceType.TABLE,
                 primary_id,
                 `Unmerge ${date} ${shift}`,
-                { date, shift }
+                // merged_ids: senza, la divisione diceva solo il tavolo
+                // principale e non quali tavoli erano stati uniti.
+                { date, shift, merged_ids: deleted.merged_ids }
             );
         }
 
@@ -29115,7 +29141,7 @@ async function recordConfirmationSent(
 // affidabile, quindi non viene promessa. I chiamanti lanciano e proseguono.
 async function dispatchBookingNotification(params: {
     tenantId: number;
-    /** reservations.source; fonte ignota → policy MANUAL. */
+    /** reservations.source; 'WEB' → policy del web, fonte ignota → MANUAL. */
     source: string | null | undefined;
     phone?: string | null;
     email?: string | null;
@@ -29169,12 +29195,9 @@ async function dispatchBookingNotification(params: {
 
     try {
         const policyMap = await getBookingChannelPolicy(tenantId);
-        const src: BookingSource = (BOOKING_SOURCES as readonly string[]).includes(String(params.source))
-            ? params.source as BookingSource
-            : 'MANUAL';
         const smtpReady = !!params.buildEmail && !!email
             && await isSmtpConfigured(tenantId).catch(() => false);
-        const { attempts, emailCopy } = resolveBookingChannels(policyMap[src], {
+        const { attempts, emailCopy } = resolveBookingChannels(policyForSource(policyMap, params.source), {
             hasPhone: !!phone,
             hasEmail: !!email,
             smtpReady,
@@ -37033,8 +37056,15 @@ app.put('/settings/reservation-notes', authenticate, requirePermission('settings
 // against abuse:
 //   - express-rate-limit caps each IP to 5 reservation POSTs per minute
 //   - a hidden honeypot field (`website`) — bots fill every field, humans don't
-// Submissions always land as source=GOOGLE + reservation_status=PENDING so staff
-// review them before they become confirmed bookings.
+// Submissions land as source=PUBLIC_BOOKING_SOURCE: CONFIRMED with a table when
+// the room is under its cap, otherwise PENDING for staff review.
+
+// La fonte scritta dal form pubblico. Resta 'GOOGLE' finché tutto il CRM
+// (filtri, icone, report, policy) non riconosce 'WEB': un valore che il
+// frontend già pubblicato non conosce comparirebbe come prenotazione manuale.
+// Le policy si leggono con policySourceOf, così il passaggio a 'WEB' non
+// cambia né la blacklist né i canali di risposta.
+const PUBLIC_BOOKING_SOURCE: 'GOOGLE' | 'WEB' = 'GOOGLE';
 
 const publicBookingLimiter = rateLimit({
     windowMs: 60 * 1000,
@@ -37703,7 +37733,7 @@ const handlePublicReservationCreate = async (tenantId: number, req: express.Requ
         // e decide. Con la policy su 'warn' la prenotazione entra e lo staff
         // la trova col badge in lista.
         if (phoneE164
-            && (await getBlacklistPolicy(tenantId)).GOOGLE === 'block'
+            && blacklistBehaviorFor(await getBlacklistPolicy(tenantId), PUBLIC_BOOKING_SOURCE) === 'block'
             && await isPhoneBlacklisted(tenantId, phoneE164)) {
             return res.status(503).json({
                 error: 'customer_blacklisted',
@@ -37789,7 +37819,7 @@ const handlePublicReservationCreate = async (tenantId: number, req: express.Requ
                 reservation_status, source, requires_review,
                 consent_data_health, consent_updated_at, tenant_id, language
             )
-            VALUES ($1, $2, $3, $4, $14, $10, $5, $6, $7, 'PENDING', 'WAITING', $11, 'GOOGLE', $12, $8, $9, $13, $15)
+            VALUES ($1, $2, $3, $4, $14, $10, $5, $6, $7, 'PENDING', 'WAITING', $11, $16, $12, $8, $9, $13, $15)
             RETURNING *`,
             [customer_name, reservation_time, shift, guestsInt, notes, emailNormalized, phoneE164,
              consentHealth, consentUpdatedAt,
@@ -37798,7 +37828,8 @@ const handlePublicReservationCreate = async (tenantId: number, req: express.Requ
              !confirmed,
              tenantId,
              childrenNum,
-             language]
+             language,
+             PUBLIC_BOOKING_SOURCE]
         );
 
         let created: any;
@@ -38069,14 +38100,14 @@ const handlePublicReservationCreate = async (tenantId: number, req: express.Requ
             }
         }
 
-        // Ack all'ospite sui canali decisi dalla policy per fonte GOOGLE
+        // Ack all'ospite sui canali decisi dalla policy del web
         // (Impostazioni → Canali di risposta). L'email — quando è il canale
         // scelto o è in copia — ricalca la priorità dell'ackText SMS: prima
         // la caparra (il link deve viaggiare nel canale che parte davvero),
         // poi la conferma, poi la semplice ricevuta.
         dispatchBookingNotification({
             tenantId,
-            source: 'GOOGLE',
+            source: PUBLIC_BOOKING_SOURCE,
             phone: phoneE164,
             email: emailNormalized,
             reservationId: created.id,
@@ -44010,7 +44041,7 @@ app.get('/reports/reservations', authenticate, requireReportsAccess, async (req,
                    FROM reservations WHERE ${trendWhere}
                   GROUP BY 1 ORDER BY 1`, params),
             queryWithRetry(
-                `SELECT COALESCE(source, 'MANUAL') AS canale,
+                `SELECT ${CHANNEL_KEY_SQL} AS canale,
                         COUNT(*)::int AS prenotazioni, COALESCE(SUM(guests),0)::int AS coperti
                    FROM reservations
                   WHERE tenant_id = $1 AND ${ROME_DAY('reservation_time', TZ)} BETWEEN $2 AND $3

@@ -172,7 +172,8 @@
   "step": {
     "details": "Dettagli",
     "payments": "Pagamenti",
-    "messages": "Comunicazione"
+    "messages": "Comunicazione",
+    "history": "Cronologia"
   },
   "takenByVoiceAgent": "Presa dall'agente vocale",
   "takenByVoiceAgentShort": "presa dall'agente vocale",

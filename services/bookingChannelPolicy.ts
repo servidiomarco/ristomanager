@@ -13,6 +13,7 @@
 // è un altro — così il default riproduce esattamente la condotta di prima e
 // nessun tenant cambia comportamento al deploy.
 import { queryWithRetry } from '../db.js';
+import { policySourceOf } from '../utils/reservationSource.js';
 
 export type BookingChannel = 'email' | 'whatsapp' | 'sms';
 export type BookingSource = 'GOOGLE' | 'VOICE' | 'WHATSAPP' | 'MANUAL';
@@ -102,6 +103,14 @@ export async function saveBookingChannelPolicy(tenantId: number, policy: Booking
            SET text_value = EXCLUDED.text_value, updated_at = CURRENT_TIMESTAMP`,
         [tenantId, SETTINGS_KEY, JSON.stringify(policy)]
     );
+}
+
+/**
+ * La policy che vale per una prenotazione, dalla sua fonte: 'WEB' usa quella
+ * del web (chiave 'GOOGLE'), una fonte ignota o vuota quella manuale.
+ */
+export function policyForSource(map: BookingChannelPolicyMap, source: unknown): SourceChannelPolicy {
+    return map[policySourceOf(source)];
 }
 
 export interface ChannelAvailability {

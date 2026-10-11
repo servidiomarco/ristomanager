@@ -1,4 +1,4 @@
-import { ActivityLog, LogFilters, ActivityStats } from '../types';
+import { ActivityLog, LogFilters, ActivityStats, LogRefs } from '../types';
 import { authApiService } from './authApiService';
 import { buildApiError } from './apiError';
 
@@ -42,7 +42,26 @@ const fetchWithAuth = async (
 export interface LogsResponse {
   logs: ActivityLog[];
   total: number;
+  refs: LogRefs;
 }
+
+export interface ReservationHistoryResponse {
+  logs: ActivityLog[];
+  refs: LogRefs;
+}
+
+// Un backend di prima di questa versione non manda refs: la pagina resta
+// leggibile con gli id al posto dei nomi.
+const EMPTY_REFS: LogRefs = { tables: {}, rooms: {}, reservations: {}, merge_reservations: {} };
+const withRefs = (refs: unknown): LogRefs => {
+  const r = (refs && typeof refs === 'object' ? refs : {}) as Partial<LogRefs>;
+  return {
+    tables: r.tables ?? EMPTY_REFS.tables,
+    rooms: r.rooms ?? EMPTY_REFS.rooms,
+    reservations: r.reservations ?? EMPTY_REFS.reservations,
+    merge_reservations: r.merge_reservations ?? EMPTY_REFS.merge_reservations,
+  };
+};
 
 export interface LogUser {
   id: number;
@@ -59,6 +78,7 @@ class LogApiService {
 
     if (filters.user_id) params.append('user_id', filters.user_id.toString());
     if (filters.resource_type) params.append('resource_type', filters.resource_type);
+    if (filters.resource_id) params.append('resource_id', filters.resource_id.toString());
     if (filters.action) params.append('action', filters.action);
     if (filters.from_date) params.append('from_date', filters.from_date);
     if (filters.to_date) params.append('to_date', filters.to_date);
@@ -78,7 +98,26 @@ class LogApiService {
       throw buildApiError(response.status, error, 'Failed to fetch logs');
     }
 
-    return response.json();
+    const body = await response.json();
+    return { logs: body.logs ?? [], total: Number(body.total) || 0, refs: withRefs(body.refs) };
+  }
+
+  /**
+   * La storia di una prenotazione, dalla più vecchia: i suoi log più unioni
+   * e divisioni dei suoi tavoli in quel turno.
+   */
+  async getReservationHistory(reservationId: number): Promise<ReservationHistoryResponse> {
+    const response = await fetchWithAuth(`${API_URL}/activity-logs/reservation/${reservationId}`, {
+      headers: getHeaders()
+    });
+
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({ error: 'Failed to fetch history' }));
+      throw buildApiError(response.status, error, 'Failed to fetch history');
+    }
+
+    const body = await response.json();
+    return { logs: body.logs ?? [], refs: withRefs(body.refs) };
   }
 
   /**
