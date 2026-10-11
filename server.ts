@@ -141,7 +141,7 @@ import { publicKeysForNodes } from './auth/jwtKeys.js';
 import { serviceWriteRoute } from './services/serviceWrites.js';
 import { RolePermissionService, isReportsAdmin, ALL_PERMISSIONS, ALL_PERMISSION_KEYS, clearPermissionCaches, type Permission } from './auth/permissionService.js';
 import { canAssignToRole } from './auth/permissions.js';
-import { LogService, ActivityAction, ResourceType } from './activityLogs/logService.js';
+import { LogService, ActivityAction, ResourceType, reservationChanges } from './activityLogs/logService.js';
 import { isPushConfigured, getVapidPublicKey, sendToUser as pushSendToUser, sendToRoles as pushSendToRoles, sendToPlatformAdmins as pushSendToPlatformAdmins, setNotificationPersistListener } from './services/pushService.js';
 import { channelsForRole, rolesForChannel, parseThreadKey, channelThreadKey, dmThreadKey, mentionThreadKey, STAFF_CHANNEL_UNREAD_FROM, isStaffPresetKey, STAFF_MESSAGE_MAX_LENGTH, STAFF_MAX_MENTIONS, STAFF_MESSAGE_PRESETS, STAFF_MAX_ATTACHMENTS, staffMessagePreview } from './services/staffChat.js';
 import {
@@ -3989,7 +3989,14 @@ app.put('/reservations/:id', authenticate, requirePermission('reservations:full'
             const updRes = await txClient.query(
             `WITH old AS (
                 SELECT reservation_status AS prev_status, table_id AS prev_table_id,
-                       reservation_time AS prev_reservation_time, guests AS prev_guests
+                       reservation_time AS prev_reservation_time, guests AS prev_guests,
+                       jsonb_build_object(
+                           'customer_name', customer_name, 'reservation_time', reservation_time,
+                           'shift', shift, 'guests', guests, 'children', children, 'table_id', table_id,
+                           'reservation_status', reservation_status, 'arrival_status', arrival_status,
+                           'payment_status', payment_status, 'duration_minutes', duration_minutes,
+                           'banquet_menu_id', banquet_menu_id, 'phone', phone, 'email', email, 'notes', notes
+                       ) AS prev_snapshot
                 FROM reservations WHERE id = $14 AND tenant_id = $18
             ), upd AS (
                 UPDATE reservations
@@ -4017,6 +4024,7 @@ app.put('/reservations/:id', authenticate, requirePermission('reservations:full'
                    (SELECT prev_table_id FROM old) AS prev_table_id,
                    (SELECT prev_reservation_time FROM old) AS prev_reservation_time,
                    (SELECT prev_guests FROM old) AS prev_guests,
+                   (SELECT prev_snapshot FROM old) AS prev_snapshot,
                    c.is_vip AS customer_is_vip,
                    c.is_blacklisted AS customer_is_blacklisted,
                    c.blacklist_reason AS customer_blacklist_reason,
@@ -4078,9 +4086,16 @@ app.put('/reservations/:id', authenticate, requirePermission('reservations:full'
         if (updatedReservation && 'prev_table_id' in updatedReservation) {
             delete (updatedReservation as any).prev_table_id;
         }
+        const previousSnapshot = updatedReservation?.prev_snapshot ?? null;
+        if (updatedReservation && 'prev_snapshot' in updatedReservation) {
+            delete (updatedReservation as any).prev_snapshot;
+        }
 
         // Log activity. table_id/prev_table_id compresi: senza, i cambi di
         // tavolo erano invisibili all'audit (indagine tavolo 56, 04/08).
+        // changes: prima → dopo dei campi toccati. Il log scriveva solo lo
+        // stato nuovo, e «chi ha cambiato l'orario» voleva dire confrontare
+        // a mano due righe consecutive.
         if (req.user) {
             LogService.logActivity(
                 req.tenantId!,
@@ -4095,10 +4110,12 @@ app.put('/reservations/:id', authenticate, requirePermission('reservations:full'
                     const prevT = previousTableId == null ? null : Number(previousTableId);
                     const storedT = updatedReservation?.table_id ?? effectiveTableId;
                     const newT = storedT == null ? null : Number(storedT);
+                    const diff = reservationChanges(previousSnapshot, updatedReservation);
                     return {
                         guests, reservation_time, shift, payment_status, arrival_status, reservation_status,
                         table_id: newT,
                         ...(prevT !== newT ? { prev_table_id: prevT } : {}),
+                        ...(diff ?? {}),
                     };
                 })()
             );
@@ -17141,7 +17158,9 @@ app.delete('/table-merges', authenticate, requirePermission('floorplan:full'), a
                 ResourceType.TABLE,
                 primary_id,
                 `Unmerge ${date} ${shift}`,
-                { date, shift }
+                // merged_ids: senza, la divisione diceva solo il tavolo
+                // principale e non quali tavoli erano stati uniti.
+                { date, shift, merged_ids: deleted.merged_ids }
             );
         }
 

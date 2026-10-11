@@ -1203,7 +1203,11 @@ export enum ResourceType {
   STAFF_TIME_OFF = 'STAFF_TIME_OFF',
   CUSTOMER = 'CUSTOMER',
   ORDER = 'ORDER',
-  SETTINGS = 'SETTINGS'
+  SETTINGS = 'SETTINGS',
+  INVENTORY_LOCATION = 'INVENTORY_LOCATION',
+  INVENTORY_CATEGORY = 'INVENTORY_CATEGORY',
+  INVENTORY_PRODUCT = 'INVENTORY_PRODUCT',
+  INVENTORY_MOVEMENT = 'INVENTORY_MOVEMENT'
 }
 
 export interface ActivityLog {
@@ -1221,9 +1225,19 @@ export interface ActivityLog {
   created_at: string;
 }
 
+/** Nomi per gli id citati nei details, risolti dal server per la pagina
+ *  (activityLogs/logService.ts). Le chiavi sono id in stringa. */
+export interface LogRefs {
+  tables: Record<string, string>;
+  rooms: Record<string, string>;
+  reservations: Record<string, string>;
+  merge_reservations: Record<string, { id: number; name: string }[]>;
+}
+
 export interface LogFilters {
   user_id?: number;
   resource_type?: ResourceType;
+  resource_id?: number;
   action?: ActivityAction;
   from_date?: string;
   to_date?: string;

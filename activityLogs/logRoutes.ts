@@ -10,6 +10,7 @@ router.get('/', authenticate, requirePermission('logs:view'), async (req: Reques
     const {
       user_id,
       resource_type,
+      resource_id,
       action,
       from_date,
       to_date,
@@ -21,6 +22,7 @@ router.get('/', authenticate, requirePermission('logs:view'), async (req: Reques
     const filters = {
       user_id: user_id ? parseInt(user_id as string, 10) : undefined,
       resource_type: resource_type as ResourceType | undefined,
+      resource_id: resource_id ? parseInt(resource_id as string, 10) || undefined : undefined,
       action: action as ActivityAction | undefined,
       from_date: from_date as string | undefined,
       to_date: to_date as string | undefined,
@@ -33,6 +35,21 @@ router.get('/', authenticate, requirePermission('logs:view'), async (req: Reques
     res.json(result);
   } catch (error) {
     console.error('Error fetching activity logs:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// GET /activity-logs/reservation/:id - Storia di una prenotazione: i suoi log
+// più unioni e divisioni dei suoi tavoli in quel turno (vedi LogService).
+router.get('/reservation/:id', authenticate, requirePermission('logs:view'), async (req: Request, res: Response) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ error: 'invalid_id' });
+    const history = await LogService.getReservationHistory(req.tenantId!, id);
+    if (!history) return res.status(404).json({ error: 'Reservation not found' });
+    res.json(history);
+  } catch (error) {
+    console.error('Error fetching reservation history:', error);
     res.status(500).json({ error: 'Internal server error' });
   }
 });

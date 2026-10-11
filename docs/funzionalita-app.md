@@ -105,10 +105,11 @@ La sezione centrale del CRM: elenco, mappa tavoli e scheda prenotazione in un'un
 - Stati derivati dall'orologio, che avanzano da soli durante il servizio: **In arrivo** (da 20 minuti prima dell'orario) e **In uscita** (oltre la durata attesa). Stesso colore e stessa etichetta in lista, reception, mappa tavoli e dashboard.
 - Azioni: estendi il tavolo di 30 minuti, rimanda di 15, forza manualmente uno stato.
 
-**Scheda prenotazione (3 passi)**
+**Scheda prenotazione (3 passi, 4 per chi vede il log attività)**
 1. **Dettagli** — cliente (nome, telefono, email), coperti, data e slot orario, turno, sala/tavolo, durata, tipo (Prenotazione / Walk-in / Banchetto), note rapide a chip configurabili, intolleranze a chip, consensi privacy e marketing. Controlli automatici anti-duplicato, avviso blacklist, ripristino bozza non salvata.
 2. **Pagamenti** — richiesta acconto con link di pagamento (inviato via SMS, WhatsApp o email), revoca link, rimborso; apertura e gestione del conto al tavolo (vedi [Pagamenti](#pagamenti-conto-al-tavolo-e-cassa)).
 3. **Comunicazione** — invio conferma o promemoria sul canale scelto, email personalizzata, **«Copia link ospite»** (il link «La tua prenotazione» da incollare in una chat), storico messaggi con stati In coda / Inviato / Consegnato / Fallito.
+4. **Cronologia** (Proprietario, General Manager, Manager — chi ha il permesso del log attività) — chi ha fatto cosa sulla prenotazione, dalla creazione: chi l'ha presa (anche Sofia, l'agente WhatsApp o l'ospite dal link), chi l'ha confermata, spostata di tavolo, cambiata d'orario o di persone (col prima e il dopo), e le **unioni e divisioni dei suoi tavoli in quel turno**, con nome e ora di chi le ha fatte.
 
 **Automatismi**
 - Alla conferma parte automaticamente il messaggio al cliente sui canali configurati; al rifiuto parte la disdetta con invito a chiamare.
@@ -849,7 +850,9 @@ Pagina unica a blocchi, con chip-àncora per saltare alla sezione e una **ricerc
 - **Matrice permessi personalizzabile** per ristorante dalla UI (checkbox per ruolo), effettiva immediatamente.
 - Account: creazione/disattivazione utenti (solo Proprietario), cambio profilo, email e password self-service, **recupero password** via link monouso; il cambio password disconnette tutte le altre sessioni. L'email di recupero si presenta col nome del ristorante — per un account di piattaforma, col nome del prodotto.
 - **Sessioni per dispositivo**: più palmari o postazioni sullo stesso account convivono senza sbattersi fuori a vicenda; il rinnovo dei token è trasparente e anticipato (la sessione resta viva finché il dispositivo la usa almeno una volta a settimana, e un blip di rete o un riavvio del server non disconnettono mai); il logout spegne solo il dispositivo da cui è fatto.
-- **Log attività** completo: chi ha fatto cosa, quando, su quale risorsa, con esito — filtrabile per utente, azione, risorsa e periodo.
+- **Log attività** completo: chi ha fatto cosa, quando, su quale risorsa, con esito — filtrabile per utente, azione, risorsa e periodo (Oggi, Ieri, 7 giorni o date a scelta).
+  - Ogni riga è una frase col **nome vero** di chi ha agito e i nomi dei tavoli: «Roberto Donato ha unito i tavoli 26 + 27 · Cena 11/10 · Orlando Panticorvo». Le modifiche alle prenotazioni mostrano **prima → dopo** (ora, persone, tavolo, stato, arrivo, pagamento); per nome, telefono, email e note solo che sono cambiati, senza riportarne il valore.
+  - **Cercando un cliente escono anche le unioni dei suoi tavoli**, e dal suo nome si apre la **cronologia della prenotazione** (la stessa del quarto passo della scheda). La freccia di ogni riga mostra i dati registrati così come sono.
 
 ---
 
@@ -937,6 +940,7 @@ Pagina unica a blocchi, con chip-àncora per saltare alla sezione e una **ricerc
 
 | Data | Sezione | Modifica |
 |---|---|---|
+| 2026-10-11 | Prenotazioni, Amministrazione | **Chi ha fatto cosa, senza cercare.** Il log attività ora si legge come frasi, con i nomi delle persone e dei tavoli («Roberto Donato ha unito i tavoli 26 + 27»), il prima e il dopo delle modifiche e i periodi Oggi / Ieri / 7 giorni. Cercando un cliente escono anche le unioni dei suoi tavoli, e nella scheda prenotazione c'è il nuovo passo **Cronologia**: dalla creazione all'ultimo spostamento, chi ha fatto cosa e quando. |
 | 2026-10-11 | Dashboard | Nelle richieste da confermare, quelle arrivate dalla pagina di prenotazione si chiamano «Web», non più «Google»: arrivano dal sito o dal link del locale, non da Google. |
 | 2026-10-11 | Prenotazione online (Piattaforma) | Il CRM riconosce la fonte `WEB` accanto alla storica `GOOGLE`: stesse regole di blacklist e canali di risposta, stessa icona e stesso filtro «Web» in Prenotazioni, un solo canale in Reportistica. Il form pubblico scrive ancora `GOOGLE` (costante `PUBLIC_BOOKING_SOURCE`): passerà a `WEB` quando questo rilascio è in produzione. |
 | 2026-10-11 | Messaggi: WhatsApp e SMS, Impostazioni | **Il tuo numero WhatsApp su Meta.** In Impostazioni › WhatsApp › Numero e stato colleghi il numero del locale dall'API Cloud di Meta: i messaggi dei clienti arrivano in Messaggi, staff e agente rispondono da quel numero, e quello che scrivi dall'app WhatsApp Business compare in chat come tuo. Qualità del numero e limite d'invio sono nella card. |

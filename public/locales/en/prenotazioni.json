@@ -172,7 +172,8 @@
   "step": {
     "details": "Details",
     "payments": "Payments",
-    "messages": "Messages"
+    "messages": "Messages",
+    "history": "History"
   },
   "takenByVoiceAgent": "Taken by the voice agent",
   "takenByVoiceAgentShort": "taken by the voice agent",
