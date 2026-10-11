@@ -2887,7 +2887,7 @@ app.get('/phone/sip-lines', authenticate, requireFeature('voice'), authorize(...
     res.json({
         configured: config != null,
         domain: config?.domain ?? null,
-        proxy: config?.proxy ?? null,
+        registrar: config?.registrar ?? null,
         lines: result.rows.map(r => ({ id: r.id, label: r.label, username: r.username, created_at: new Date(r.created_at).toISOString() })),
     });
 });
@@ -2919,7 +2919,7 @@ app.post('/phone/sip-lines', authenticate, requireFeature('voice'), requirePermi
         await queryWithRetry(`DELETE FROM phone_sip_lines WHERE id = $1 AND tenant_id = $2`, [id, req.tenantId!]);
         return res.status(502).json({ error: 'twilio_error', message: 'Twilio non ha creato la credenziale, riprova' });
     }
-    res.status(201).json({ id, label, username, password, domain: config.domain, proxy: config.proxy });
+    res.status(201).json({ id, label, username, password, domain: config.domain, registrar: config.registrar });
 });
 
 app.delete('/phone/sip-lines/:id', authenticate, requireFeature('voice'), requirePermission('settings:full'), async (req, res) => {

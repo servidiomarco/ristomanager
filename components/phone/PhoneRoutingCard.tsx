@@ -455,11 +455,10 @@ export const PhoneRoutingCard: React.FC<Props> = ({ showToast }) => {
               <p className="font-medium">{t('pr.cordlessConfig', 'Da scrivere nella base del cordless')}</p>
               <dl className="space-y-1.5">
                 {([
-                  [t('pr.sipServer', 'Server SIP'), createdCordless.domain],
-                  [t('pr.sipProxy', 'Proxy in uscita'), createdCordless.proxy],
+                  [t('pr.sipServer', 'Server SIP'), `${createdCordless.registrar}:5060`],
                   [t('pr.sipUser', 'Utente'), createdCordless.username],
                   [t('pr.sipPassword', 'Password'), createdCordless.password],
-                  [t('pr.sipTransport', 'Trasporto'), 'TLS · 5061'],
+                  [t('pr.sipTransport', 'Trasporto'), 'UDP'],
                 ] as [string, string][]).map(([k, v]) => (
                   <div key={k} className="flex items-center gap-2">
                     <dt className="w-28 flex-shrink-0 text-[var(--ds-text-secondary)]">{k}</dt>
@@ -477,6 +476,8 @@ export const PhoneRoutingCard: React.FC<Props> = ({ showToast }) => {
                 ))}
               </dl>
               <p className="text-[12px] text-[var(--ds-text-secondary)]">
+                {t('pr.cordlessNoProxy', 'Niente proxy in uscita: basta il server con la porta.')}
+                {' '}
                 {t('pr.cordlessOnce', 'La password si vede solo adesso. Se la perdi, togli il cordless e aggiungilo di nuovo.')}
               </p>
               <div className="flex justify-end">

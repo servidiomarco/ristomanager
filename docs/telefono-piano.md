@@ -180,12 +180,20 @@ Il banner ha la fase (`stage`: ringing / sofia / staff, evento `phoneCall:update
 - **Numeri chiamabili** (CRM e cordless): solo fissi `+390…` e cellulari `+393…`. Restano fuori estero, numeri a pagamento e numeri brevi, compresi 112, 113 e 118: per le emergenze resta il fisso.
 - **Smartphone:** il CRM aperto nel telefono (anche come app installata) squilla con «Questo dispositivo squilla», come sul PC. Per lo squillo con l'app chiusa restano il cellulare con «premi 1» o, più avanti, l'app nativa.
 
-**Da provare (prima di comprare la base):** un'app SIP sul telefono o sul Mac (per esempio Linphone o Zoiper) con i dati della linea mostrati nel CRM:
-1. si registra (dietro il doppio NAT USG → EdgeRouter → NeXXt, TLS sulla 5061);
+**Prova del 10/10 con un'app SIP (Zoiper su iPhone, in 5G):**
+- con «dominio + proxy in uscita `sip.frankfurt.twilio.com`» la registrazione falliva con «DNS Timeout (503)»: il dominio non ha record SRV;
+- con un solo indirizzo, `sympotia-d702a3.sip.frankfurt.twilio.com:5060` in UDP e senza proxy, si registra;
+- una chiamata di prova dal 010032 a `sip:t1c1@…` è stata risposta (6 s);
+- il riquadro del CRM ora mostra quell'indirizzo con la porta.
+
+**Da provare ancora:**
+1. registrazione dalla rete del locale (doppio NAT USG → EdgeRouter → NeXXt) e in TLS sulla 5061;
 2. con «Prima il locale» squilla insieme al CRM, e mostra il nome se l'app legge `Remote-Party-ID`;
 3. chiama un cellulare italiano e chi risponde vede il numero del locale.
 
-**Configurazione della base (Yealink W70B, simile su Gigaset N670):** account SIP con Server = dominio, porta 5061, trasporto TLS, Outbound Proxy = `sip.frankfurt.twilio.com`, utente e password del CRM, scadenza della registrazione 600 s; in «Caller ID Source» scegliere RPID (o PAI/RPID) per avere il nome del cliente.
+**Configurazione della base (Yealink W70B, simile su Gigaset N670):** account SIP con Server = `sympotia-d702a3.sip.frankfurt.twilio.com`, porta 5060 (UDP) o 5061 (TLS), nessun Outbound Proxy, utente e password del CRM, scadenza della registrazione 600 s; in «Caller ID Source» scegliere RPID (o PAI/RPID) per avere il nome del cliente.
+
+**Cosa comprare (11/10):** la W70B è solo la base (fino a 10 cordless). Per la sala il kit W73P (W70B + cordless W73H), per cucina ed esterni il W59R (IP67; il kit W79P è W70B + W59R). Il ripetitore RT30 solo se la base non copre terrazza o tettoia. Una linea del CRM per ogni cordless, così il registro dice chi ha risposto (ne squillano al massimo 5).
 
 ### Fase 5: lancio del numero prenotazioni (quando 3 e 4 squillano davvero in sala)
 - **«Telefono pubblico»** (`legal_config.public_phone`) impostato sul 010032. Conferme, promemoria ed email usano già `identity.phone` («Per modifiche o imprevisti chiamaci al …», server.ts circa 26600 e 27120–27400), quindi ogni prenotazione insegna il numero nuovo. Da verificare che il fallback `IDENTITY_FALLBACK.phone` non lo sovrascriva.

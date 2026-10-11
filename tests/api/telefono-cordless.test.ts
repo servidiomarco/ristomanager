@@ -78,7 +78,7 @@ describe('telefono: cordless SIP', () => {
     it('aggiunge un cordless: credenziale su Twilio, password mostrata una volta', async () => {
         const empty = await api().get('/phone/sip-lines').set(bearer(token));
         expect(empty.status).toBe(200);
-        expect(empty.body).toMatchObject({ configured: true, domain: DOMAIN, proxy: 'sip.frankfurt.twilio.com', lines: [] });
+        expect(empty.body).toMatchObject({ configured: true, domain: DOMAIN, registrar: 'sympotia-test.sip.frankfurt.twilio.com', lines: [] });
 
         expect((await api().post('/phone/sip-lines').set(bearer(token)).send({ label: '  ' })).status).toBe(400);
 
@@ -87,6 +87,8 @@ describe('telefono: cordless SIP', () => {
         lineId = created.body.id;
         username = created.body.username;
         expect(username).toBe(`t1c${lineId}`);
+        expect(created.body.registrar).toBe('sympotia-test.sip.frankfurt.twilio.com');
+        expect(created.body).not.toHaveProperty('proxy');
         expect(created.body.password).toMatch(/^[A-Za-z0-9]{20}$/);
         expect(created.body.password).toMatch(/[A-Z]/);
         expect(created.body.password).toMatch(/[a-z]/);

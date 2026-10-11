@@ -242,8 +242,11 @@ export interface SipConfig {
     /** es. sympotia-voce.sip.twilio.com */
     domain: string;
     credentialListSid: string;
-    /** Il proxy in uscita più vicino all'Italia; la registrazione vale lì. */
-    proxy: string;
+    /** L'indirizzo a cui si registra la base: il dominio sull'edge più
+     *  vicino all'Italia (es. sympotia-x.sip.frankfurt.twilio.com). Un solo
+     *  nome con la porta: la prova del 10/10 con «dominio + proxy in uscita»
+     *  falliva per DNS (il dominio non ha record SRV), così funziona. */
+    registrar: string;
     restBase: string;
 }
 
@@ -256,7 +259,7 @@ export function sipConfig(): SipConfig | null {
     const edge = process.env.TWILIO_SIP_EDGE || 'frankfurt';
     return {
         accountSid, authToken, domain, credentialListSid,
-        proxy: `sip.${edge}.twilio.com`,
+        registrar: domain.replace(/\.sip\.twilio\.com$/, `.sip.${edge}.twilio.com`),
         // Solo per i test: uno stub locale al posto delle API di Twilio.
         restBase: (process.env.TWILIO_REST_URL || 'https://api.twilio.com').replace(/\/$/, ''),
     };
