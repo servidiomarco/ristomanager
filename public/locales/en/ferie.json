@@ -74,6 +74,9 @@
     "pending": "Pending",
     "remaining": "Left"
   },
+  "edit": "Edit",
+  "editTitle": "Edit leave",
+  "editedToast": "Leave updated",
   "decidedTitle": "Decided",
   "revoke": "Revoke",
   "rejectTitle": "Reject request",
