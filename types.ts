@@ -1436,6 +1436,7 @@ export interface LeaveRequest {
   decidedByName?: string | null;
   decidedAt?: string | null;
   decisionNote?: string | null;
+  timeOffId?: string | null; // l'assenza VACANZA delle ferie approvate
   createdAt: string;
 }
 

@@ -130,6 +130,52 @@ describe('personale — ferie e assenze solo a chi ha staff:leave', () => {
         expect((await api().delete(`/staff/time-off/${ok.body.id}`).set(bearer(manager))).status).toBe(204);
     });
 
+    // Ferie approvate e già passate si correggono (solo chi ha staff:leave):
+    // la richiesta segue le date dell'assenza, e se l'assenza smette di
+    // essere ferie la richiesta passa ad annullata.
+    it('il titolare corregge ferie approvate e già passate; la richiesta le segue', async () => {
+        const created = await api().post('/staff/leave-requests').set(bearer(owner)).send({
+            staffId: other, startDate: '2020-02-03', endDate: '2020-02-05',
+        });
+        expect(created.status).toBe(201);
+        const decided = await api().post('/staff/leave-requests/decide').set(bearer(owner)).send({
+            decisions: [{ id: created.body.id, decision: 'APPROVE' }],
+        });
+        expect(decided.body.results[0].ok).toBe(true);
+
+        const request = async () => {
+            const plan = await api().get('/staff/leave-plan?year=2020').set(bearer(owner));
+            expect(plan.status).toBe(200);
+            return plan.body.requests.find((r: any) => r.id === created.body.id);
+        };
+        const approved = await request();
+        expect(approved.status).toBe('APPROVED');
+        const timeOffId = approved.timeOffId as string;
+        expect(timeOffId).toBeTruthy();
+
+        // Il manager non le tocca, nemmeno spostandole.
+        expect((await api().put(`/staff/time-off/${timeOffId}`).set(bearer(manager)).send({ endDate: '2020-02-07' })).status).toBe(403);
+        // Un intervallo rovesciato no.
+        expect((await api().put(`/staff/time-off/${timeOffId}`).set(bearer(owner)).send({ endDate: '2020-02-01' })).status).toBe(400);
+
+        const moved = await api().put(`/staff/time-off/${timeOffId}`).set(bearer(owner)).send({ startDate: '2020-02-04', endDate: '2020-02-07' });
+        expect(moved.status).toBe(200);
+        expect(moved.body.startDate.slice(0, 10)).toBe('2020-02-04');
+        expect(moved.body.endDate.slice(0, 10)).toBe('2020-02-07');
+        const followed = await request();
+        expect(followed.status).toBe('APPROVED');
+        expect(followed.startDate).toBe('2020-02-04');
+        expect(followed.endDate).toBe('2020-02-07');
+
+        // Era malattia, non ferie: la richiesta si annulla, l'assenza resta.
+        const sick = await api().put(`/staff/time-off/${timeOffId}`).set(bearer(owner)).send({ type: 'MALATTIA' });
+        expect(sick.status).toBe(200);
+        expect(sick.body.type).toBe('MALATTIA');
+        const cancelled = await request();
+        expect(cancelled.status).toBe('CANCELLED');
+        expect(cancelled.timeOffId).toBeNull();
+    });
+
     it('i giorni di ferie l\'anno: il manager non li legge e non li sovrascrive', async () => {
         const seen = await api().get(`/staff/${other}`).set(bearer(manager));
         expect(seen.status).toBe(200);

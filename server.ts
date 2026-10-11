@@ -23718,37 +23718,90 @@ app.put('/staff/time-off/:id', authenticate, requirePermission('staff:full'), as
             && (prevOff.rows[0].type !== 'RIPOSO' || (type != null && type !== 'RIPOSO'))) {
             return res.status(403).json({ error: 'leave_permission_required' });
         }
+        // Le date si correggono anche a cose fatte (ferie passate, già
+        // approvate): l'unico vincolo è un intervallo che stia in piedi.
+        if ((startDate != null && !isIsoDay(startDate)) || (endDate != null && !isIsoDay(endDate))) {
+            return res.status(400).json({ error: 'invalid_dates' });
+        }
         if (prevOff.rows[0]) {
             const p = prevOff.rows[0];
+            if (String(endDate ?? p.end_date) < String(startDate ?? p.start_date)) {
+                return res.status(400).json({ error: 'invalid_dates' });
+            }
             await noteShiftChange(req.tenantId!, String(p.staff_id), [
                 ...timeOffDates(p.start_date, p.end_date),
                 ...timeOffDates(String(startDate ?? p.start_date), String(endDate ?? p.end_date)),
             ], req.user?.userId ?? null);
         }
 
-        const result = await queryWithRetry(
-            `UPDATE staff_time_off SET
-                start_date = COALESCE($1, start_date),
-                end_date = COALESCE($2, end_date),
-                type = COALESCE($3, type),
-                shift = CASE WHEN $4::boolean THEN $5 ELSE shift END,
-                notes = COALESCE($6, notes),
-                approved = COALESCE($7, approved)
-             WHERE id = $8 AND tenant_id = $9
-             RETURNING *`,
-            [startDate, endDate, type, shiftProvided, shift ?? null, notes, approved, id, req.tenantId!]
-        );
+        // Ferie nate da una richiesta approvata: la richiesta segue l'assenza,
+        // o il dipendente in «Le mie ferie» e il piano leggerebbero le date di
+        // prima. Se l'assenza smette di essere ferie (era malattia), la
+        // richiesta passa ad annullata, come quando la si cancella.
+        const outcome = await withTenant(req.tenantId!, async client => {
+            const upd = await client.query(
+                `UPDATE staff_time_off SET
+                    start_date = COALESCE($1, start_date),
+                    end_date = COALESCE($2, end_date),
+                    type = COALESCE($3, type),
+                    shift = CASE WHEN $4::boolean THEN $5 ELSE shift END,
+                    notes = COALESCE($6, notes),
+                    approved = COALESCE($7, approved)
+                 WHERE id = $8 AND tenant_id = $9
+                 RETURNING *`,
+                [startDate, endDate, type, shiftProvided, shift ?? null, notes, approved, id, req.tenantId!]
+            );
+            const row = upd.rows[0];
+            if (!row) return { row: null, requestIds: [] as string[] };
+            const linked = row.type === 'VACANZA'
+                ? await client.query(
+                    `UPDATE staff_leave_requests SET start_date = $3, end_date = $4
+                      WHERE time_off_id = $1 AND tenant_id = $2 AND status = 'APPROVED'
+                        AND (start_date <> $3::date OR end_date <> $4::date)
+                      RETURNING id`,
+                    [row.id, req.tenantId!, row.start_date, row.end_date]
+                )
+                : await client.query(
+                    `UPDATE staff_leave_requests
+                        SET status = 'CANCELLED', time_off_id = NULL, decided_by_user_id = $3, decided_at = now()
+                      WHERE time_off_id = $1 AND tenant_id = $2 AND status = 'APPROVED'
+                      RETURNING id`,
+                    [row.id, req.tenantId!, req.user?.userId ?? null]
+                );
+            return { row, requestIds: linked.rows.map((r: any) => String(r.id)) };
+        });
 
-        if (result.rows.length === 0) {
+        if (!outcome.row) {
             return res.status(404).json({ error: 'Time off record not found' });
         }
 
-        const row = result.rows[0];
+        const row = outcome.row;
         const timeOff = timeOffRowJson(row, true);
 
         // Broadcast: solo chi e di chi, come per la creazione.
         const socketId = req.headers['x-socket-id'] as string;
         if (socketService) socketService.broadcastToAll(req.tenantId!, 'timeoff:updated', { id: row.id, staffId: row.staff_id }, socketId);
+        if (socketService && outcome.requestIds.length > 0) {
+            socketService.broadcastToAll(req.tenantId!, 'leave:changed', { ids: outcome.requestIds });
+        }
+        // Ferie approvate spostate quando non sono ancora finite: il
+        // dipendente lo sa come quando gliele approvano. Per quelle passate
+        // è una correzione del registro, niente notifica.
+        const startIso = leaveIsoDay(row.start_date);
+        const endIso = leaveIsoDay(row.end_date);
+        if (row.type === 'VACANZA' && outcome.requestIds.length > 0 && endIso >= getRomeDatePart(new Date())) {
+            const who = await queryWithRetry('SELECT user_id FROM staff_members WHERE id = $1 AND tenant_id = $2', [row.staff_id, req.tenantId!]);
+            const staffUserId = who.rows[0]?.user_id ?? null;
+            if (staffUserId && staffUserId !== req.user?.userId) {
+                void pushSendToUser(staffUserId, {
+                    title: 'Ferie modificate',
+                    body: formatLeaveRange(startIso, endIso),
+                    url: '/',
+                    tag: `leave-decision-${outcome.requestIds[0]}`,
+                    category: 'staff',
+                })?.catch(err => console.warn('[ferie] notifica al dipendente fallita:', err?.message || err));
+            }
+        }
 
         res.json(timeOff);
     } catch (err) {
@@ -24078,6 +24131,8 @@ const leaveRequestJson = (row: any, isOpen: ServiceOpen) => ({
     decidedByName: row.decided_by_name ?? null,
     decidedAt: row.decided_at ?? null,
     decisionNote: row.decision_note ?? null,
+    // L'assenza in calendario delle ferie approvate: è lei che si modifica.
+    timeOffId: row.time_off_id ?? null,
     createdAt: row.created_at,
 });
 

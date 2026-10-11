@@ -197,8 +197,11 @@ export const StaffManagement: React.FC<StaffManagementProps> = ({ showToast, aut
   const registrableTimeOffTypes: TimeOffType[] = canSeeLeave
     ? (Object.keys(TIME_OFF_LABELS) as TimeOffType[])
     : [TimeOffType.RIPOSO];
-  // Senza staff:leave si tolgono solo i riposi: il server rifiuta il resto.
-  const canRemoveTimeOff = (off: StaffTimeOff) => canSeeLeave || off.type === TimeOffType.RIPOSO;
+  // Modificare o togliere un'assenza: serve staff:full (la Cucina vede i
+  // turni senza toccarli), e senza staff:leave solo i riposi. Le ferie si
+  // correggono anche passate o già approvate: il server non mette limiti
+  // di data, e una richiesta approvata segue l'assenza.
+  const canChangeTimeOff = (off: StaffTimeOff) => canManage && (canSeeLeave || off.type === TimeOffType.RIPOSO);
   const [area, setArea] = useState<'PERSONALE' | 'FERIE' | 'COMPENSI'>('PERSONALE');
 
   // Richieste di ferie in attesa: il numero sul segmento «Ferie» e, per
@@ -280,6 +283,8 @@ export const StaffManagement: React.FC<StaffManagementProps> = ({ showToast, aut
   const [isSavingStaff, setIsSavingStaff] = useState(false);
   const [isSavingShift, setIsSavingShift] = useState(false);
   const [isSavingTimeOff, setIsSavingTimeOff] = useState(false);
+  // L'assenza aperta nel modulo: null = se ne registra una nuova.
+  const [editingTimeOffId, setEditingTimeOffId] = useState<string | null>(null);
 
   // The "…" menu on the person header.
   const [personMenuOpen, setPersonMenuOpen] = useState(false);
@@ -606,6 +611,9 @@ export const StaffManagement: React.FC<StaffManagementProps> = ({ showToast, aut
     if (!showTimeOffModal || !selectedStaff) return null;
     const { startDate, endDate } = timeOffForm;
     if (!startDate || !endDate || endDate < startDate) return null;
+    // Un'assenza tutta nel passato si registra o si corregge a cose fatte:
+    // chi resta in servizio non è più una domanda.
+    if (endDate < formatLocalDate(new Date())) return null;
     const dates = eachDate(startDate, endDate);
     if (dates.length === 0) return null;
 
@@ -958,7 +966,7 @@ export const StaffManagement: React.FC<StaffManagementProps> = ({ showToast, aut
       t.staffId === selectedStaff.id &&
       toDateOnly(t.startDate) === dateStr &&
       toDateOnly(t.endDate) === dateStr &&
-      canRemoveTimeOff(t)
+      canChangeTimeOff(t)
     );
     if (dayShifts.length === 0 && !singleDayOff) return;
     try {
@@ -989,6 +997,21 @@ export const StaffManagement: React.FC<StaffManagementProps> = ({ showToast, aut
       notes: '',
       approved: true
     });
+    setEditingTimeOffId(null);
+    setShowTimeOffModal(true);
+  };
+
+  const handleOpenEditTimeOff = (off: StaffTimeOff) => {
+    setTimeOffForm({
+      staffId: off.staffId,
+      startDate: toDateOnly(off.startDate),
+      endDate: toDateOnly(off.endDate),
+      type: off.type as TimeOffType,
+      shift: off.shift ?? null,
+      notes: off.notes ?? '',
+      approved: off.approved,
+    });
+    setEditingTimeOffId(off.id);
     setShowTimeOffModal(true);
   };
 
@@ -996,12 +1019,19 @@ export const StaffManagement: React.FC<StaffManagementProps> = ({ showToast, aut
     if (isSavingTimeOff) return;
     try {
       setIsSavingTimeOff(true);
-      const created = await staffApiService.createTimeOff(timeOffForm);
-      setTimeOffs(prev => [...prev, created]);
+      if (editingTimeOffId) {
+        const { startDate, endDate, type, shift, notes } = timeOffForm;
+        const updated = await staffApiService.updateTimeOff(editingTimeOffId, { startDate, endDate, type, shift, notes: notes ?? '' });
+        setTimeOffs(prev => prev.map(x => (x.id === updated.id ? updated : x)));
+        showToast(t('leaveUpdated'), 'success');
+      } else {
+        const created = await staffApiService.createTimeOff(timeOffForm);
+        setTimeOffs(prev => [...prev, created]);
+        showToast(t('leaveRecordedShort'), 'success');
+      }
       setShowTimeOffModal(false);
-      showToast(t('leaveRecordedShort'), 'success');
     } catch (error: any) {
-      console.error('createTimeOff failed', error);
+      console.error('saveTimeOff failed', error);
       showToast(`Errore nel salvataggio: ${error?.message || 'sconosciuto'}`, 'error');
     } finally {
       setIsSavingTimeOff(false);
@@ -1151,14 +1181,16 @@ export const StaffManagement: React.FC<StaffManagementProps> = ({ showToast, aut
       {/* On a pointer the top bar's + is the one way in, as everywhere else.
           On touch it leads the column: the top bar is a thumb-stretch away
           from the list you are actually working in. */}
-      <button
-        type="button"
-        onClick={handleOpenAddStaff}
-        className={`${dsButton.primary} w-full lg:hidden`}
-      >
-        <UserPlus className="h-4 w-4" aria-hidden />
-        {t('newStaff')}
-      </button>
+      {canManage && (
+        <button
+          type="button"
+          onClick={handleOpenAddStaff}
+          className={`${dsButton.primary} w-full lg:hidden`}
+        >
+          <UserPlus className="h-4 w-4" aria-hidden />
+          {t('newStaff')}
+        </button>
+      )}
 
       <div className="flex items-center gap-3">
         <SearchField
@@ -1438,7 +1470,9 @@ export const StaffManagement: React.FC<StaffManagementProps> = ({ showToast, aut
         key={idx}
         type="button"
         onClick={(e) => openDayMenu(e, dateStr)}
-        aria-label={`${day.getDate()} ${calendarDate.toLocaleDateString('it-IT', { month: 'long' })} — modifica`}
+        // Senza staff:full il calendario si legge e basta (la Cucina).
+        disabled={!canManage}
+        aria-label={`${day.getDate()} ${calendarDate.toLocaleDateString('it-IT', { month: 'long' })}${canManage ? ' — modifica' : ''}`}
         // Taller than the merged cell was: two rows need the room, and a grid
         // whose cells resize as shifts change would jump under the cursor.
         className={`flex min-h-[92px] flex-col gap-1 rounded-[var(--ds-radius)] p-2 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] ${
@@ -1446,7 +1480,7 @@ export const StaffManagement: React.FC<StaffManagementProps> = ({ showToast, aut
             ? 'opacity-40'
             : fullDayOff
               ? TIME_OFF_CHIP[dayTimeOff!.type]
-              : 'bg-[var(--ds-surface-row)] hover:bg-[var(--ds-border)]'
+              : canManage ? 'bg-[var(--ds-surface-row)] hover:bg-[var(--ds-border)]' : 'bg-[var(--ds-surface-row)]'
         } ${isToday ? 'ring-2 ring-[var(--ds-action-bg)]' : ''} ${busy ? 'opacity-60' : ''}`}
       >
         <span className="flex items-center justify-between gap-1">
@@ -1474,7 +1508,7 @@ export const StaffManagement: React.FC<StaffManagementProps> = ({ showToast, aut
         title={fullName(selectedStaff)}
         subtitle={`${defaultRole(selectedStaff)} · ${categoryLabel(selectedStaff.category)} · ${typeLabel(selectedStaff.staffType)}`}
         badge={!selectedStaff.isActive ? <StatusPill tone="neutral">Inattivo</StatusPill> : undefined}
-        actions={
+        actions={canManage ? (
           <>
             {/* Una sola cosa da premere in testa alla scheda. Modifica è
                 scesa nel menu insieme alle altre due azioni sulla persona:
@@ -1532,7 +1566,7 @@ export const StaffManagement: React.FC<StaffManagementProps> = ({ showToast, aut
               )}
             </div>
           </>
-        }
+        ) : undefined}
       />
 
       <div className="min-h-0 flex-1 space-y-4 overflow-y-auto px-4 pb-6 sm:px-6 lg:px-8">
@@ -1605,6 +1639,7 @@ export const StaffManagement: React.FC<StaffManagementProps> = ({ showToast, aut
               >
                 {t('today')}
               </button>
+              {canManage && (
               <div className="ml-auto flex items-center gap-2">
                 <button type="button" onClick={() => handleOpenAddTimeOff()} className={`${dsButton.secondary} px-4`}>
                   <CalendarDays className="h-4 w-4" aria-hidden />
@@ -1615,6 +1650,7 @@ export const StaffManagement: React.FC<StaffManagementProps> = ({ showToast, aut
                   {t('shift')}
                 </button>
               </div>
+              )}
             </div>
 
             {/* Wider than it was: "Pranzo" needs about 52px of cell to sit on
@@ -1690,12 +1726,12 @@ export const StaffManagement: React.FC<StaffManagementProps> = ({ showToast, aut
             {timeOffsByMonth.length === 0 ? (
               <EmptyState
                 icon={CalendarDays}
-                action={
+                action={canManage ? (
                   <button type="button" onClick={() => handleOpenAddTimeOff()} className={dsButton.primary}>
                     <Plus className="h-4 w-4" aria-hidden />
                     {t('recordLeave')}
                   </button>
-                }
+                ) : undefined}
               >
                 {t('noLeaveRecorded')}
               </EmptyState>
@@ -1726,7 +1762,17 @@ export const StaffManagement: React.FC<StaffManagementProps> = ({ showToast, aut
                             <span className="text-[var(--ds-text-muted)]"> · {timeOff.notes}</span>
                           )}
                         </span>
-                        {canRemoveTimeOff(timeOff) && (
+                        {canChangeTimeOff(timeOff) && (
+                        <button
+                          type="button"
+                          onClick={() => handleOpenEditTimeOff(timeOff)}
+                          className={rowIconButton}
+                          aria-label={t('editLeaveAria', { label: timeOffLabel(timeOff.type) })}
+                        >
+                          <Edit2 className="h-4 w-4" />
+                        </button>
+                        )}
+                        {canChangeTimeOff(timeOff) && (
                         <button
                           type="button"
                           onClick={() => {
@@ -1756,7 +1802,7 @@ export const StaffManagement: React.FC<StaffManagementProps> = ({ showToast, aut
   const dayMenuStaff = selectedStaff;
   const dayMenuHasSomething = dayMenu && dayMenuStaff
     ? shifts.some(s => s.staffId === dayMenuStaff.id && toDateOnly(s.date) === dayMenu.date) ||
-      timeOffs.some(t => t.staffId === dayMenuStaff.id && toDateOnly(t.startDate) === dayMenu.date && toDateOnly(t.endDate) === dayMenu.date && canRemoveTimeOff(t))
+      timeOffs.some(t => t.staffId === dayMenuStaff.id && toDateOnly(t.startDate) === dayMenu.date && toDateOnly(t.endDate) === dayMenu.date && canChangeTimeOff(t))
     : false;
 
   const dayMenuItem =
@@ -2376,7 +2422,7 @@ export const StaffManagement: React.FC<StaffManagementProps> = ({ showToast, aut
       <ModalShell
         open={showTimeOffModal}
         onClose={() => setShowTimeOffModal(false)}
-        title={selectedStaff ? `${t('leave')} · ${fullName(selectedStaff)}` : t('leave')}
+        title={`${editingTimeOffId ? t('editLeave') : t('leave')}${selectedStaff ? ` · ${fullName(selectedStaff)}` : ''}`}
         subtitle={t('shiftsReplaced')}
         size="sm"
         closeOnEscape
@@ -2398,7 +2444,7 @@ export const StaffManagement: React.FC<StaffManagementProps> = ({ showToast, aut
               className={dsButton.primary}
             >
               {isSavingTimeOff && <Loader2 className="h-4 w-4 animate-spin" aria-hidden />}
-              {t('record')}
+              {editingTimeOffId ? t('save') : t('record')}
             </button>
           </>
         }
