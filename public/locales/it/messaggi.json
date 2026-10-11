@@ -48,5 +48,20 @@
   "sendWith": "Invio con",
   "unreadCount_one": "{{count}} non letto",
   "unreadCount_other": "{{count}} non letti",
-  "newLineWith": ", a capo con"
+  "newLineWith": ", a capo con",
+  "agentChipDraft": "Agente: bozze",
+  "agentChipReply": "Agente: risposte",
+  "agentPaused": "Agente in pausa",
+  "agentPausedUntil": "Agente in pausa fino alle {{ora}}",
+  "agentBotStopped": "Agente fermo: risponditore automatico",
+  "agentPause1h": "Pausa per un'ora",
+  "agentPauseTomorrow": "Pausa fino a domattina",
+  "agentPauseAlways": "Pausa per questa conversazione",
+  "agentResume": "Riattiva l'agente",
+  "agentPauseFailed": "Pausa non salvata",
+  "agentDraftTitle": "Bozza dell'agente",
+  "agentDraftUse": "Usa",
+  "agentDraftDiscard": "Scarta",
+  "agentLabel": "Agente",
+  "agentWrote": "Scritto dall'agente"
 }

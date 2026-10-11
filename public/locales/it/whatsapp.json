@@ -57,5 +57,37 @@
     "failed": "non consegnati",
     "sms": "SMS inviati: {{n}}",
     "ai": "AI dei messaggi: {{runs}} richieste, {{cost}}"
+  },
+  "agent": {
+    "loadError": "Impostazioni non disponibili",
+    "saved": "Salvato",
+    "saveError": "Non salvato",
+    "save": "Salva",
+    "modeLabel": "Come lavora l'agente",
+    "modeOff": "Spento",
+    "modeDraft": "Bozze",
+    "modeReply": "Risposte",
+    "modeOffHint": "Lavora solo quando premi la bacchetta in Messaggi.",
+    "modeDraftHint": "A ogni messaggio prepara la risposta: in Messaggi la trovi pronta da inviare.",
+    "modeReplyHint": "Risponde da solo. Le modifiche alle prenotazioni restano da confermare: ti arriva una notifica.",
+    "limits": "Limiti",
+    "limit": {
+      "debounce_seconds": "Attesa dopo l'ultimo messaggio (secondi)",
+      "max_wait_seconds": "Attesa massima (secondi)",
+      "staff_quiet_minutes": "Tace se lo staff ha scritto da (minuti)",
+      "max_replies_per_thread_24h": "Risposte al giorno per conversazione",
+      "max_runs_per_day": "Giri al giorno",
+      "daily_budget_eur": "Spesa AI al giorno (€)"
+    },
+    "simTitle": "Prova l'agente",
+    "simReset": "Ricomincia",
+    "simHint": "Scrivi come un cliente: l'agente risponde come farebbe sul numero vero, senza mandare niente. Le prenotazioni non cambiano.",
+    "simPlaceholder": "Es. Siete aperti stasera? Siamo in 4",
+    "simSend": "Prova",
+    "simDraft": "Bozza",
+    "simProposal": "Da confermare",
+    "simSkipped": "Nessuna risposta ({{motivo}})",
+    "simNothing": "L'agente non ha risposto",
+    "simError": "Errore del simulatore"
   }
 }

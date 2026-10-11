@@ -57,5 +57,37 @@
     "failed": "not delivered",
     "sms": "SMS sent: {{n}}",
     "ai": "Messaging AI: {{runs}} requests, {{cost}}"
+  },
+  "agent": {
+    "loadError": "Settings unavailable",
+    "saved": "Saved",
+    "saveError": "Not saved",
+    "save": "Save",
+    "modeLabel": "How the agent works",
+    "modeOff": "Off",
+    "modeDraft": "Drafts",
+    "modeReply": "Replies",
+    "modeOffHint": "It works only when you press the wand in Messages.",
+    "modeDraftHint": "For every message it prepares the reply: you find it ready to send in Messages.",
+    "modeReplyHint": "It replies on its own. Changes to bookings still need your confirmation: you get a notification.",
+    "limits": "Limits",
+    "limit": {
+      "debounce_seconds": "Wait after the last message (seconds)",
+      "max_wait_seconds": "Longest wait (seconds)",
+      "staff_quiet_minutes": "Stays quiet if staff wrote within (minutes)",
+      "max_replies_per_thread_24h": "Replies per conversation per day",
+      "max_runs_per_day": "Runs per day",
+      "daily_budget_eur": "AI spend per day (€)"
+    },
+    "simTitle": "Try the agent",
+    "simReset": "Start over",
+    "simHint": "Write as a guest: the agent replies as it would on the real number, without sending anything. Bookings don't change.",
+    "simPlaceholder": "E.g. Are you open tonight? We are 4",
+    "simSend": "Try",
+    "simDraft": "Draft",
+    "simProposal": "To confirm",
+    "simSkipped": "No reply ({{motivo}})",
+    "simNothing": "The agent did not reply",
+    "simError": "Simulator error"
   }
 }

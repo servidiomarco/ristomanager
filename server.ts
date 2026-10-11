@@ -19,6 +19,7 @@ import { SocketService } from './services/socketService.js';
 import { retryOnLockContention } from './utils/lockRetry.js';
 import * as bookingTools from './services/bookingTools.js';
 import * as whatsappAgent from './services/whatsapp/agent/index.js';
+import type { AgentContext, AgentProposal } from './services/whatsapp/agent/index.js';
 import * as tableAssignmentAgent from './services/tableAssignmentAgent.js';
 import * as aiReport from './services/aiReportService.js';
 import { renderPrenota } from './services/prenotaSeo.js';
@@ -13393,7 +13394,7 @@ app.get('/messages/conversations/:phoneDigits', authenticate, requirePermission(
             `SELECT * FROM (
                 SELECT id, provider, channel, direction, from_phone, to_phone, body,
                        status, provider_sid, reservation_id, sent_at, delivered_at,
-                       failed_at, read_at, error_code, error_message, media
+                       failed_at, read_at, error_code, error_message, media, kind
                 FROM outbound_messages
                 WHERE tenant_id = $2
                   AND channel IN ('sms','whatsapp')
@@ -14322,6 +14323,82 @@ const proposalRow = (r: any) => ({
     reservation_id: r.reservation_id,
 });
 
+/**
+ * Il contesto di un giro dell'agente per una conversazione: storia (senza
+ * gli automatismi), regole della casa, prenotazioni del numero, rubrica,
+ * cataloghi, caparra. Lo usano la bacchetta e la coda automatica
+ * (services/whatsapp/agent/queue.ts). null se la conversazione è vuota.
+ */
+async function buildAgentContext(tenantId: number, key: string): Promise<{ ctx: AgentContext; reservationId: number | null } | null> {
+    const [msgs, kb, soglia] = await Promise.all([
+        queryWithRetry(
+            `SELECT direction, body, from_phone, to_phone, profile_name
+               FROM outbound_messages
+              WHERE tenant_id = $2
+                AND channel IN ('sms','whatsapp')
+                AND (to_phone_digits = ANY($1::text[]) OR from_phone_digits = ANY($1::text[]))
+                AND (kind IS NULL OR kind <> ALL($3::text[]))
+              ORDER BY sent_at DESC LIMIT 15`, [phoneDigitsVariants(key), tenantId, INBOX_HIDDEN_KINDS]),
+        queryWithRetry(`SELECT title, content FROM ai_knowledge_entries WHERE tenant_id = $1 AND is_active ORDER BY sort_order, id`, [tenantId]),
+        getVoiceLargeGroupThreshold(tenantId),
+    ]);
+    const messages = msgs.rows.reverse();
+    if (messages.length === 0) return null;
+
+    // Stesso scoping della gemella in /messages/suggest-reply: tenant
+    // sulla prenotazione e sui JOIN, o l'agente ragionerebbe sulla
+    // prenotazione omonima di un altro ristorante.
+    const resv = await queryWithRetry(
+        `SELECT r.id, r.customer_name, r.reservation_time, r.guests, r.notes,
+                r.reservation_status AS status, ro.name AS room_name, t.name AS table_name
+           FROM reservations r
+           LEFT JOIN tables t ON t.id = r.table_id AND t.tenant_id = r.tenant_id
+           LEFT JOIN rooms ro ON ro.id = t.room_id AND ro.tenant_id = t.tenant_id
+          WHERE r.tenant_id = $2
+            AND r.phone IS NOT NULL AND r.phone <> ''
+            AND ${PHONE_MATCH_KEY_SQL('r.phone')} = ${PHONE_MATCH_KEY_SQL('$1')}
+          ORDER BY abs(extract(epoch FROM (r.reservation_time - CURRENT_TIMESTAMP))) ASC
+          LIMIT 1`, [key, tenantId]);
+
+    // Numero in formato utile agli strumenti: quello da cui il cliente scrive.
+    const inbound = messages.find((m: any) => m.direction === 'inbound');
+    const phone = inbound?.from_phone || `+${key}`;
+    // Il nome del profilo WhatsApp più recente: un suggerimento per il
+    // nome della prenotazione, che l'agente propone e non usa da solo.
+    const profilo = [...messages].reverse().find((m: any) => m.direction === 'inbound' && m.profile_name);
+
+    const ctx: AgentContext = {
+        tenantId,
+        phoneDigits: key,
+        messages: messages as any,
+        reservation: resv.rows[0] ?? null,
+        upcomingBookings: await bookingTools.upcomingBookingsForPrompt(tenantId, phone, { withIds: true }),
+        customer: await loadCustomerProfileForAi(tenantId, key),
+        profileName: profilo?.profile_name ?? null,
+        phone,
+        ...(await loadAgentCatalogs(tenantId)),
+        knowledge: kb.rows as any,
+        largeGroupThreshold: soglia,
+        restaurantName: (await publicBusinessIdentity(tenantId)).name,
+        depositPolicy: await getAutoDepositPolicy(tenantId),
+        timezone: (await getTenantLocale(tenantId)).timezone,
+    };
+    return { ctx, reservationId: resv.rows[0]?.id ?? null };
+}
+
+/** Salva la proposta dell'agente. Una per volta e per conversazione: quelle
+ *  vecchie decadono, altrimenti lo staff si trova due schede in contrasto. */
+async function saveAgentProposal(tenantId: number, key: string, proposal: AgentProposal, reply: string | null, reservationId: number | null): Promise<any> {
+    await queryWithRetry(
+        `UPDATE agent_proposals SET status = 'SUPERSEDED', resolved_at = CURRENT_TIMESTAMP
+          WHERE tenant_id = $2 AND phone_digits = $1 AND status = 'PENDING'`, [key, tenantId]);
+    const ins = await queryWithRetry(
+        `INSERT INTO agent_proposals (tenant_id, phone_digits, tool, args, summary, suggested_reply, reservation_id)
+         VALUES ($7, $1, $2, $3::jsonb, $4, $5, $6) RETURNING *`,
+        [key, proposal.tool, JSON.stringify(proposal.args), proposal.summary, reply, reservationId, tenantId]);
+    return ins.rows[0];
+}
+
 app.post('/messages/agent/run', authenticate, requirePermission('reservations:full'), async (req, res) => {
     try {
         if (!(await getFeatureFlag(req.tenantId!, 'ai_messages_enabled', false))) {
@@ -14333,61 +14410,11 @@ app.post('/messages/agent/run', authenticate, requirePermission('reservations:fu
         const key = phoneMatchKey(String(req.body?.phone_digits ?? ''));
         if (!key) return res.status(400).json({ error: 'phone_digits mancante' });
 
-        const [msgs, kb, soglia] = await Promise.all([
-            queryWithRetry(
-                `SELECT direction, body, from_phone, to_phone, profile_name
-                   FROM outbound_messages
-                  WHERE tenant_id = $2
-                    AND channel IN ('sms','whatsapp')
-                    AND (to_phone_digits = ANY($1::text[]) OR from_phone_digits = ANY($1::text[]))
-                    AND (kind IS NULL OR kind <> ALL($3::text[]))
-                  ORDER BY sent_at DESC LIMIT 15`, [phoneDigitsVariants(key), req.tenantId!, INBOX_HIDDEN_KINDS]),
-            queryWithRetry(`SELECT title, content FROM ai_knowledge_entries WHERE tenant_id = $1 AND is_active ORDER BY sort_order, id`, [req.tenantId!]),
-            getVoiceLargeGroupThreshold(req.tenantId!),
-        ]);
-        const messages = msgs.rows.reverse();
-        if (messages.length === 0) return res.status(404).json({ error: 'Conversazione vuota' });
+        const built = await buildAgentContext(req.tenantId!, key);
+        if (!built) return res.status(404).json({ error: 'Conversazione vuota' });
+        const result = await whatsappAgent.runAgent(built.ctx);
 
-        // Stesso scoping della gemella in /messages/suggest-reply: tenant
-        // sulla prenotazione e sui JOIN, o l'agente ragionerebbe sulla
-        // prenotazione omonima di un altro ristorante.
-        const resv = await queryWithRetry(
-            `SELECT r.id, r.customer_name, r.reservation_time, r.guests, r.notes,
-                    r.reservation_status AS status, ro.name AS room_name, t.name AS table_name
-               FROM reservations r
-               LEFT JOIN tables t ON t.id = r.table_id AND t.tenant_id = r.tenant_id
-               LEFT JOIN rooms ro ON ro.id = t.room_id AND ro.tenant_id = t.tenant_id
-              WHERE r.tenant_id = $2
-                AND r.phone IS NOT NULL AND r.phone <> ''
-                AND ${PHONE_MATCH_KEY_SQL('r.phone')} = ${PHONE_MATCH_KEY_SQL('$1')}
-              ORDER BY abs(extract(epoch FROM (r.reservation_time - CURRENT_TIMESTAMP))) ASC
-              LIMIT 1`, [key, req.tenantId!]);
-
-        // Numero in formato utile agli strumenti: quello da cui il cliente scrive.
-        const inbound = messages.find((m: any) => m.direction === 'inbound');
-        const phone = inbound?.from_phone || `+${key}`;
-        // Il nome del profilo WhatsApp più recente: un suggerimento per il
-        // nome della prenotazione, che l'agente propone e non usa da solo.
-        const profilo = [...messages].reverse().find((m: any) => m.direction === 'inbound' && m.profile_name);
-
-        const result = await whatsappAgent.runAgent({
-            tenantId: req.tenantId!,
-            phoneDigits: key,
-            messages: messages as any,
-            reservation: resv.rows[0] ?? null,
-            upcomingBookings: await bookingTools.upcomingBookingsForPrompt(req.tenantId!, phone, { withIds: true }),
-            customer: await loadCustomerProfileForAi(req.tenantId!, key),
-            profileName: profilo?.profile_name ?? null,
-            phone,
-            ...(await loadAgentCatalogs(req.tenantId!)),
-            knowledge: kb.rows as any,
-            largeGroupThreshold: soglia,
-            restaurantName: (await publicBusinessIdentity(req.tenantId!)).name,
-            depositPolicy: await getAutoDepositPolicy(req.tenantId!),
-            timezone: (await getTenantLocale(req.tenantId!)).timezone,
-        });
-
-        // Il giro dell'agente interroga il modello da 1 a 3 volte: qui si
+        // Il giro dell'agente interroga il modello più volte: qui si
         // registra la somma. Finora non si registrava NIENTE — la stellina
         // della Inbox chiama questo endpoint, non suggest-reply, e la pagina
         // Consumi mostrava zero mentre si spendeva davvero.
@@ -14400,22 +14427,11 @@ app.post('/messages/agent/run', authenticate, requirePermission('reservations:fu
             ).catch(err => console.error('ai_token_usage insert (whatsapp_agent) failed:', err));
         }
 
-        let proposta: any = null;
         // Al più una proposta per giro (services/whatsapp/agent/run.ts).
         const proposal = result.proposals[0] ?? null;
-        if (proposal) {
-            // Una proposta per volta e per conversazione: quelle vecchie
-            // decadono, altrimenti lo staff si trova due schede in contrasto.
-            await queryWithRetry(
-                `UPDATE agent_proposals SET status = 'SUPERSEDED', resolved_at = CURRENT_TIMESTAMP
-                  WHERE tenant_id = $2 AND phone_digits = $1 AND status = 'PENDING'`, [key, req.tenantId!]);
-            const ins = await queryWithRetry(
-                `INSERT INTO agent_proposals (tenant_id, phone_digits, tool, args, summary, suggested_reply, reservation_id)
-                 VALUES ($7, $1, $2, $3::jsonb, $4, $5, $6) RETURNING *`,
-                [key, proposal.tool, JSON.stringify(proposal.args),
-                 proposal.summary, result.reply, resv.rows[0]?.id ?? null, req.tenantId!]);
-            proposta = proposalRow(ins.rows[0]);
-        }
+        const proposta = proposal
+            ? proposalRow(await saveAgentProposal(req.tenantId!, key, proposal, result.reply, built.reservationId))
+            : null;
 
         res.json({
             reply: result.reply,
@@ -14425,7 +14441,7 @@ app.post('/messages/agent/run', authenticate, requirePermission('reservations:fu
             // automatico): l'Inbox lo dice invece di una bozza vuota.
             skipped: result.skipped ?? null,
             reason: result.reason ?? (result.skipped ? 'Il messaggio del cliente non richiede risposta' : null),
-            knowledge_count: kb.rows.length,
+            knowledge_count: built.ctx.knowledge.length,
         });
     } catch (err: any) {
         if (isAiKeyInvalid(err)) return sendAiKeyInvalid(res, 'POST /messages/agent/run', err);
@@ -18217,6 +18233,7 @@ const SCHEDULER_LOCK_PLATFORM_HEALTH = 761008;
 const SCHEDULER_LOCK_HEALTH_RETENTION = 761009;
 const SCHEDULER_LOCK_HACCP_SENSORS = 761010;
 const SCHEDULER_LOCK_BOOKING_REMINDERS = 761011;
+const SCHEDULER_LOCK_WHATSAPP_AGENT = 761012;
 
 // Il lock advisory è di SESSIONE: va preso su un client dedicato tenuto per
 // tutta la durata del tick (sul pool condiviso un'altra query potrebbe
@@ -19281,6 +19298,16 @@ const startBookingReminderScheduler = () => {
         .catch((err: any) => console.error('[booking-reminders] lock wrapper failed:', err?.message || err));
     lockedTick();
     setInterval(lockedTick, 15 * 60 * 1000);
+};
+
+// L'agente WhatsApp che parte da solo (services/whatsapp/agent/queue.ts):
+// ogni 15 secondi prende le conversazioni la cui attesa è scaduta. Il lock
+// evita che due repliche rispondano due volte allo stesso cliente.
+const startWhatsAppAgentScheduler = () => {
+    const tickMs = Number(process.env.WA_AGENT_TICK_MS) || 15_000;
+    const lockedTick = () => runSchedulerTickWithLock(SCHEDULER_LOCK_WHATSAPP_AGENT, 'whatsapp-agent', () => whatsappAgent.agentQueueTick())
+        .catch((err: any) => console.error('[whatsapp-agent] lock wrapper failed:', err?.message || err));
+    setInterval(lockedTick, tickMs);
 };
 
 // ============================================
@@ -45725,6 +45752,18 @@ configureWhatsApp({
     broadcastToAll: (tenantId, event, payload) => { socketService?.broadcastToAll(tenantId, event, payload); },
 });
 
+// L'agente WhatsApp che parte da solo: la coda chiede a server.ts il
+// contesto del giro (lo stesso della bacchetta), dove salvare la proposta,
+// se l'AI è accesa e se il numero è in blacklist.
+whatsappAgent.configureAgentQueue({
+    isAiEnabled: async tenantId =>
+        (await getFeatureFlag(tenantId, 'ai_messages_enabled', false)) && (await isFeatureEnabledForTenant(tenantId, 'whatsapp')),
+    buildContext: async (tenantId, key) => (await buildAgentContext(tenantId, key))?.ctx ?? null,
+    saveProposal: async (tenantId, key, proposal, reply, reservationId) =>
+        (await saveAgentProposal(tenantId, key, proposal, reply, reservationId))?.id ?? null,
+    isBlacklisted: (tenantId, phone) => isPhoneBlacklisted(tenantId, phone),
+});
+
 // Quello che l'ospite dice della sua prenotazione (ritardo, note, allergie,
 // conferma): services/reservationGuestUpdates.ts scrive, qui il broadcast.
 configureGuestUpdates({
@@ -46204,6 +46243,12 @@ const startServer = async () => {
                         console.log('✅ Review request scheduler started (15 min, finestra 10-21 Europe/Rome)');
                     } catch (schedErr) {
                         console.error('Review request scheduler failed to start:', schedErr);
+                    }
+                    if (!isServiceNode) try {
+                        startWhatsAppAgentScheduler();
+                        console.log('✅ WhatsApp agent scheduler started (15 s)');
+                    } catch (schedErr) {
+                        console.error('WhatsApp agent scheduler failed to start:', schedErr);
                     }
                     if (!isServiceNode) try {
                         startBookingReminderScheduler();

@@ -118,6 +118,11 @@ export default async function globalSetup(): Promise<() => Promise<void>> {
             // Avviso «cambio turno»: in produzione aspetta che la griglia
             // smetta di scrivere (20 s); nei test basta un attimo.
             SHIFT_CHANGE_NOTIFY_DELAY_MS: '300',
+            // Agente WhatsApp che parte da solo: attesa e giro dello
+            // scheduler in millisecondi invece di 20 e 15 secondi. Contano
+            // solo per un locale con l'agente acceso (di serie è spento).
+            WA_AGENT_DEBOUNCE_MS: '300',
+            WA_AGENT_TICK_MS: '250',
             JWT_REFRESH_SECRET: 'test-jwt-refresh-secret',
             // Telefono (Fase 2): i webhook voce verificano la firma Twilio, e
             // register-call va a uno stub locale che il test della voce

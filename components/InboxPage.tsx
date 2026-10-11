@@ -24,6 +24,7 @@ import { socketClient } from '../services/socketClient';
 import { runAgent, confirmProposal, discardProposal, extractBooking, type AgentProposal, type ExtractedBooking } from '../services/aiMessagesApiService';
 import { listMedia, attachFromLibrary, type MediaFile } from '../services/mediaApiService';
 import { getFeatureFlags } from '../services/apiService';
+import { getAgentThread, pauseAgentThread, markAgentDraft, type AgentThreadState } from '../services/whatsappApiService';
 import { toTitleCase, phoneMatchKey, isoDatesToEuropean } from '../utils/text';
 import { Shift, type Reservation } from '../types';
 import {
@@ -187,9 +188,13 @@ interface InboxPageProps {
    *  quelle che combaciano col numero, così più prenotazioni dello stesso
    *  cliente sono tutte gestibili senza un aggancio manuale. */
   reservations?: Reservation[];
+  /** Apri questa conversazione appena la lista c'è (link da una notifica,
+   *  ?view=MESSAGGI&phone=…). */
+  openPhoneDigits?: string | null;
+  onOpenedPhone?: () => void;
 }
 
-const InboxPage: React.FC<InboxPageProps> = ({ onCreateReservationFromContact, onOpenReservation, refreshTick, reservations }) => {
+const InboxPage: React.FC<InboxPageProps> = ({ onCreateReservationFromContact, onOpenReservation, refreshTick, reservations, openPhoneDigits, onOpenedPhone }) => {
   const { t: tv } = useTranslation('messaggi', { useSuspense: false });
   // Riparte dall'ultimo stato noto (cache modulo-level): la pagina viene
   // smontata a ogni cambio vista, e senza questo ogni rientro mostrava lo
@@ -215,6 +220,10 @@ const InboxPage: React.FC<InboxPageProps> = ({ onCreateReservationFromContact, o
   const [suggesting, setSuggesting] = useState(false);
   const [proposal, setProposal] = useState<AgentProposal | null>(null);
   const [proposalBusy, setProposalBusy] = useState(false);
+  // L'agente che lavora da solo su questa conversazione: modalità, pausa,
+  // bozza pronta, proposta in attesa (services/whatsapp/agent/queue.ts).
+  const [agentState, setAgentState] = useState<AgentThreadState | null>(null);
+  const [pauseMenuOpen, setPauseMenuOpen] = useState(false);
   // Libreria: si carica solo quando la apri, non a ogni conversazione.
   const [libreriaAperta, setLibreriaAperta] = useState(false);
   const [libreria, setLibreria] = useState<MediaFile[] | null>(null);
@@ -489,8 +498,76 @@ const InboxPage: React.FC<InboxPageProps> = ({ onCreateReservationFromContact, o
     }
   }, [selected, suggesting]);
 
+  // Una notifica ha chiesto questa conversazione: si apre appena compare
+  // nella lista (che può arrivare dopo il primo render).
+  useEffect(() => {
+    if (!openPhoneDigits) return;
+    const key = phoneMatchKey(openPhoneDigits);
+    if (key && conversations.some(c => c.phone_digits === key)) {
+      setSelectedKey(key);
+      onOpenedPhone?.();
+    }
+  }, [openPhoneDigits, conversations, onOpenedPhone]);
+
   // Cambiando conversazione la proposta non deve seguirti addosso.
   useEffect(() => { setProposal(null); }, [selectedKey]);
+
+  // Lo stato dell'agente sulla conversazione aperta. Una proposta nata da un
+  // giro automatico (non dalla bacchetta) si vede solo così.
+  const loadAgentState = useCallback(async (key: string) => {
+    try {
+      const st = await getAgentThread(key);
+      setAgentState(st);
+      if (st.proposal) setProposal(p => p ?? (st.proposal as unknown as AgentProposal));
+    } catch {
+      setAgentState(null);
+    }
+  }, []);
+  useEffect(() => {
+    setAgentState(null);
+    setPauseMenuOpen(false);
+    if (selectedKey && aiEnabled) loadAgentState(selectedKey);
+  }, [selectedKey, aiEnabled, loadAgentState]);
+  // Il server avvisa quando un giro dell'agente finisce o la pausa cambia.
+  useEffect(() => {
+    if (!selectedKey || !aiEnabled) return;
+    const onActivity = (payload: any) => {
+      const key = payload?.phone_digits ? phoneMatchKey(String(payload.phone_digits)) : '';
+      if (key && key === selectedKey) loadAgentState(selectedKey);
+    };
+    let attached: ReturnType<typeof socketClient.getSocket> = null;
+    const attach = (sock: ReturnType<typeof socketClient.getSocket>) => {
+      if (attached === sock) return;
+      if (attached) attached.off('agent:activity', onActivity);
+      attached = sock;
+      if (attached) attached.on('agent:activity', onActivity);
+    };
+    attach(socketClient.getSocket());
+    const unsub = socketClient.onSocketChange(sock => attach(sock));
+    return () => { unsub(); attach(null); };
+  }, [selectedKey, aiEnabled, loadAgentState]);
+
+  const handlePause = useCallback(async (per: '1h' | 'tomorrow' | 'always' | 'resume') => {
+    if (!selectedKey) return;
+    setPauseMenuOpen(false);
+    try {
+      await pauseAgentThread(selectedKey, per);
+      await loadAgentState(selectedKey);
+    } catch (err: any) {
+      setSendError(err?.data?.error || err?.message || tv('agentPauseFailed'));
+    }
+  }, [selectedKey, loadAgentState]);
+
+  const handleDraft = useCallback(async (use: boolean) => {
+    const d = agentState?.draft;
+    if (!d) return;
+    if (use) {
+      setComposerText(d.text);
+      composerRef.current?.focus();
+    }
+    setAgentState(st => (st ? { ...st, draft: null } : st));
+    markAgentDraft(d.run_id, use ? 'used' : 'discarded').catch(() => {});
+  }, [agentState]);
 
   // "Crea prenotazione" dalla chat: precompila il modulo coi campi estratti dal
   // messaggio (data/ora/coperti/zona/note, anche in inglese). Usa l'estrazione
@@ -803,6 +880,50 @@ const InboxPage: React.FC<InboxPageProps> = ({ onCreateReservationFromContact, o
               }
               actions={
                 <div className="flex items-center gap-2">
+                  {aiEnabled && agentState && agentState.mode !== 'off' && (
+                    <div className="relative">
+                      <button
+                        type="button"
+                        onClick={() => setPauseMenuOpen(o => !o)}
+                        aria-haspopup="menu"
+                        aria-expanded={pauseMenuOpen}
+                        className={`inline-flex h-9 items-center gap-1.5 rounded-[var(--ds-radius-control)] px-3 text-[13px] font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] ${
+                          agentState.paused
+                            ? 'bg-[var(--ds-pending-tint)] text-[var(--ds-pending-text)]'
+                            : 'bg-[var(--ds-arriving-tint)] text-[var(--ds-arriving-text)]'
+                        }`}
+                      >
+                        <Wand2 className="h-4 w-4" aria-hidden />
+                        <span className="hidden sm:inline">
+                          {agentState.paused
+                            ? (agentState.pause_reason === 'bot_suspected'
+                              ? tv('agentBotStopped')
+                              : agentState.paused_until
+                                ? tv('agentPausedUntil', { ora: formatTime(agentState.paused_until) })
+                                : tv('agentPaused'))
+                            : (agentState.mode === 'reply' ? tv('agentChipReply') : tv('agentChipDraft'))}
+                        </span>
+                      </button>
+                      {pauseMenuOpen && (
+                        <>
+                          <div className="fixed inset-0 z-40" onClick={() => setPauseMenuOpen(false)} aria-hidden />
+                          <div role="menu" className="absolute right-0 z-50 mt-1 w-56 overflow-hidden rounded-[var(--ds-radius)] bg-[var(--ds-surface)] py-1 shadow-[var(--ds-shadow-card)] ring-1 ring-[var(--ds-border)]">
+                            {agentState.paused ? (
+                              <button type="button" role="menuitem" onClick={() => handlePause('resume')} className="block w-full px-3.5 py-2.5 text-left text-[14px] text-[var(--ds-text-primary)] hover:bg-[var(--ds-surface-row)]">
+                                {tv('agentResume')}
+                              </button>
+                            ) : (
+                              (['1h', 'tomorrow', 'always'] as const).map(per => (
+                                <button key={per} type="button" role="menuitem" onClick={() => handlePause(per)} className="block w-full px-3.5 py-2.5 text-left text-[14px] text-[var(--ds-text-primary)] hover:bg-[var(--ds-surface-row)]">
+                                  {tv(per === '1h' ? 'agentPause1h' : per === 'tomorrow' ? 'agentPauseTomorrow' : 'agentPauseAlways')}
+                                </button>
+                              ))
+                            )}
+                          </div>
+                        </>
+                      )}
+                    </div>
+                  )}
                   {waWindowOpen && preferredChannel === 'whatsapp' && (
                     <StatusPill tone="positive" className="hidden sm:inline-flex">
                       <Clock className="h-3 w-3" aria-hidden /> Finestra WA: {windowRemaining}
@@ -920,6 +1041,12 @@ const InboxPage: React.FC<InboxPageProps> = ({ onCreateReservationFromContact, o
                               <div className={`mt-1 flex items-center justify-end gap-1.5 text-[12px] ${outbound ? 'text-white/75' : 'text-[var(--ds-text-muted)]'}`}>
                                 <span className="tabular-nums">{formatTime(m.sent_at)}</span>
                                 {statusIcon(m, tv)}
+                                {/* Scritto dall'agente, non da una persona. */}
+                                {(m.kind === 'agent' || m.kind === 'agent_followup') && (
+                                  <span className="inline-flex items-center gap-0.5 rounded-[var(--ds-radius-control)] bg-white/20 px-1.5 text-[11px]" title={tv('agentWrote')}>
+                                    <Wand2 className="h-3 w-3" aria-hidden /> {tv('agentLabel')}
+                                  </span>
+                                )}
                                 <span className={`rounded-[var(--ds-radius-control)] px-1.5 text-[11px] ${outbound ? 'bg-white/20' : 'bg-[var(--ds-surface-row)]'}`}>
                                   {m.channel === 'whatsapp' ? 'WA' : 'SMS'}
                                 </span>
@@ -991,6 +1118,37 @@ const InboxPage: React.FC<InboxPageProps> = ({ onCreateReservationFromContact, o
                         ))}
                       </ul>
                     )}
+                  </div>
+                )}
+
+                {/* La bozza che l'agente ha preparato da solo (modalità
+                    Bozze, o una risposta che non è partita): si usa nel campo
+                    di scrittura, dove si corregge prima di inviarla. */}
+                {agentState?.draft && !composerText.trim() && (
+                  <div className="ds-ai-frame">
+                    <div className="ds-ai-card flex items-start gap-2.5 px-3.5 py-3">
+                      <Wand2 className="mt-0.5 h-4 w-4 flex-shrink-0 text-[var(--ds-text-secondary)]" aria-hidden />
+                      <div className="min-w-0 flex-1">
+                        <p className="text-[13px] font-semibold text-[var(--ds-text-primary)]">{tv('agentDraftTitle')}</p>
+                        <p className="mt-0.5 whitespace-pre-wrap text-[14px] text-[var(--ds-text-primary)]">{agentState.draft.text}</p>
+                        <div className="mt-2.5 flex flex-wrap items-center gap-2">
+                          <button
+                            type="button"
+                            onClick={() => handleDraft(true)}
+                            className="inline-flex h-9 items-center gap-1.5 rounded-[var(--ds-radius-control)] bg-[var(--ds-action-bg)] px-3.5 text-[13px] font-semibold text-[var(--ds-action-fg)] transition-colors hover:bg-[var(--ds-action-bg-hover)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+                          >
+                            <Check className="h-4 w-4" /> {tv('agentDraftUse')}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleDraft(false)}
+                            className="inline-flex h-9 items-center gap-1.5 rounded-[var(--ds-radius-control)] px-3 text-[13px] font-medium text-[var(--ds-text-muted)] transition-colors hover:bg-[var(--ds-surface-row)] hover:text-[var(--ds-text-primary)]"
+                          >
+                            <XIcon className="h-4 w-4" /> {tv('agentDraftDiscard')}
+                          </button>
+                        </div>
+                      </div>
+                    </div>
                   </div>
                 )}
 

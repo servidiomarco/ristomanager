@@ -48,5 +48,20 @@
   "sendWith": "Send with",
   "unreadCount_one": "{{count}} unread",
   "unreadCount_other": "{{count}} unread",
-  "newLineWith": ", new line with"
+  "newLineWith": ", new line with",
+  "agentChipDraft": "Agent: drafts",
+  "agentChipReply": "Agent: replies",
+  "agentPaused": "Agent paused",
+  "agentPausedUntil": "Agent paused until {{ora}}",
+  "agentBotStopped": "Agent stopped: auto-responder",
+  "agentPause1h": "Pause for an hour",
+  "agentPauseTomorrow": "Pause until tomorrow morning",
+  "agentPauseAlways": "Pause for this conversation",
+  "agentResume": "Resume the agent",
+  "agentPauseFailed": "Pause not saved",
+  "agentDraftTitle": "Agent's draft",
+  "agentDraftUse": "Use",
+  "agentDraftDiscard": "Discard",
+  "agentLabel": "Agent",
+  "agentWrote": "Written by the agent"
 }

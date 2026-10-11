@@ -7,3 +7,4 @@ export { AgentError } from './types.js';
 export type { AgentContext, AgentProposal, AgentResult, AgentUsage } from './types.js';
 export { findTool as findAgentTool } from './tools/index.js';
 export type { ToolRun } from './tools/index.js';
+export { configureAgentQueue, agentQueueTick, processRun, simulateRun, AGENT_AUTO_FEATURE, type AgentQueueDeps, type RunOutcome } from './queue.js';

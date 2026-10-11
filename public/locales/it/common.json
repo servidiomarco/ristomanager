@@ -160,7 +160,9 @@
     "waTemplates": "Template",
     "waTemplatesHint": "I messaggi approvati da Meta, uno per tipo",
     "waUsage": "Consumi del mese",
-    "waUsageHint": "Messaggi ricevuti e inviati, spesa dell'AI"
+    "waUsageHint": "Messaggi ricevuti e inviati, spesa dell'AI",
+    "waAgent": "Agente automatico",
+    "waAgentHint": "Bozze o risposte da solo ai messaggi in arrivo"
   },
   "aria": {
     "openMenu": "Apri menu",

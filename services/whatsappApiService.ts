@@ -83,3 +83,64 @@ export const getWhatsAppTemplates = (): Promise<{ templates: WhatsAppTemplateRow
 
 export const getWhatsAppUsage = (): Promise<WhatsAppUsage> =>
   apiRequest(`${API_URL}/whatsapp/usage`, { headers: getHeaders() });
+
+// ── L'agente che parte da solo ─────────────────────────────────────────
+
+export type AgentMode = 'off' | 'draft' | 'reply';
+
+export interface AgentPolicy {
+  mode: AgentMode;
+  debounce_seconds: number;
+  max_wait_seconds: number;
+  staff_quiet_minutes: number;
+  max_replies_per_thread_24h: number;
+  max_runs_per_day: number;
+  daily_budget_eur: number;
+}
+
+export const getAgentPolicy = (): Promise<{ agent: AgentPolicy }> =>
+  apiRequest(`${API_URL}/whatsapp/settings`, { headers: getHeaders() });
+
+export const saveAgentPolicy = (agent: Partial<AgentPolicy>): Promise<{ agent: AgentPolicy }> =>
+  apiRequest(`${API_URL}/whatsapp/settings`, { method: 'PUT', headers: getHeaders(), body: JSON.stringify({ agent }) });
+
+export interface AgentThreadState {
+  mode: AgentMode;
+  paused: boolean;
+  paused_until: string | null;
+  pause_reason: 'manual' | 'bot_suspected' | string | null;
+  draft: { run_id: number; text: string; at: string } | null;
+  last_run: { status: string; outcome: string | null; skip_reason: string | null; finished_at: string | null } | null;
+  proposal: {
+    id: number; tool: string; args: Record<string, any>; summary: string;
+    suggested_reply: string | null; status: string; expires_at: string; reservation_id: number | null;
+  } | null;
+}
+
+export const getAgentThread = (phoneDigits: string): Promise<AgentThreadState> =>
+  apiRequest(`${API_URL}/whatsapp/agent/thread/${encodeURIComponent(phoneDigits)}`, { headers: getHeaders() });
+
+export const pauseAgentThread = (phoneDigits: string, per: '1h' | 'tomorrow' | 'always' | 'resume'): Promise<{ ok: boolean }> =>
+  apiRequest(`${API_URL}/whatsapp/agent/thread/${encodeURIComponent(phoneDigits)}/pause`, {
+    method: 'POST', headers: getHeaders(), body: JSON.stringify({ for: per }),
+  });
+
+export const markAgentDraft = (runId: number, state: 'used' | 'discarded'): Promise<{ ok: boolean }> =>
+  apiRequest(`${API_URL}/whatsapp/agent/runs/${runId}/draft`, {
+    method: 'POST', headers: getHeaders(), body: JSON.stringify({ state }),
+  });
+
+export interface SimulationResult {
+  outcome: 'would_reply' | 'drafted' | 'no_reply' | null;
+  status: string;
+  reply: string | null;
+  proposal: { tool: string; summary: string } | null;
+  skipped: string | null;
+  note: string | null;
+}
+
+export const simulateAgent = (text: string, mode: 'draft' | 'reply'): Promise<SimulationResult> =>
+  apiRequest(`${API_URL}/whatsapp/agent/simulate`, { method: 'POST', headers: getHeaders(), body: JSON.stringify({ text, mode }) });
+
+export const resetAgentSimulation = (): Promise<{ ok: boolean }> =>
+  apiRequest(`${API_URL}/whatsapp/agent/simulate`, { method: 'POST', headers: getHeaders(), body: JSON.stringify({ reset: true }) });
