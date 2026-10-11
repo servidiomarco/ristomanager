@@ -77,7 +77,7 @@ Il modulo **Conversazioni** richiede il permesso `voice_calls:view`, disponibile
 
 La **cronologia della prenotazione** e il **log attività** richiedono il permesso `logs:view`, disponibile per Titolare, Direttore generale e Manager (vedi §13).
 
-> **Nota per l'amministratore.** I permessi si gestiscono dalla sezione **Utenti** e **Impostazioni → Ruoli**. Se un collaboratore non vede il menu "Clienti" o "Conversazioni", verificare il ruolo assegnato al suo account.
+> **Nota per l'amministratore.** I permessi si gestiscono dalla sezione **Utenti** e **Impostazioni → Amministrazione → Permessi ruoli**. Se un collaboratore non vede il menu "Clienti" o "Conversazioni", verificare il ruolo assegnato al suo account.
 
 ---
 
@@ -125,7 +125,7 @@ Cliccando su un cliente si apre il **pannello di dettaglio**, che raccoglie in u
 - **Preferenze e note alimentari/allergie** — sempre visibili per un rapido riferimento in sala.
 - **Storico prenotazioni** — l'elenco delle prenotazioni registrate, con data, orario, numero di ospiti e indicazione del turno (pranzo con l'icona del sole, cena con l'icona della luna). Un contatore mostra quante prenotazioni ha totalizzato il cliente.
 - **Conteggio no-show** — quante volte il cliente non si è presentato (vedi §8).
-- **Spesa** — quanto ha **speso** il cliente, le **visite con conto** e la spesa **media a coperto**. Contano i conti chiusi nel CRM delle sue prenotazioni e, nei locali con la cassa Passepartout e la lettura dei conti accesa (Impostazioni → Passepartout → «Conti della cassa nel CRM»), anche i tavoli chiusi solo in cassa. La striscia compare solo quando c'è almeno un conto.
+- **Spesa** — quanto ha **speso** il cliente, le **visite con conto** e la spesa **media a coperto**. Contano i conti chiusi nel CRM delle sue prenotazioni e, nei locali con la cassa Passepartout e la lettura dei conti accesa (Impostazioni → Cassa → Passepartout → «Conti della cassa nel CRM»), anche i tavoli chiusi solo in cassa. La striscia compare solo quando c'è almeno un conto.
 
 Questa scheda è pensata per essere consultata **al volo**, ad esempio mentre si è al telefono con il cliente o mentre lo si accoglie all'ingresso.
 
@@ -247,7 +247,7 @@ Oltre alle conversazioni, il CRM scrive da solo all'ospite nei momenti chiave de
 ### 11.1 Conferma e avviso di modifica
 
 - Alla **conferma** della prenotazione l'ospite riceve il messaggio di conferma; al rifiuto, la disdetta con l'invito a chiamare.
-- Nella conferma WhatsApp, accanto a «Gestisci la prenotazione» (vedi §11.3), c'è il pulsante **«Come raggiungerci»**, che apre Google Maps sul locale. Compare se è compilato il campo **«Link Google Maps (Come raggiungerci)»** in Impostazioni → Ristorante → Identità e documenti legali (un link breve, `https://maps.app.goo.gl/…`).
+- Nella conferma WhatsApp, accanto a «Gestisci la prenotazione» (vedi §11.3), c'è il pulsante **«Come raggiungerci»**, che apre Google Maps sul locale. Compare se è compilato il campo **«Link Google Maps (Come raggiungerci)»** in Impostazioni → Locale → Identità e documenti legali (un link breve, `https://maps.app.goo.gl/…`).
 - Se cambiano **ora o coperti** di una prenotazione già confermata, l'ospite riceve un **avviso di modifica**.
 
 ### 11.2 Promemoria automatico
@@ -346,7 +346,7 @@ Aprire Clienti → controllare il badge "Duplicati" → aprire "Clienti duplicat
 Rivedere i clienti VIP e lo storico visite per impostare iniziative dedicate; monitorare i no-show per definire politiche di conferma o caparra.
 
 **Attivare i messaggi automatici (titolare/manager).**
-Impostazioni → Prenotazioni → «Promemoria all'ospite»: accendere e scegliere quando parte → «Gestione dall'ospite»: accendere e scegliere fino a quante ore prima l'ospite può cambiare o annullare → Impostazioni → Ristorante → Identità e documenti legali: inserire il link Google Maps, per il pulsante «Come raggiungerci».
+Impostazioni → Prenotazioni → «Promemoria all'ospite»: accendere e scegliere quando parte → «Gestione dall'ospite»: accendere e scegliere fino a quante ore prima l'ospite può cambiare o annullare → Impostazioni → Locale → Identità e documenti legali: inserire il link Google Maps, per il pulsante «Come raggiungerci».
 
 **Ospite che vuole spostare la prenotazione via chat (reception).**
 Aprire la prenotazione → passo Comunicazione → «Copia link ospite» → incollarlo nella chat: l'ospite sceglie da solo fra gli orari dove c'è posto, e lo staff riceve l'avviso «Modificata dall'ospite».
@@ -355,7 +355,7 @@ Aprire la prenotazione → passo Comunicazione → «Copia link ospite» → inc
 Arriva l'avviso «Annullata dall'ospite». Se dice «caparra da rimborsare», aprire la prenotazione → passo Pagamenti → rimborso. Sotto le 24 ore dall'arrivo la caparra resta al locale e non c'è niente da fare.
 
 **Capire chi ha spostato una prenotazione o unito i tavoli (titolare/manager).**
-Aprire la prenotazione → passo Cronologia: le righe sono in ordine di tempo, con nome e ora. In alternativa: Impostazioni → Log attività → periodo «Oggi» → cercare il nome del cliente → toccare il nome per la sua cronologia.
+Aprire la prenotazione → passo Cronologia: le righe sono in ordine di tempo, con nome e ora. In alternativa: Impostazioni → Amministrazione → Log attività → periodo «Oggi» → cercare il nome del cliente → toccare il nome per la sua cronologia.
 
 ---
 

@@ -61,6 +61,8 @@
     }
   },
   "prom": {
+    "activeCount_one": "{{count}} acceso",
+    "activeCount_other": "{{count}} accesi",
     "errLoad": "Errore caricamento promemoria",
     "errSave": "Errore salvataggio",
     "errUpdate": "Errore aggiornamento",
@@ -551,6 +553,8 @@
     "capChiudiConSconto": "Sconto del CRM sul conto in cassa"
   },
   "attp": {
+    "activeCount_one": "{{count}} accesa",
+    "activeCount_other": "{{count}} accese",
     "title": "Attività programmate",
     "subtitle": "Compaiono da sole in Attività, al giorno e all'ora stabiliti, e avvisano la squadra.",
     "new": "Nuova",

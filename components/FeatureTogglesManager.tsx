@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Globe, Phone, Loader2, ChevronDown, Users, PauseCircle, Clock, CalendarClock, Plus, Trash2, Percent, MessageSquare, Repeat } from 'lucide-react';
+import { Globe, Phone, Loader2, Users, PauseCircle, Clock, CalendarClock, Plus, Trash2, Percent, MessageSquare, Repeat } from 'lucide-react';
 import { Loader } from './Loader';
 import {
     getFeatureFlags,
@@ -19,6 +19,7 @@ import {
 } from '../services/apiService';
 import { useAuth } from '../contexts/AuthContext';
 import { SHIFT_WINDOWS } from './BookingChannelsBar';
+import { SettingsSummary, settingsCardClass } from './SettingsCard';
 
 const HHMM_RE = /^([01]\d|2[0-3]):[0-5]\d$/;
 const ISO_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
@@ -57,11 +58,9 @@ type FlagKey = keyof FeatureFlags;
 
 interface ChannelMeta {
     key: FlagKey;
-    icon: React.ReactNode;
+    icon: React.ComponentType<{ className?: string }>;
     title: string;
     description: string;
-    onLabel: string;
-    offLabel: string;
     /** Entitlement commerciale che sblocca la sezione: senza, non compare —
      *  un interruttore per un modulo non compreso nel piano è solo confusione. */
     feature: 'voice' | 'whatsapp' | 'web_booking';
@@ -70,20 +69,16 @@ interface ChannelMeta {
 const CHANNELS: ChannelMeta[] = [
     {
         key: 'voice_agent_enabled',
-        icon: <Phone className="w-5 h-5" />,
+        icon: Phone,
         title: 'Agente vocale (ElevenLabs)',
         description: 'Sofia prende le chiamate e gestisce prenotazioni, modifiche e cancellazioni via telefono.',
-        onLabel: 'Attivo',
-        offLabel: 'Sospeso',
         feature: 'voice',
     },
     {
         key: 'public_bookings_enabled',
-        icon: <Globe className="w-5 h-5" />,
+        icon: Globe,
         title: 'Prenotazioni web',
         description: 'Modulo /prenota pubblico raggiungibile da Google e siti esterni.',
-        onLabel: 'Attive',
-        offLabel: 'Sospese',
         feature: 'web_booking',
     },
 ];
@@ -508,8 +503,10 @@ export const FeatureTogglesManager: React.FC<Props> = ({ showToast, only }) => {
     const capsDirty = JSON.stringify(sortCaps(channels.room_occupancy_caps ?? [])) !== JSON.stringify(sortCaps(capsDraft));
     const todayKey = todayISO();
 
+    // «contents»: le card di questo componente sono figlie della griglia di
+    // Impostazioni, non una colonna dentro una sua cella.
     return (
-        <div className="space-y-3">
+        <div className="contents">
             {visibleChannels.length === 0 && !only && (
                 <p className="rounded-[var(--ds-radius)] bg-[var(--ds-surface)] px-4 py-3 text-[14px] text-[var(--ds-text-muted)] shadow-[var(--ds-shadow-card)]">
                     {t('noChannelsInPlan')}
@@ -523,23 +520,15 @@ export const FeatureTogglesManager: React.FC<Props> = ({ showToast, only }) => {
                 return (
                     <details
                         key={meta.key}
-                        className="group bg-[var(--ds-surface)] rounded-[var(--ds-radius)] shadow-[var(--ds-shadow-card)] overflow-hidden"
+                        className={settingsCardClass}
                     >
-                        <summary className="flex items-center justify-between gap-3 px-4 py-3 cursor-pointer select-none list-none [&::-webkit-details-marker]:hidden hover:bg-[var(--ds-surface-row)] transition-colors">
-                            <div className="flex items-center gap-3 min-w-0">
-                                <div className="w-10 h-10 rounded-[var(--ds-radius)] bg-[var(--ds-surface-row)] flex items-center justify-center text-[var(--ds-text-primary)] flex-shrink-0">
-                                    {meta.icon}
-                                </div>
-                                <div className="min-w-0">
-                                    <h4 className="font-medium text-[14px] text-[var(--ds-text-primary)]">{t(`channel.${meta.key}.title`, meta.title)}</h4>
-                                    <p className="text-[12px] text-[var(--ds-text-muted)] truncate">{t(`channel.${meta.key}.description`, meta.description)}</p>
-                                </div>
-                            </div>
-                            <div className="flex items-center gap-2 flex-shrink-0">
-                                <span className={`text-[12px] font-medium ${enabled ? 'text-[var(--ds-seated-text)]' : 'text-[var(--ds-text-subtle)]'}`}>
-                                    {t(`channel.${meta.key}.${enabled ? 'on' : 'off'}`, enabled ? meta.onLabel : meta.offLabel)}
-                                </span>
-                                {/* stopPropagation so clicking the switch doesn't toggle the accordion */}
+                        <SettingsSummary
+                            icon={meta.icon}
+                            tone={enabled ? 'positive' : 'neutral'}
+                            title={t(`channel.${meta.key}.title`, meta.title)}
+                            description={t(`channel.${meta.key}.description`, meta.description)}
+                            trailing={
+                                // stopPropagation so clicking the switch doesn't toggle the accordion
                                 <button
                                     type="button"
                                     role="switch"
@@ -558,9 +547,8 @@ export const FeatureTogglesManager: React.FC<Props> = ({ showToast, only }) => {
                                         } translate-y-0.5`}
                                     />
                                 </button>
-                                <ChevronDown className="w-4 h-4 text-[var(--ds-text-muted)] flex-shrink-0 transition-transform group-open:rotate-180" />
-                            </div>
-                        </summary>
+                            }
+                        />
                         <div className="px-4 pb-4 pt-3 border-t border-[var(--ds-border)] space-y-3">
                             <p className="text-[13px] text-[var(--ds-text-muted)] leading-relaxed">{t(`channel.${meta.key}.description`, meta.description)}</p>
 
@@ -1017,26 +1005,18 @@ export const FeatureTogglesManager: React.FC<Props> = ({ showToast, only }) => {
                 split della pagina Impostazioni la card resta sull'istanza
                 web/Prenotazioni per non comparire due volte. */}
             {only !== 'voice' && (
-            <details className="group bg-[var(--ds-surface)] rounded-[var(--ds-radius)] shadow-[var(--ds-shadow-card)] overflow-hidden">
-                <summary className="flex items-center justify-between gap-3 px-4 py-3 cursor-pointer select-none list-none [&::-webkit-details-marker]:hidden hover:bg-[var(--ds-surface-row)] transition-colors">
-                    <div className="flex items-center gap-3 min-w-0">
-                        <div className="w-10 h-10 rounded-[var(--ds-radius)] bg-[var(--ds-surface-row)] flex items-center justify-center text-[var(--ds-text-primary)] flex-shrink-0">
-                            <Percent className="w-5 h-5" />
-                        </div>
-                        <div className="min-w-0">
-                            <h4 className="font-medium text-[14px] text-[var(--ds-text-primary)]">{t('roomOccupancyCapsTitle')}</h4>
-                            <p className="text-[12px] text-[var(--ds-text-muted)] truncate">
-                                {t('roomOccupancyCapsSubtitle')}
-                            </p>
-                        </div>
-                    </div>
-                    <div className="flex items-center gap-2 flex-shrink-0">
+            <details className={settingsCardClass}>
+                <SettingsSummary
+                    icon={Percent}
+                    tone={capsDraft.length > 0 ? 'positive' : 'neutral'}
+                    title={t('roomOccupancyCapsTitle')}
+                    description={t('roomOccupancyCapsSubtitle')}
+                    trailing={
                         <span className={`text-[12px] font-medium ${capsDraft.length > 0 ? 'text-[var(--ds-seated-text)]' : 'text-[var(--ds-text-subtle)]'}`}>
                             {capsDraft.length > 0 ? t('capsActive', { count: capsDraft.length }) : t('noCaps')}
                         </span>
-                        <ChevronDown className="w-4 h-4 text-[var(--ds-text-muted)] flex-shrink-0 transition-transform group-open:rotate-180" />
-                    </div>
-                </summary>
+                    }
+                />
                 <div className="px-4 pb-4 pt-3 border-t border-[var(--ds-border)] space-y-3">
                     <p className="text-[13px] text-[var(--ds-text-muted)] leading-relaxed">
                         {t('capsExplainer')}

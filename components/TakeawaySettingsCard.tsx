@@ -6,6 +6,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { asportoApiService, TakeawayConfig } from '../services/asportoApiService';
 import { Callout, Field, SegmentedControl, Stepper } from './ds';
 import { sessionTimeZone } from '../utils/displayTime';
+import { SettingsSummary, settingsCardClass } from './SettingsCard';
 
 /* ===========================================================================
    Impostazioni → Asporto.
@@ -76,19 +77,13 @@ export const TakeawaySettingsCard: React.FC<TakeawaySettingsCardProps> = ({ show
   };
 
   return (
-    <details className="group rounded-[var(--ds-radius)] bg-[var(--ds-surface)] shadow-[var(--ds-shadow-card)]">
-      <summary className="flex cursor-pointer list-none items-center gap-3 p-4 [&::-webkit-details-marker]:hidden">
-        <span className="flex h-10 w-10 flex-none items-center justify-center rounded-[var(--ds-radius-sm)] bg-[var(--ds-surface-row)]">
-          <ShoppingBag className="h-5 w-5 text-[var(--ds-text-secondary)]" aria-hidden />
-        </span>
-        <span className="min-w-0 flex-1">
-          <span className="block text-[15px] font-semibold text-[var(--ds-text-primary)]">{t('card.title')}</span>
-          <span className="block truncate text-[13px] text-[var(--ds-text-muted)]">
-            {t('card.subtitle')}
-          </span>
-        </span>
-        {saving && <Loader2 className="h-4 w-4 animate-spin text-[var(--ds-text-muted)]" aria-hidden />}
-      </summary>
+    <details className={settingsCardClass}>
+      <SettingsSummary
+        icon={ShoppingBag}
+        title={t('card.title')}
+        description={t('card.subtitle')}
+        trailing={saving ? <Loader2 className="h-4 w-4 animate-spin text-[var(--ds-text-muted)]" aria-hidden /> : undefined}
+      />
 
       <div className="space-y-4 px-4 pb-4">
         {loadError && (
