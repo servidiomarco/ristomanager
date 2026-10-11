@@ -91,6 +91,9 @@ export interface AgentRunResult {
   /** Azione che l'agente eseguirebbe: nulla parte senza una conferma umana. */
   proposal: AgentProposal | null;
   checks: Array<{ tool: string; args: Record<string, any>; result: any }>;
+  /** Il messaggio non vuole risposta (un grazie, un risponditore automatico):
+   *  il motivo dato dall'agente. Assente su un backend più vecchio. */
+  skipped?: string | null;
   reason: string | null;
   knowledge_count: number;
 }
@@ -120,8 +123,10 @@ export const extractBooking = (phoneDigits: string): Promise<{ booking: Extracte
     method: 'POST', headers: getHeaders(), body: JSON.stringify({ phone_digits: phoneDigits }),
   });
 
-/** Esegue davvero la proposta: è l'unico punto in cui l'agente scrive. */
-export const confirmProposal = (id: number): Promise<{ ok: boolean; tool: string; result: any }> =>
+/** Esegue davvero la proposta: è l'unico punto in cui l'agente scrive.
+ *  `followup_sent`: al cliente è partito il messaggio «Fatto!» (solo dentro
+ *  la finestra di 24 ore di WhatsApp). */
+export const confirmProposal = (id: number): Promise<{ ok: boolean; tool: string; result: any; followup_sent?: boolean }> =>
   apiRequest(`${API_URL}/messages/agent/proposals/${id}/confirm`, { method: 'POST', headers: getHeaders() });
 
 export const discardProposal = (id: number): Promise<{ ok: true }> =>

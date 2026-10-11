@@ -559,6 +559,10 @@ Per i ristoranti con cassa **Passepartout Menù** (modulo dedicato). Tutto si re
 
 **Prenotazioni via WhatsApp**
 - Un messaggio come "15/12 20:00 4 Marco Rossi" (o in linguaggio naturale, interpretato dall'agente AI) diventa una **proposta di prenotazione** che lo staff conferma con un tocco.
+- L'agente **verifica la disponibilità** (anche più orari o zone insieme), conosce le prenotazioni già in agenda di quel numero e il nome del profilo WhatsApp (che propone, senza usarlo finché il cliente non lo conferma), e scrive lui la risposta: dice «fatto» solo per ciò che è stato davvero eseguito, «ti confermo a breve» per ciò che conferma lo staff. Una sola modifica per risposta.
+- **A un «grazie» o a un risponditore automatico non risponde**: lo dice invece di proporre una bozza.
+- **Quando lo staff conferma la proposta, al cliente parte il messaggio «Fatto!»** con giorno, ora e persone (e il link «La tua prenotazione», se attivo), entro la finestra di 24 ore di WhatsApp.
+- Le prenotazioni nate così sono segnate **WhatsApp** (prima risultavano prese a voce); le note aggiunte dall'agente o da Sofia si **aggiungono** a quelle dello staff invece di sostituirle, e una modifica non conferma da sola una richiesta ancora in attesa (per esempio della caparra).
 
 ---
 
@@ -888,6 +892,7 @@ Pagina unica a blocchi, con chip-àncora per saltare alla sezione e una **ricerc
 
 | Data | Sezione | Modifica |
 |---|---|---|
+| 2026-10-11 | Messaggi: WhatsApp e SMS, Agente vocale "Sofia" | **Agente WhatsApp più preciso.** Verifica più orari in una volta, vede le prenotazioni già in agenda del cliente, non risponde ai «grazie» né ai risponditori automatici, e quando confermi una sua proposta al cliente arriva il messaggio «Fatto!» con giorno e ora. Le prenotazioni prese su WhatsApp ora risultano WhatsApp e non voce; le note aggiunte dall'agente o da Sofia si sommano a quelle dello staff invece di cancellarle, e un orario fuori dagli slot del giorno viene rifiutato. |
 | 2026-10-11 | Messaggi: WhatsApp e SMS, Impostazioni | **Impostazioni › WhatsApp.** Una sezione nuova riunisce il canale: da quale numero scrive il locale e se manda, lo stato di ogni template approvato da Meta (in italiano e in inglese), i Messaggi con AI e i consumi del mese, con i messaggi non consegnati e la spesa dell'AI. |
 | 2026-10-11 | Messaggi: WhatsApp e SMS | Una posizione condivisa dal cliente su WhatsApp ora arriva in chat come link a Google Maps, la notifica di un nuovo messaggio mostra il nome del profilo WhatsApp, e un messaggio ripetuto dal provider compare una volta sola. |
 | 2026-10-11 | Piattaforma | WhatsApp e SMS partono dal mittente del ristorante: le credenziali Twilio in env valgono solo per i tenant in `WHATSAPP_ENV_TENANT_IDS` (di serie il Frantoio); gli altri non scrivono più dal numero e coi template del Frantoio. L'esito di consegna torna al ristorante che ha mandato (callback col token). Codice nel nuovo modulo `services/whatsapp/`. |

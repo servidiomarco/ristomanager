@@ -18,7 +18,7 @@ import pool, { createSchema, queryWithRetry, runMigrations, tenantQuery, runWith
 import { SocketService } from './services/socketService.js';
 import { retryOnLockContention } from './utils/lockRetry.js';
 import * as bookingTools from './services/bookingTools.js';
-import * as whatsappAgent from './services/whatsappAgent.js';
+import * as whatsappAgent from './services/whatsapp/agent/index.js';
 import * as tableAssignmentAgent from './services/tableAssignmentAgent.js';
 import * as aiReport from './services/aiReportService.js';
 import { renderPrenota } from './services/prenotaSeo.js';
@@ -49,7 +49,7 @@ import {
     configureWhatsApp, isWhatsAppReady, isSmsReady, getSender, backendBaseUrl,
     sendWhatsAppText, sendTwilioSms, logOutboundMessage, logInboundMessage,
     handleTwilioWhatsAppInbound, validateTwilioSignature, pickTemplate, twilioMediaAuthHeader,
-    createWhatsAppRouter,
+    createWhatsAppRouter, isWindowOpen,
     type OutboundConfirmationResult, type WhatsAppTemplateOpts,
 } from './services/whatsapp/index.js';
 import { AI_KEY_INVALID, AI_KEY_INVALID_MESSAGE, isAiKeyInvalid } from './utils/aiErrors.js';
@@ -14307,7 +14307,7 @@ app.post('/messages/suggest-reply', authenticate, requirePermission('reservation
 // --- Agente WhatsApp: propone, non esegue ----------------------------------
 // Gli strumenti di sola lettura girano davvero; quelli che scrivono diventano
 // una proposta che una persona conferma con un tocco. Vedi
-// services/whatsappAgent.ts per il perche' della divisione.
+// services/whatsapp/agent/run.ts per il perche' della divisione.
 
 const proposalRow = (r: any) => ({
     id: r.id,
@@ -14333,7 +14333,7 @@ app.post('/messages/agent/run', authenticate, requirePermission('reservations:fu
 
         const [msgs, kb, soglia] = await Promise.all([
             queryWithRetry(
-                `SELECT direction, body, from_phone, to_phone
+                `SELECT direction, body, from_phone, to_phone, profile_name
                    FROM outbound_messages
                   WHERE tenant_id = $2
                     AND channel IN ('sms','whatsapp')
@@ -14364,13 +14364,18 @@ app.post('/messages/agent/run', authenticate, requirePermission('reservations:fu
         // Numero in formato utile agli strumenti: quello da cui il cliente scrive.
         const inbound = messages.find((m: any) => m.direction === 'inbound');
         const phone = inbound?.from_phone || `+${key}`;
+        // Il nome del profilo WhatsApp più recente: un suggerimento per il
+        // nome della prenotazione, che l'agente propone e non usa da solo.
+        const profilo = [...messages].reverse().find((m: any) => m.direction === 'inbound' && m.profile_name);
 
         const result = await whatsappAgent.runAgent({
             tenantId: req.tenantId!,
             phoneDigits: key,
             messages: messages as any,
             reservation: resv.rows[0] ?? null,
+            upcomingBookings: await bookingTools.upcomingBookingsForPrompt(req.tenantId!, phone, { withIds: true }),
             customer: await loadCustomerProfileForAi(req.tenantId!, key),
+            profileName: profilo?.profile_name ?? null,
             phone,
             knowledge: kb.rows as any,
             largeGroupThreshold: soglia,
@@ -14393,7 +14398,9 @@ app.post('/messages/agent/run', authenticate, requirePermission('reservations:fu
         }
 
         let proposta: any = null;
-        if (result.proposal) {
+        // Al più una proposta per giro (services/whatsapp/agent/run.ts).
+        const proposal = result.proposals[0] ?? null;
+        if (proposal) {
             // Una proposta per volta e per conversazione: quelle vecchie
             // decadono, altrimenti lo staff si trova due schede in contrasto.
             await queryWithRetry(
@@ -14402,8 +14409,8 @@ app.post('/messages/agent/run', authenticate, requirePermission('reservations:fu
             const ins = await queryWithRetry(
                 `INSERT INTO agent_proposals (tenant_id, phone_digits, tool, args, summary, suggested_reply, reservation_id)
                  VALUES ($7, $1, $2, $3::jsonb, $4, $5, $6) RETURNING *`,
-                [key, result.proposal.tool, JSON.stringify(result.proposal.args),
-                 result.proposal.summary, result.reply, resv.rows[0]?.id ?? null, req.tenantId!]);
+                [key, proposal.tool, JSON.stringify(proposal.args),
+                 proposal.summary, result.reply, resv.rows[0]?.id ?? null, req.tenantId!]);
             proposta = proposalRow(ins.rows[0]);
         }
 
@@ -14411,7 +14418,10 @@ app.post('/messages/agent/run', authenticate, requirePermission('reservations:fu
             reply: result.reply,
             proposal: proposta,
             checks: result.checks,
-            reason: result.reason ?? null,
+            // Il messaggio non vuole risposta (un grazie, un risponditore
+            // automatico): l'Inbox lo dice invece di una bozza vuota.
+            skipped: result.skipped ?? null,
+            reason: result.reason ?? (result.skipped ? 'Il messaggio del cliente non richiede risposta' : null),
             knowledge_count: kb.rows.length,
         });
     } catch (err: any) {
@@ -14498,6 +14508,57 @@ app.post('/messages/agent/extract-booking', authenticate, requirePermission('res
     }
 });
 
+/**
+ * Il messaggio al cliente quando lo staff conferma una proposta dell'agente.
+ *
+ * L'agente aveva scritto «verifico e ti confermo a breve», ma dopo il tocco
+ * dello staff al cliente non arrivava niente: la prenotazione cambiava e lui
+ * non lo sapeva, finché qualcuno non scriveva a mano. Parte solo dentro la
+ * finestra di 24 ore (testo libero) e solo su WhatsApp; fuori finestra lo
+ * staff scrive da sé, come prima. Non lancia mai.
+ */
+async function sendProposalFollowup(tenantId: number, tool: string, args: Record<string, any>, body: Record<string, any>): Promise<boolean> {
+    try {
+        const phone = String(args.phone || '');
+        const reservationId = Number(body?.reservation_id);
+        if (!phone || !Number.isInteger(reservationId)) return false;
+        if (!(await isWhatsAppReady(tenantId)) || !(await isWindowOpen(tenantId, phone))) return false;
+        const r = (await queryWithRetry(
+            `SELECT id, customer_name, reservation_time, guests, language, phone FROM reservations WHERE id = $1 AND tenant_id = $2`,
+            [reservationId, tenantId]
+        )).rows[0];
+        if (!r) return false;
+        const english = isEnglishGuest(resolveGuestLanguage(r));
+        const { dateLabel, timeLabel } = formatBookingDateTime(asUtcInstant(r.reservation_time), (await getTenantLocale(tenantId)).timezone);
+        const persone = english
+            ? `${r.guests} ${Number(r.guests) === 1 ? 'guest' : 'guests'}`
+            : `${r.guests} ${Number(r.guests) === 1 ? 'persona' : 'persone'}`;
+        const manage = tool === 'cancel_reservation' ? null : await guestManageLink(tenantId, r.id);
+        let text: string;
+        if (tool === 'create_reservation') {
+            text = english
+                ? `Done! Your booking is confirmed for ${dateLabel} at ${timeLabel}, ${persone}.`
+                : `Fatto! La prenotazione è confermata per il ${dateLabel} alle ${timeLabel}, ${persone}.`;
+        } else if (tool === 'modify_reservation') {
+            text = english
+                ? `Done: your booking is now on ${dateLabel} at ${timeLabel}, ${persone}.`
+                : `Fatto: la prenotazione ora è il ${dateLabel} alle ${timeLabel}, ${persone}.`;
+        } else if (tool === 'cancel_reservation') {
+            text = english
+                ? `Done: your booking on ${dateLabel} at ${timeLabel} is cancelled. Hope to see you soon!`
+                : `Fatto: la prenotazione del ${dateLabel} alle ${timeLabel} è annullata. A presto!`;
+        } else {
+            return false;
+        }
+        if (manage?.url) text += english ? ` To change it: ${manage.url}` : ` Per cambiarla: ${manage.url}`;
+        await sendWhatsAppText(tenantId, phone, text, r.id, undefined, undefined, 'agent_followup');
+        return true;
+    } catch (err: any) {
+        console.warn('[agent] messaggio dopo la conferma non inviato:', err?.message || err);
+        return false;
+    }
+}
+
 // Esegue la proposta: e' QUI che si scrive sulle prenotazioni, e solo dopo un
 // tocco di una persona. Usa gli stessi strumenti di Sofia col canale WhatsApp.
 app.post('/messages/agent/proposals/:id/confirm', authenticate, requirePermission('reservations:full'), async (req, res) => {
@@ -14556,7 +14617,8 @@ app.post('/messages/agent/proposals/:id/confirm', authenticate, requirePermissio
               WHERE id = $1`,
             [id, riuscito ? 'DONE' : 'FAILED', JSON.stringify(outcome.body), req.user?.userId ?? null]);
 
-        res.status(outcome.serverError ? 500 : 200).json({ ok: riuscito, tool: prop.tool, result: outcome.body });
+        const followupSent = riuscito ? await sendProposalFollowup(req.tenantId!, prop.tool, args, outcome.body) : false;
+        res.status(outcome.serverError ? 500 : 200).json({ ok: riuscito, tool: prop.tool, result: outcome.body, followup_sent: followupSent });
     } catch (err: any) {
         console.error('POST /messages/agent/proposals/:id/confirm error:', err);
         res.status(500).json({ error: 'Internal server error' });
@@ -14595,18 +14657,7 @@ app.post('/messages/send', authenticate, requireFeature('whatsapp'), requirePerm
         if (!key) return res.status(400).json({ error: 'invalid phone' });
 
         if (desiredChannel === 'whatsapp') {
-            const win = await queryWithRetry(
-                `SELECT MAX(sent_at) AS last_inbound_at
-                 FROM outbound_messages
-                 WHERE tenant_id = $2
-                   AND direction = 'inbound' AND channel = 'whatsapp'
-                   AND from_phone_digits = ANY($1::text[])`,
-                [phoneDigitsVariants(key), req.tenantId!]
-            );
-            const lastInbound = win.rows[0]?.last_inbound_at as Date | null;
-            const withinWindow = !!lastInbound
-                && (Date.now() - new Date(lastInbound).getTime()) < 24 * 3600 * 1000;
-            if (!withinWindow) {
+            if (!(await isWindowOpen(req.tenantId!, String(phone)))) {
                 return res.status(409).json({
                     error: 'window_closed',
                     message: 'Fuori dalla finestra 24h WhatsApp: serve un template approvato.',

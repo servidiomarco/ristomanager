@@ -27,7 +27,8 @@
 import { Shift } from '../types.js';
 import { normalizeLanguageCode, detectLanguageFromPhonePrefix } from '../utils/language.js';
 import { spokenFirstName } from '../utils/text.js';
-import type { ActiveReservationByPhone } from './elevenlabsService.js';
+import type { ActiveReservationByPhone, ReservationChannelTag } from './elevenlabsService.js';
+import { VOICE_CHANNEL_TAG, WHATSAPP_CHANNEL_TAG } from './elevenlabsService.js';
 
 // Chi riceve le notifiche di prenotazione (nuova, richiesta, modificata,
 // annullata), da ogni canale: CRM, sito, agente vocale e WhatsApp. Una lista
@@ -67,6 +68,9 @@ export interface ToolChannel {
     sourceTag: string;
     /** Titoli delle push allo staff. */
     pushTitles: { created: string; cancelled: string; modified: string };
+    /** Come il canale firma la prenotazione: fonte, prefisso delle note,
+     *  attore nel log di replica. */
+    tag: ReservationChannelTag;
     /** Aggancio all'audit del canale (per la voce: la riga in voice_calls). */
     linkConversation?: (p: { tenantId: number; conversationId: string; phone: string; reservationId: number }) => void;
 }
@@ -77,6 +81,7 @@ export const VOICE_CHANNEL: ToolChannel = {
     actorEmail: 'voice-agent@elevenlabs',
     actorName: 'Agent vocale',
     sourceTag: 'VOICE',
+    tag: VOICE_CHANNEL_TAG,
     pushTitles: {
         created: 'Nuova prenotazione vocale',
         cancelled: 'Prenotazione cancellata (voce)',
@@ -92,6 +97,7 @@ export const WHATSAPP_CHANNEL: ToolChannel = {
     actorEmail: 'agente-whatsapp@ristomanager',
     actorName: 'Agente WhatsApp',
     sourceTag: 'WHATSAPP',
+    tag: WHATSAPP_CHANNEL_TAG,
     pushTitles: {
         created: 'Nuova prenotazione da WhatsApp',
         cancelled: 'Prenotazione cancellata (WhatsApp)',
@@ -269,7 +275,7 @@ function describeExisting(r: ActiveReservationByPhone, tz: string, english: bool
  * "vorrei modificare la prenotazione" Sofia non passa da check_availability
  * e senza questo elenco chiedeva la data (chiamata di prova del 27/09/2026).
  */
-export async function upcomingBookingsForPrompt(tenantId: number, phone: string): Promise<string> {
+export async function upcomingBookingsForPrompt(tenantId: number, phone: string, opts: { withIds?: boolean } = {}): Promise<string> {
     const d = deps();
     const active = await d.findActiveReservationsByPhone(tenantId, phone, { horizonDays: EXISTING_BOOKING_HORIZON_DAYS });
     if (active.length === 0) return 'nessuna';
@@ -277,7 +283,10 @@ export async function upcomingBookingsForPrompt(tenantId: number, phone: string)
     return active.map(r => {
         const e = describeExisting(r, tz, false);
         const name = d.toTitleCase(r.customer_name || '').trim();
-        return `- ${e.day} alle ${e.time}, ${guestsLabel(e.guests, false)}${name ? `, a nome ${name}` : ''} [date ${e.date}]`;
+        // L'id serve all'agente WhatsApp, che modifica e annulla per id; a
+        // Sofia, che lavora a voce, basta la data.
+        const id = opts.withIds ? `, id ${r.id}` : '';
+        return `- ${e.day} alle ${e.time}, ${guestsLabel(e.guests, false)}${name ? `, a nome ${name}` : ''} [date ${e.date}${id}]`;
     }).join('\n');
 }
 
@@ -817,6 +826,7 @@ export async function createReservation(
             location_preference: locationPreference,
             deposit_required: depositRequired,
             language: detectedLanguage,
+            channelTag: channel.tag,
         });
 
         // Caparra: ordine + riga payment_requests + invio del link. Se il
@@ -1020,12 +1030,21 @@ export interface CancelReservationParams {
     conversation_id?: string;
     /** Card #34 — lingua della chiamata: 'en' accende le frasi inglesi. */
     language?: any;
+    /** La prenotazione esatta da toccare (agente WhatsApp, che l'ha già
+     *  scelta fra quelle del numero). Restringe la ricerca a quell'id. */
+    reservation_id?: any;
 }
 
 /** Il primo valore che contiene almeno una cifra: un telefono senza cifre
  *  (placeholder non sostituito, trascrizione vuota) non identifica nulla. */
 const firstUsablePhone = (...values: any[]): string =>
     values.map((v) => String(v ?? '').trim()).find((v) => /\d/.test(v)) ?? '';
+
+/** L'id di una prenotazione passato da chi chiama, se è un intero valido. */
+const reservationIdOf = (v: any): number | undefined => {
+    const n = Number(v);
+    return Number.isInteger(n) && n > 0 ? n : undefined;
+};
 
 export async function cancelReservation(
     tenantId: number,
@@ -1068,6 +1087,7 @@ export async function cancelReservation(
         const outcome = await d.cancelVoiceReservation(tenantId, {
             phone: phoneRaw, customer_name: customerName,
             date: normalizedDate, time: normalizedTime, conversation_id: conversationId,
+            reservation_id: reservationIdOf(p.reservation_id), channelTag: channel.tag,
         });
 
         if (outcome.status === 'not_found') {
@@ -1278,6 +1298,28 @@ export async function modifyReservation(
         if (Number.isFinite(hh)) newShift = (hh >= 11 && hh < 17) ? Shift.LUNCH : Shift.DINNER;
     }
 
+    // Il nuovo orario sta sulla griglia del giorno, come in creazione: una
+    // modifica alle 20:10 passava, e la prenotazione non tornava più uguale
+    // aprendola dal modulo dello staff. E un giorno riservato resta chiuso
+    // anche a chi sposta lì una prenotazione esistente.
+    if (newTime && newShift) {
+        const targetDate = newDate ?? normalizedDate;
+        const dateBlock = d.findVoiceDateBlock(targetDate, newShift, await d.getVoiceDateBlocks(tenantId));
+        if (dateBlock) return fail('date_blocked', d.buildVoiceDateBlockMessage(targetDate, newShift, dateBlock, english ? 'en' : null));
+        const validSlots = await d.getAvailableSlots(tenantId, targetDate, newShift);
+        if (!validSlots.includes(newTime)) {
+            const near = nearestSlots(newTime, validSlots);
+            const message = english
+                ? (validSlots.length === 0
+                    ? 'That shift is not available on that day. Shall we try another day?'
+                    : `We do not take bookings at ${newTime}: the closest times are ${near.join(' or ')}.`)
+                : (validSlots.length === 0
+                    ? 'Quel turno non è disponibile in quel giorno. Possiamo provare un altro giorno?'
+                    : `Alle ${newTime} non prendiamo prenotazioni: gli orari più vicini sono le ${near.join(' o le ')}.`);
+            return { body: { success: false, error: 'invalid_slot', message, available_slots: validSlots, nearest_slots: near } };
+        }
+    }
+
     try {
         console.log(`${channel.logPrefix} modify-reservation start`, {
             phone_raw: phoneRaw, customer_name: customerName,
@@ -1290,6 +1332,7 @@ export async function modifyReservation(
             date: normalizedDate, time: normalizedTime, conversation_id: conversationId,
             new_date: newDate, new_time: newTime, new_shift: newShift, new_guests: newGuests,
             new_location_preference: newLocation, new_notes: newNotes,
+            reservation_id: reservationIdOf(p.reservation_id), channelTag: channel.tag,
         });
 
         if (outcome.status === 'not_found') {

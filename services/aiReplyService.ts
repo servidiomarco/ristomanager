@@ -54,7 +54,7 @@ export interface AiReplyContext {
      *  «venerdì». A Roma per difetto — un default sbagliato qui fa
      *  prenotare il giorno prima. */
     timezone?: string;
-    /** Politica caparra dalle Impostazioni: vedi la nota in whatsappAgent.ts. */
+    /** Politica caparra dalle Impostazioni: vedi la nota in services/whatsapp/agent/types.ts. */
     depositPolicy?: DepositPolicy;
 }
 

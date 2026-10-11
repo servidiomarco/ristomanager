@@ -20,3 +20,4 @@ export type {
     WhatsAppSender, TwilioSender, OutboundConfirmationResult, WhatsAppTemplateOpts, InboundMessage,
 } from './types.js';
 export { createWhatsAppRouter } from './routes.js';
+export { isWindowOpen, lastInboundAt, WINDOW_MS } from './window.js';
