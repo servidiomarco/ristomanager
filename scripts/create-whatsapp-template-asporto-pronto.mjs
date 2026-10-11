@@ -6,6 +6,11 @@
 // Forma: twilio/text, {{1}} nome, {{2}} numero d'ordine del giorno, {{3}}
 // nome del locale.
 //
+// Meta rifiuta un template che inizia o finisce con una variabile: «{{3}}.»
+// conta come fine, per questo dopo il nome del locale c'è un saluto. La prima
+// versione (takeaway_ready_it/_en, 11/10) è stata rifiutata così, e i nomi
+// rifiutati restano occupati: da qui il suffisso _v2.
+//
 // L'approvazione Meta richiede ore o giorni. Finché la SID non è su Railway
 // (TWILIO_WA_CONTENT_SID_TAKEAWAY_READY[_EN]) l'avviso parte solo dentro la
 // finestra di 24 ore.
@@ -28,16 +33,16 @@ const headers = { Authorization: auth, 'Content-Type': 'application/json' };
 
 const TEMPLATES = [
     {
-        friendlyName: 'takeaway_ready_it',
+        friendlyName: 'takeaway_ready_v2_it',
         envKey: 'TWILIO_WA_CONTENT_SID_TAKEAWAY_READY',
         language: 'it',
-        body: 'Ciao {{1}}! Il tuo ordine d\'asporto n. {{2}} è pronto: ti aspettiamo da {{3}}.',
+        body: 'Ciao {{1}}! Il tuo ordine d\'asporto n. {{2}} è pronto: ti aspettiamo da {{3}}. A presto!',
     },
     {
-        friendlyName: 'takeaway_ready_en',
+        friendlyName: 'takeaway_ready_v2_en',
         envKey: 'TWILIO_WA_CONTENT_SID_TAKEAWAY_READY_EN',
         language: 'en',
-        body: 'Hi {{1}}! Your takeaway order no. {{2}} is ready: see you at {{3}}.',
+        body: 'Hi {{1}}! Your takeaway order no. {{2}} is ready: see you at {{3}}. Thank you!',
     },
 ];
 

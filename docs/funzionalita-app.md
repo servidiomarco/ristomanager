@@ -950,6 +950,7 @@ La **ricerca** sta accanto alle schede (sopra, sul telefono) e resta visibile me
 
 | Data | Sezione | Modifica |
 |---|---|---|
+| 2026-10-11 | Asporto, Impostazioni | Il template WhatsApp «Ordine d'asporto pronto» ha un testo nuovo che finisce con «A presto!» («Thank you!» in inglese): Meta rifiutava la prima versione perché finiva col nome del locale. |
 | 2026-10-11 | Agente vocale "Sofia", Messaggi: WhatsApp e SMS | **«Ora» vuol dire adesso.** A chi chiede un tavolo «per ora» Sofia non risponde più «alle 21:43 non prendiamo prenotazioni»: propone subito il primo orario libero («Posso prenotarle alle 21:45 o alle 22:00»). E per oggi non propone più orari già passati. Vale anche per l'agente WhatsApp. |
 | 2026-10-11 | Prenotazione online | **Prenotazioni web senza nulla da confermare.** Nuovo interruttore «Solo prenotazioni confermabili subito» in Impostazioni › Prenotazioni › Prenotazioni web: dal sito si prenota solo dove un tavolo è libero adesso, la prenotazione si conferma da sola e, dove non c'è posto, al cliente si propongono l'altro turno o un altro giorno. Corretto anche il calendario della pagina /prenota, che non mostrava più i pallini dei giorni liberi, quasi pieni e chiusi. |
 | 2026-10-11 | Messaggi: WhatsApp e SMS, Prenotazioni | **WhatsApp in testata.** Accanto al telefono di Sofia e al globo del web c'è l'icona WhatsApp, quando il numero è collegato: la «a» dice che l'agente prenota da solo, la «m» che le prenotazioni in chat le fa lo staff. Si cambia in Impostazioni › WhatsApp › Agente automatico. |
