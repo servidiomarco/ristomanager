@@ -195,12 +195,13 @@ export interface PhoneSipLinesResponse {
   /** Il server ha dominio SIP e Credential List: senza, niente cordless. */
   configured: boolean;
   domain: string | null;
-  proxy: string | null;
+  /** Dove si registra la base: dominio sull'edge europeo, con la porta. */
+  registrar: string | null;
   lines: PhoneSipLine[];
 }
 
 /** Appena creato: l'unica volta in cui si vede la password. */
-export interface PhoneSipLineCreated { id: number; label: string; username: string; password: string; domain: string; proxy: string }
+export interface PhoneSipLineCreated { id: number; label: string; username: string; password: string; domain: string; registrar: string }
 
 export interface PhoneDevice {
   id: number;
