@@ -12,6 +12,7 @@ import { normalizePhoneE164 } from '../../utils/phone.js';
 import { envTenantIds, getSender, getSmsSender } from './config.js';
 import { statusCallbackUrl } from './callbacks.js';
 import { twilioSendMessage } from './providers/twilio.js';
+import { metaSendMessage } from './providers/meta.js';
 import { isVonageConfigured, sendVonageWhatsApp } from './providers/vonage.js';
 import type { OutboundConfirmationResult, WhatsAppTemplateOpts } from './types.js';
 
@@ -89,6 +90,23 @@ export async function sendWhatsAppText(
     if (isServiceNode) throw new Error('profilo service-node: gli invii esterni partono solo dal cloud');
 
     const sender = await getSender(tenantId);
+    if (sender?.provider === 'meta') {
+        // L'API Cloud di Meta (Fase 12a). I template su Meta arrivano con la
+        // Fase 12b: fino ad allora un template non parte da qui, e chi chiama
+        // ripiega come quando il template non è impostato.
+        if (template) throw new Error('Template WhatsApp non ancora disponibili sul numero Meta del locale');
+        const toE164 = normalizePhoneE164(String(to), (await getTenantLocale(tenantId)).dialCode);
+        console.log(`[Meta] Sending message to ${toE164} from ${sender.from}`);
+        const outcome = await metaSendMessage(sender, { to: toE164, body: text, mediaUrls });
+        if (!outcome.ok) {
+            const message = `Meta API error: ${outcome.error}`;
+            console.error('[Meta] ❌ Error sending message:', outcome.error);
+            await logOutboundMessage({ tenantId, provider: 'meta', channel: 'whatsapp', to, body: text, reservationId, kind, errorMessage: message });
+            throw new Error(message);
+        }
+        await logOutboundMessage({ tenantId, provider: 'meta', channel: 'whatsapp', to, body: text, sid: outcome.sid, reservationId, kind });
+        return { sid: outcome.sid, channel: 'whatsapp' };
+    }
     if (sender) {
         // Twilio vuole "whatsapp:+E164" a entrambi i capi. Un numero locale
         // senza prefisso è del paese del ristorante, non per forza italiano:

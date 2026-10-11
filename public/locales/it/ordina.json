@@ -39,7 +39,8 @@
     "name": "Nome",
     "phone": "Telefono",
     "notes": "Note per la cucina",
-    "notesPlaceholder": "Allergie, citofono, preferenze…"
+    "notesPlaceholder": "Allergie, citofono, preferenze…",
+    "marketing": "Voglio ricevere su WhatsApp offerte e novità del ristorante. Posso smettere quando voglio scrivendo STOP."
   },
   "bar": {
     "none": "Nessun piatto",

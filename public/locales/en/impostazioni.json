@@ -56,7 +56,8 @@
       "haccpManage": "Set up points and limits",
       "inventoryInvoices": "Supplier invoices and purchase prices",
       "foodcostView": "View costs and margins",
-      "foodcostManage": "Edit prices and recipe cards"
+      "foodcostManage": "Edit prices and recipe cards",
+      "campaignsManage": "Create and send WhatsApp campaigns"
     }
   },
   "prom": {
