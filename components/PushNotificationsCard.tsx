@@ -10,6 +10,7 @@ import {
     sendTestPush,
 } from '../services/pushClient';
 import { useToast } from '../contexts/ToastContext';
+import { SettingsIcon, settingsCardClass } from './SettingsCard';
 
 export const PushNotificationsCard: React.FC = () => {
     const { t } = useTranslation('impostazioni', { useSuspense: false });
@@ -69,17 +70,15 @@ export const PushNotificationsCard: React.FC = () => {
     const iosPwaWarning = isIOS && !isStandalone;
 
     return (
-        <section className="mb-6">
-            <h3 className="text-[13px] font-semibold text-[var(--ds-text-muted)] mb-2 px-1">{t('push.section', 'Notifiche')}</h3>
-            <div className="bg-[var(--ds-surface)] rounded-[var(--ds-radius)] shadow-[var(--ds-shadow-card)] p-4">
-                <div className="flex items-center justify-between gap-3">
+        // Una card della griglia di Impostazioni → Profilo, come le vicine:
+        // il titolo «Notifiche» sopra la card stava dentro una cella sola.
+        <div className={`${settingsCardClass} px-4 py-3`}>
+                <div className="flex min-h-[48px] items-center justify-between gap-3">
                     <div className="flex items-center gap-3 min-w-0">
-                        <div className="w-10 h-10 rounded-[var(--ds-radius)] bg-[var(--ds-surface-row)] flex items-center justify-center flex-shrink-0">
-                            {enabled ? <Bell className="w-5 h-5 text-[var(--ds-text-primary)]" /> : <BellOff className="w-5 h-5 text-[var(--ds-text-primary)]" />}
-                        </div>
+                        <SettingsIcon icon={enabled ? Bell : BellOff} tone={enabled ? 'positive' : 'neutral'} />
                         <div className="min-w-0">
-                            <h4 className="font-medium text-[14px] text-[var(--ds-text-primary)]">{t('push.title', 'Notifiche push')}</h4>
-                            <p className="text-[13px] text-[var(--ds-text-muted)]">
+                            <h4 className="font-semibold text-[14px] text-[var(--ds-text-primary)]">{t('push.title', 'Notifiche push')}</h4>
+                            <p className="text-[13px] leading-snug text-[var(--ds-text-muted)]">
                                 {t('push.subtitle', 'Ricevi avvisi su questo dispositivo per nuove prenotazioni e todo assegnati.')}
                             </p>
                         </div>
@@ -129,7 +128,6 @@ export const PushNotificationsCard: React.FC = () => {
                         </button>
                     </div>
                 )}
-            </div>
-        </section>
+        </div>
     );
 };

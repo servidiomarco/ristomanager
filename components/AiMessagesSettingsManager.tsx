@@ -1,12 +1,13 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Wand2, Loader2, Plus, Trash2, ChevronDown, Pencil, Check, X } from 'lucide-react';
+import { Wand2, Loader2, Plus, Trash2, Pencil, Check, X } from 'lucide-react';
 import { getFeatureFlags, updateFeatureFlags, FeatureFlags } from '../services/apiService';
 import {
     listKnowledge, createKnowledge, updateKnowledge, deleteKnowledge,
     type KnowledgeEntry,
 } from '../services/aiMessagesApiService';
 import { useAuth } from '../contexts/AuthContext';
+import { SettingsSummary, settingsCardClass } from './SettingsCard';
 
 /* ── Messaggi con AI ──────────────────────────────────────────────────────
    Due cose in un posto solo: l'interruttore e le regole della casa da cui il
@@ -105,23 +106,13 @@ export const AiMessagesSettingsManager: React.FC<Props> = ({ showToast }) => {
     }
 
     return (
-        <details className="group bg-[var(--ds-surface)] rounded-[var(--ds-radius)] shadow-[var(--ds-shadow-card)] overflow-hidden">
-            <summary className="flex items-center justify-between gap-3 px-4 py-3 cursor-pointer select-none list-none [&::-webkit-details-marker]:hidden hover:bg-[var(--ds-surface-row)] transition-colors">
-                <div className="flex items-center gap-3 min-w-0">
-                    <div className="w-10 h-10 rounded-[var(--ds-radius)] bg-[var(--ds-surface-row)] flex items-center justify-center text-[var(--ds-arriving-text)] flex-shrink-0">
-                        <Wand2 className="w-5 h-5" />
-                    </div>
-                    <div className="min-w-0">
-                        <h4 className="font-medium text-[14px] text-[var(--ds-text-primary)]">{t('ai.title', 'Messaggi con AI')}</h4>
-                        <p className="text-[13px] text-[var(--ds-text-muted)] truncate">
-                            {t('ai.subtitle', 'Risposte suggerite ai clienti, basate sulle regole che scrivi tu.')}
-                        </p>
-                    </div>
-                </div>
-                <div className="flex items-center gap-2 flex-shrink-0">
-                    <span className={`text-[12px] font-medium ${enabled ? 'text-[var(--ds-seated-text)]' : 'text-[var(--ds-text-subtle)]'}`}>
-                        {enabled ? t('ai.on', 'Attivo') : t('ai.off', 'Disattivato')}
-                    </span>
+        <details className={settingsCardClass}>
+            <SettingsSummary
+                icon={Wand2}
+                tone="ai"
+                title={t('ai.title', 'Messaggi con AI')}
+                description={t('ai.subtitle', 'Risposte suggerite ai clienti, basate sulle regole che scrivi tu.')}
+                trailing={
                     <button
                         type="button" role="switch" aria-checked={enabled}
                         aria-label={t('ai.toggleAria', '{{azione}} messaggi con AI', { azione: enabled ? t('ai.switchOff', 'Disattiva') : t('ai.switchOn', 'Attiva') })}
@@ -134,9 +125,8 @@ export const AiMessagesSettingsManager: React.FC<Props> = ({ showToast }) => {
                         <span aria-hidden="true"
                               className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition-transform ${enabled ? 'translate-x-5' : 'translate-x-0.5'} translate-y-0.5`} />
                     </button>
-                    <ChevronDown className="w-4 h-4 text-[var(--ds-text-muted)] flex-shrink-0 transition-transform group-open:rotate-180" />
-                </div>
-            </summary>
+                }
+            />
 
             <div className="border-t border-[var(--ds-border)] px-4 py-4 space-y-5">
                 <div className="rounded-[var(--ds-radius)] bg-[var(--ds-surface-row)] border border-[var(--ds-border)] px-3 py-2.5 text-[13px] leading-relaxed text-[var(--ds-text-muted)]">

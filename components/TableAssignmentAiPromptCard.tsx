@@ -1,9 +1,10 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Wand2, Save, Loader2, ChevronDown } from 'lucide-react';
+import { Wand2, Save, Loader2 } from 'lucide-react';
 import { Loader } from './Loader';
 import { getTableAssignmentAiPrompt, updateTableAssignmentAiPrompt } from '../services/apiService';
 import { useAuth } from '../contexts/AuthContext';
+import { SettingsSummary, settingsCardClass } from './SettingsCard';
 
 interface Props {
   showToast: (msg: string, kind?: 'success' | 'error' | 'info') => void;
@@ -58,20 +59,14 @@ export const TableAssignmentAiPromptCard: React.FC<Props> = ({ showToast }) => {
   };
 
   return (
-    <details className="group bg-[var(--ds-surface)] rounded-[var(--ds-radius)] shadow-[var(--ds-shadow-card)] overflow-hidden"
+    <details className={settingsCardClass}
       open={expanded} onToggle={e => setExpanded((e.target as HTMLDetailsElement).open)}>
-      <summary className="flex items-center justify-between gap-3 px-4 py-3 cursor-pointer select-none list-none [&::-webkit-details-marker]:hidden hover:bg-[var(--ds-surface-row)] transition-colors">
-        <div className="flex items-center gap-3 min-w-0">
-          <div className="w-10 h-10 rounded-[var(--ds-radius)] bg-[var(--ds-surface-row)] flex items-center justify-center text-[var(--ds-text-primary)] flex-shrink-0">
-            <Wand2 className="w-5 h-5" />
-          </div>
-          <div className="min-w-0">
-            <h4 className="font-medium text-[14px] text-[var(--ds-text-primary)]">Prompt logica tavoli per AI</h4>
-            <p className="text-[13px] text-[var(--ds-text-muted)]">Istruzioni su come assegnare o unire i tavoli: alimentano il suggerimento AI per le prenotazioni senza tavolo dal sito, WhatsApp e Sofia.</p>
-          </div>
-        </div>
-        <ChevronDown className="w-5 h-5 text-[var(--ds-text-muted)] flex-shrink-0 transition-transform group-open:rotate-180" />
-      </summary>
+      <SettingsSummary
+        icon={Wand2}
+        tone="ai"
+        title="Prompt logica tavoli per AI"
+        description="Istruzioni su come assegnare o unire i tavoli: alimentano il suggerimento AI per le prenotazioni senza tavolo dal sito, WhatsApp e Sofia."
+      />
 
       <div className="px-4 pb-4 pt-1 border-t border-[var(--ds-border)]">
         {loading ? (

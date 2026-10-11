@@ -61,6 +61,8 @@
     }
   },
   "prom": {
+    "activeCount_one": "{{count}} on",
+    "activeCount_other": "{{count}} on",
     "errLoad": "Could not load the reminders",
     "errSave": "Could not save",
     "errUpdate": "Could not update",
@@ -551,6 +553,8 @@
     "capChiudiConSconto": "The CRM's discount on the till's bill"
   },
   "attp": {
+    "activeCount_one": "{{count}} on",
+    "activeCount_other": "{{count}} on",
     "title": "Scheduled tasks",
     "subtitle": "They appear in Tasks on their own, on the set day and time, and notify the team.",
     "new": "New",

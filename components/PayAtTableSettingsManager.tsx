@@ -1,9 +1,10 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Receipt, Loader2, Clock, ShieldCheck, ChevronDown } from 'lucide-react';
+import { Receipt, Loader2, Clock, ShieldCheck } from 'lucide-react';
 import { getFeatureFlags, updateFeatureFlags, FeatureFlags } from '../services/apiService';
 import { useAuth } from '../contexts/AuthContext';
 import { PaymentProviderPicker } from './PaymentProviderPicker';
+import { SettingsSummary, settingsCardClass } from './SettingsCard';
 
 interface Props {
     showToast: (msg: string, kind?: 'success' | 'error' | 'info') => void;
@@ -65,22 +66,14 @@ export const PayAtTableSettingsManager: React.FC<Props> = ({ showToast }) => {
     const enabled = flags.pay_at_table_enabled;
 
     return (
-        <details className="group bg-[var(--ds-surface)] rounded-[var(--ds-radius)] shadow-[var(--ds-shadow-card)] overflow-hidden">
-            <summary className="flex items-center justify-between gap-3 px-4 py-3 cursor-pointer select-none list-none [&::-webkit-details-marker]:hidden hover:bg-[var(--ds-surface-row)] transition-colors">
-                <div className="flex items-center gap-3 min-w-0">
-                    <div className="w-10 h-10 rounded-[var(--ds-radius)] bg-[var(--ds-surface-row)] flex items-center justify-center text-[var(--ds-arriving-text)] flex-shrink-0">
-                        <Receipt className="w-5 h-5" />
-                    </div>
-                    <div className="min-w-0">
-                        <h4 className="font-medium text-[14px] text-[var(--ds-text-primary)]">Conto al tavolo</h4>
-                        <p className="text-[13px] text-[var(--ds-text-muted)] truncate">Pay-at-table + split bill via Revolut hosted checkout.</p>
-                    </div>
-                </div>
-                <div className="flex items-center gap-2 flex-shrink-0">
-                    <span className={`text-[12px] font-medium ${enabled ? 'text-[var(--ds-seated-text)]' : 'text-[var(--ds-text-subtle)]'}`}>
-                        {enabled ? t('pat.on', 'Attivo') : t('pat.off', 'Disattivato')}
-                    </span>
-                    {/* stopPropagation so clicking the switch doesn't toggle the accordion */}
+        <details className={settingsCardClass}>
+            <SettingsSummary
+                icon={Receipt}
+                tone={enabled ? 'positive' : 'neutral'}
+                title="Conto al tavolo"
+                description="Pay-at-table + split bill via Revolut hosted checkout."
+                trailing={
+                    // stopPropagation so clicking the switch doesn't toggle the accordion
                     <button
                         type="button"
                         role="switch"
@@ -99,9 +92,8 @@ export const PayAtTableSettingsManager: React.FC<Props> = ({ showToast }) => {
                             } translate-y-0.5`}
                         />
                     </button>
-                    <ChevronDown className="w-4 h-4 text-[var(--ds-text-muted)] flex-shrink-0 transition-transform group-open:rotate-180" />
-                </div>
-            </summary>
+                }
+            />
             <div className="px-4 pb-4 pt-3 border-t border-[var(--ds-border)] space-y-3">
                 <p className="text-[13px] text-[var(--ds-text-muted)] leading-relaxed">
                     Il cameriere apre un conto per la prenotazione e genera un QR effimero. Gli ospiti lo scansionano e pagano la propria quota via hosted checkout del provider scelto — split equo o importo libero. Quando la somma raggiunge il totale, il conto diventa <em>SETTLED</em>; se il cameriere chiude con un delta viene stampato un <em>SETTLED_PARTIAL</em> con l'ammanco per audit.
