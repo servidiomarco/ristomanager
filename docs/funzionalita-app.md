@@ -268,7 +268,7 @@ Il colpo d'occhio del "adesso", sempre sulla giornata corrente.
 
 - Riquadri live: **In arrivo, In sala, In uscita, Tavoli liberi** (contati come sulla mappa: unioni e tavoli nascosti inclusi).
 - KPI di giornata: prenotazioni, ospiti, tavoli, banchetti, divisi Pranzo / Cena / Giornata; indicatore di affluenza da Calmo a Sold out.
-- **Da confermare**: le richieste in sospeso si confermano o rifiutano direttamente da qui (con blocco se la caparra non è stata pagata, forzabile).
+- **Da confermare**: le richieste in sospeso si confermano o rifiutano direttamente da qui (con blocco se la caparra non è stata pagata, forzabile). Ogni richiesta dice da dove arriva: Web (pagina di prenotazione), WhatsApp, Sofia o telefono.
 - Attività di oggi, lista della spesa e **prodotti sotto scorta** con azioni rapide e collegamenti alle sezioni.
 - **Chi è in turno oggi** (sala, cucina, reception).
 - **Report AI di andamento**: una lettura in italiano dell'andamento degli ultimi 30 giorni, generata su richiesta.
@@ -937,6 +937,8 @@ Pagina unica a blocchi, con chip-àncora per saltare alla sezione e una **ricerc
 
 | Data | Sezione | Modifica |
 |---|---|---|
+| 2026-10-11 | Dashboard | Nelle richieste da confermare, quelle arrivate dalla pagina di prenotazione si chiamano «Web», non più «Google»: arrivano dal sito o dal link del locale, non da Google. |
+| 2026-10-11 | Prenotazione online (Piattaforma) | Il CRM riconosce la fonte `WEB` accanto alla storica `GOOGLE`: stesse regole di blacklist e canali di risposta, stessa icona e stesso filtro «Web» in Prenotazioni, un solo canale in Reportistica. Il form pubblico scrive ancora `GOOGLE` (costante `PUBLIC_BOOKING_SOURCE`): passerà a `WEB` quando questo rilascio è in produzione. |
 | 2026-10-11 | Messaggi: WhatsApp e SMS, Impostazioni | **Il tuo numero WhatsApp su Meta.** In Impostazioni › WhatsApp › Numero e stato colleghi il numero del locale dall'API Cloud di Meta: i messaggi dei clienti arrivano in Messaggi, staff e agente rispondono da quel numero, e quello che scrivi dall'app WhatsApp Business compare in chat come tuo. Qualità del numero e limite d'invio sono nella card. |
 | 2026-10-11 | Messaggi: WhatsApp e SMS, Clienti, Impostazioni | **Campagne WhatsApp.** Da Messaggi › Campagne mandi una promozione ai clienti che hanno dato il consenso, scegliendo chi (non tornano da un po', clienti fedeli, VIP, lingua) e vedendo prima quanti sono e quanto costa. Chi scrive STOP non riceve più niente; su /prenota e /ordina c'è la casella facoltativa per le promozioni. Regole e tetto di spesa in Impostazioni › WhatsApp › Campagne. |
 | 2026-10-11 | Asporto, Messaggi: WhatsApp e SMS, Impostazioni | **Ordini d'asporto su WhatsApp e «il tuo ordine è pronto».** Con l'add-on Asporto, in Impostazioni › WhatsApp › Asporto in chat l'agente prende gli ordini in chat con le regole del banco (capienza, stop, tempi di preparazione) e, se vuoi, il cliente riceve un WhatsApp quando l'ordine è pronto. |
