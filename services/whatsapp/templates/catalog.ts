@@ -35,6 +35,9 @@ export const TEMPLATE_CATALOG: readonly TemplateDef[] = [
     { key: 'BOOKING_CONFIRMED_LINK_MAPS', label: 'Confermata, con «Gestisci» e «Come raggiungerci»', category: 'UTILITY', group: 'prenotazioni', languages: ['it', 'en'] },
     { key: 'BOOKING_REMINDER', label: 'Promemoria', category: 'UTILITY', group: 'prenotazioni', languages: ['it', 'en'] },
     { key: 'BOOKING_REMINDER_LINK', label: 'Promemoria, con «Gestisci»', category: 'UTILITY', group: 'prenotazioni', languages: ['it', 'en'] },
+    // Tasti di risposta rapida (scripts/create-whatsapp-template-promemoria-tasti.mjs):
+    // si usa solo con l'interruttore «Promemoria con tasti» acceso.
+    { key: 'BOOKING_REMINDER_QR', label: 'Promemoria con i tasti «Ci saremo», «Devo modificare», «Annulla»', category: 'UTILITY', group: 'prenotazioni', languages: ['it', 'en'] },
     { key: 'BOOKING_UPDATED', label: 'Prenotazione modificata', category: 'UTILITY', group: 'prenotazioni', languages: ['it', 'en'] },
     { key: 'BOOKING_DECLINED', label: 'Prenotazione non accettata', category: 'UTILITY', group: 'prenotazioni', languages: ['it', 'en'] },
     { key: 'BOOKING_DEPOSIT_REQUEST', label: 'Richiesta di caparra (Revolut)', category: 'UTILITY', group: 'caparre', languages: ['it'] },

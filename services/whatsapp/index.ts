@@ -21,3 +21,6 @@ export type {
 } from './types.js';
 export { createWhatsAppRouter } from './routes.js';
 export { isWindowOpen, lastInboundAt, WINDOW_MS } from './window.js';
+export { configureReservationButtons, type ReservationButtonDeps } from './buttons.js';
+export { publicWhatsAppLink, waMeUrl } from './entry.js';
+export { getRemindersPolicy } from './settings.js';

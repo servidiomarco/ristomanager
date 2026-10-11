@@ -50,7 +50,7 @@ import {
     configureWhatsApp, isWhatsAppReady, isSmsReady, getSender, backendBaseUrl,
     sendWhatsAppText, sendTwilioSms, logOutboundMessage, logInboundMessage,
     handleTwilioWhatsAppInbound, validateTwilioSignature, pickTemplate, twilioMediaAuthHeader,
-    createWhatsAppRouter, isWindowOpen,
+    createWhatsAppRouter, isWindowOpen, configureReservationButtons, publicWhatsAppLink, getRemindersPolicy,
     type OutboundConfirmationResult, type WhatsAppTemplateOpts,
 } from './services/whatsapp/index.js';
 import { AI_KEY_INVALID, AI_KEY_INVALID_MESSAGE, isAiKeyInvalid } from './utils/aiErrors.js';
@@ -4428,8 +4428,11 @@ app.post('/reservations/:id/send-reminder', authenticate, requirePermission('res
             buildReminderMessage(resv.customer_name, resv.reservation_time, resv.guests, resv.room_name, resolveGuestLanguage(resv), { timezone: fusoMsg, manage }, businessIdentity(req.tenantId!)),
             id,
             {
-                whatsappTemplate: buildBookingReminderTemplate(req.tenantId!, resv.customer_name, resv.reservation_time, resv.guests, resolveGuestLanguage(resv), { timezone: fusoMsg, manage }),
+                whatsappTemplate: (await buildBookingReminderQrTemplate(req.tenantId!, resv.customer_name, resv.reservation_time, resv.guests, resolveGuestLanguage(resv), (await publicBusinessIdentity(req.tenantId!)).name, { timezone: fusoMsg, manage }))
+                    ?? buildBookingReminderTemplate(req.tenantId!, resv.customer_name, resv.reservation_time, resv.guests, resolveGuestLanguage(resv), { timezone: fusoMsg, manage }),
                 recordConfirmation: false,
+                // Come lo sweep: un promemoria, non un messaggio scritto a mano.
+                kind: 'reminder',
             }
         );
 
@@ -8796,6 +8799,8 @@ async function buildPublicMenu(tenantId: number): Promise<Record<string, unknown
         categorie_ordine: categorieOrdine,
         // La valuta del ristorante: la pagina scrive i prezzi con Intl.
         currency: (await getTenantLocale(tenantId)).currency,
+        // «Scrivici su WhatsApp» in fondo al menu, se il locale l'ha acceso.
+        whatsapp: await publicWhatsAppLink(tenantId, 'menu').catch(() => null),
         piatti: rows.map((d: any) => ({
             name: d.name,
             description: d.description || null,
@@ -19264,7 +19269,8 @@ const startBookingReminderScheduler = () => {
                         email,
                         reservationId: row.id,
                         smsText: buildReminderMessage(row.customer_name, row.reservation_time, row.guests, row.room_name, language, msgOpts, identity),
-                        whatsappTemplate: buildBookingReminderTemplate(tenantId, row.customer_name, row.reservation_time, row.guests, language, msgOpts),
+                        whatsappTemplate: (await buildBookingReminderQrTemplate(tenantId, row.customer_name, row.reservation_time, row.guests, language, identity.name, msgOpts))
+                            ?? buildBookingReminderTemplate(tenantId, row.customer_name, row.reservation_time, row.guests, language, msgOpts),
                         buildEmail: () => buildBookingReminderEmail({
                             customerName: row.customer_name,
                             reservationTime: row.reservation_time,
@@ -27951,6 +27957,38 @@ function buildBookingReminderTemplate(
         contentVariables: bookingTemplateVariables(picked, customerName, guests, dateLabel, timeLabel),
     };
 }
+// Il promemoria coi tasti «Ci saremo», «Devo modificare», «Annulla»
+// (scripts/create-whatsapp-template-promemoria-tasti.mjs): {{1}}–{{4}} come
+// gli altri, {{5}} il nome del locale. Solo con l'interruttore acceso in
+// Impostazioni › WhatsApp e solo se c'è nella lingua del promemoria di
+// sempre: un ospite inglese non riceve i tasti in italiano. I tasti li
+// gestisce services/whatsapp/buttons.ts.
+async function buildBookingReminderQrTemplate(
+    tenantId: number,
+    customerName: string | null | undefined,
+    reservationTime: string | Date,
+    guests: number | null | undefined,
+    language: string | null | undefined,
+    businessName: string,
+    opts?: MsgOpts
+): Promise<WhatsAppTemplateOpts | undefined> {
+    if (!(await getRemindersPolicy(tenantId)).quick_replies) return undefined;
+    const qr = pickWhatsAppTemplateSid(tenantId, 'TWILIO_WA_CONTENT_SID_BOOKING_REMINDER_QR', language);
+    if (!qr) return undefined;
+    const plain = pickWhatsAppTemplateSid(tenantId, 'TWILIO_WA_CONTENT_SID_BOOKING_REMINDER', language);
+    if (plain && plain.english !== qr.english) return undefined;
+    const { dateLabel, timeLabel } = formatBookingDateTime(asUtcInstant(reservationTime), msgTz(opts));
+    return {
+        contentSid: qr.contentSid,
+        contentVariables: {
+            '1': templateName(customerName),
+            '2': templateGuestsLabel(guests, qr.english),
+            '3': dateLabel,
+            '4': timeLabel,
+            '5': businessName || '—',
+        },
+    };
+}
 function buildBookingUpdatedTemplate(
     tenantId: number,
     customerName: string | null | undefined,
@@ -33681,6 +33719,11 @@ const GUEST_RESERVATION_SQL = `
       ) dep ON true
      WHERE r.guest_token = $1`;
 
+// La stessa riga per id, per chi ha già la prenotazione (i tasti del
+// promemoria WhatsApp): gira nel contesto del tenant.
+const loadGuestReservationById = async (tenantId: number, id: number): Promise<any | null> =>
+    (await queryWithRetry(GUEST_RESERVATION_SQL.replace('WHERE r.guest_token = $1', 'WHERE r.id = $1 AND r.tenant_id = $2'), [id, tenantId])).rows[0] ?? null;
+
 const loadGuestReservation = async (token: string): Promise<any | null> => {
     if (!token || token.length < GUEST_TOKEN_MIN_LENGTH) return null;
     const rs = await queryWithRetry(GUEST_RESERVATION_SQL, [token]);
@@ -33772,9 +33815,13 @@ async function guestWrite(
     tenantId: number,
     reservationId: number,
     check: (actions: ReturnType<typeof guestActionsFor>, fresh: any) => string | null,
-    apply: (tx: any) => Promise<any>
+    apply: (tx: any) => Promise<any>,
+    // I tasti del promemoria WhatsApp: li ha accesi il locale, valgono anche
+    // con la pagina «La tua prenotazione» spenta (la soglia resta la sua).
+    opts: { forceEnabled?: boolean } = {}
 ): Promise<GuestWriteOutcome> {
-    const policy = await getGuestManagePolicy(tenantId);
+    const stored = await getGuestManagePolicy(tenantId);
+    const policy = opts.forceEnabled ? { ...stored, enabled: true } : stored;
     return runWithOutboxTx(async (tx) => {
         const cur = await tx.query(
             `SELECT id, reservation_time, reservation_status, arrival_status, guest_confirmed_at,
@@ -33841,15 +33888,17 @@ app.post('/r/:token/confirm', guestPageLimiter, guestActionLimiter, async (req, 
 // come l'annullo dallo staff (PUT /reservations/:id). La caparra non si
 // tocca qui: con almeno 24 ore d'anticipo l'avviso chiede allo staff di
 // rimborsarla dal pulsante che già esiste; sotto, resta al locale.
-// rls-bypass: pagina a token senza JWT; la scrittura gira nel contesto del tenant della prenotazione
-app.post('/r/:token/cancel', guestPageLimiter, guestActionLimiter, async (req, res) => runAsPlatform(async () => {
-    try {
-        const found = await loadGuestReservation(String(req.params.token || ''));
-        if (!found) return res.status(404).json({ error: 'Not found' });
-        const tenantId = Number(found.tenant_id);
-        const id = Number(found.id);
-        if (found.reservation_status === 'CANCELLED') return res.json(await guestReservationView(found));
-        const outcome = await runWithTenantContext(tenantId, () => guestWrite(
+type GuestCancelVia = 'guest_link' | 'whatsapp_button';
+
+/**
+ * L'annullo dell'ospite: dalla pagina «La tua prenotazione» e dal tasto
+ * «Annulla» del promemoria WhatsApp (services/whatsapp/buttons.ts). Stesse
+ * regole, stessa campanella allo staff con la sorte della caparra.
+ */
+async function cancelReservationAsGuest(found: any, via: GuestCancelVia, opts: { forceEnabled?: boolean } = {}): Promise<GuestWriteOutcome> {
+    const tenantId = Number(found.tenant_id);
+    const id = Number(found.id);
+    const outcome = await runWithTenantContext(tenantId, () => guestWrite(
             tenantId, id,
             (actions) => actions.can_cancel ? null : (actions.cancel_block ?? 'not_allowed'),
             async (tx) => (await tx.query(
@@ -33860,41 +33909,55 @@ app.post('/r/:token/cancel', guestPageLimiter, guestActionLimiter, async (req, r
                   WHERE id = $1 AND tenant_id = $2
                   RETURNING id, customer_name, guests, reservation_time, reservation_status`,
                 [id, tenantId]
-            )).rows[0]
+            )).rows[0],
+            opts
         ));
+    if (outcome.ok === false) return outcome;
+    outboxKick();
+    await broadcastReservationsUpdatedByIds([id]);
+    await runWithTenantContext(tenantId, async () => {
+        // Le campanelle che chiedevano qualcosa per questa prenotazione
+        // (richiesta da confermare, ospite VIP in arrivo) non servono più.
+        await markSharedNotificationsRead(tenantId, [`pending-${id}`, vipReservationTag(id)]);
+        const tz = (await getTenantLocale(tenantId)).timezone;
+        const label = reservationPushLabel(asUtcInstant(outcome.row.reservation_time), tz);
+        const depositCents = guestDepositPaidCents(found);
+        const currency = (await getTenantLocale(tenantId)).currency;
+        const depositNote = depositCents > 0
+            ? (depositOutcomeOnCancel(new Date(), new Date(outcome.row.reservation_time)) === 'refund'
+                ? ` · caparra ${formatMoneyMinor(depositCents, currency)} da rimborsare`
+                : ` · caparra ${formatMoneyMinor(depositCents, currency)} trattenuta (meno di 24 ore)`)
+            : '';
+        pushSendToRoles(
+            tenantId,
+            bookingTools.RESERVATION_PUSH_ROLES,
+            {
+                category: 'reservation',
+                title: via === 'whatsapp_button' ? "Annullata dall'ospite su WhatsApp" : "Annullata dall'ospite",
+                body: `${toTitleCase(outcome.row.customer_name)} · ${outcome.row.guests} ospiti · ${label}${depositNote}`,
+                url: `/?view=RESERVATIONS&reservationId=${id}`,
+                tag: `reservation-${id}`,
+            }
+        ).catch(err => console.error('Push (guest cancellation) failed:', err));
+    });
+    LogService.logActivity(
+        tenantId, null,
+        via === 'whatsapp_button' ? 'ospite@whatsapp' : 'ospite@link',
+        via === 'whatsapp_button' ? 'Ospite (WhatsApp)' : 'Ospite (link)',
+        ActivityAction.UPDATE, ResourceType.RESERVATION, id, toTitleCase(found.customer_name),
+        { source: via === 'whatsapp_button' ? 'WHATSAPP' : 'GUEST_LINK', reservation_status: 'CANCELLED', cancelled_via: via }
+    );
+    return outcome;
+}
+
+// rls-bypass: pagina a token senza JWT; la scrittura gira nel contesto del tenant della prenotazione
+app.post('/r/:token/cancel', guestPageLimiter, guestActionLimiter, async (req, res) => runAsPlatform(async () => {
+    try {
+        const found = await loadGuestReservation(String(req.params.token || ''));
+        if (!found) return res.status(404).json({ error: 'Not found' });
+        if (found.reservation_status === 'CANCELLED') return res.json(await guestReservationView(found));
+        const outcome = await cancelReservationAsGuest(found, 'guest_link');
         if (outcome.ok === false) return res.status(outcome.status).json({ error: outcome.error });
-        outboxKick();
-        await broadcastReservationsUpdatedByIds([id]);
-        await runWithTenantContext(tenantId, async () => {
-            // Le campanelle che chiedevano qualcosa per questa prenotazione
-            // (richiesta da confermare, ospite VIP in arrivo) non servono più.
-            await markSharedNotificationsRead(tenantId, [`pending-${id}`, vipReservationTag(id)]);
-            const tz = (await getTenantLocale(tenantId)).timezone;
-            const label = reservationPushLabel(asUtcInstant(outcome.row.reservation_time), tz);
-            const depositCents = guestDepositPaidCents(found);
-            const currency = (await getTenantLocale(tenantId)).currency;
-            const depositNote = depositCents > 0
-                ? (depositOutcomeOnCancel(new Date(), new Date(outcome.row.reservation_time)) === 'refund'
-                    ? ` · caparra ${formatMoneyMinor(depositCents, currency)} da rimborsare`
-                    : ` · caparra ${formatMoneyMinor(depositCents, currency)} trattenuta (meno di 24 ore)`)
-                : '';
-            pushSendToRoles(
-                tenantId,
-                bookingTools.RESERVATION_PUSH_ROLES,
-                {
-                    category: 'reservation',
-                    title: "Annullata dall'ospite",
-                    body: `${toTitleCase(outcome.row.customer_name)} · ${outcome.row.guests} ospiti · ${label}${depositNote}`,
-                    url: `/?view=RESERVATIONS&reservationId=${id}`,
-                    tag: `reservation-${id}`,
-                }
-            ).catch(err => console.error('Push (guest cancellation) failed:', err));
-        });
-        LogService.logActivity(
-            tenantId, null, 'ospite@link', 'Ospite (link)',
-            ActivityAction.UPDATE, ResourceType.RESERVATION, id, toTitleCase(found.customer_name),
-            { source: 'GUEST_LINK', reservation_status: 'CANCELLED', cancelled_via: 'guest_link' }
-        );
         const updated = await loadGuestReservation(String(req.params.token));
         res.json(await guestReservationView(updated ?? found));
     } catch (err) {
@@ -37440,6 +37503,9 @@ const handlePublicContact = async (tenantId: number, _req: express.Request, res:
             logo_dark_url: identity.logoDarkUrl || null,
         },
         voice_agent_id: (process.env.ELEVENLABS_AGENT_ID || '').trim(),
+        // «Farsi trovare»: la pillola WhatsApp, se il locale l'ha accesa per
+        // questa pagina e ha un numero collegato.
+        whatsapp: await publicWhatsAppLink(tenantId, 'booking').catch(() => null),
     });
 };
 
@@ -45776,6 +45842,25 @@ whatsappAgent.configureAgentQueue({
         const r = (await queryWithRetry(`SELECT language, phone FROM reservations WHERE id = $1 AND tenant_id = $2`, [reservationId, tenantId])).rows[0];
         return r && isEnglishGuest(resolveGuestLanguage(r)) ? `To change it: ${manage.url}` : `Per cambiarla: ${manage.url}`;
     },
+});
+
+// I tasti del promemoria WhatsApp (services/whatsapp/buttons.ts): l'annullo
+// è quello della pagina dell'ospite, il link e il telefono del locale stanno
+// qui, e «Devo modificare» va all'agente se lavora da solo.
+configureReservationButtons({
+    cancelAsGuest: async (tenantId, reservationId) => {
+        const found = await loadGuestReservationById(tenantId, reservationId);
+        if (!found) return { ok: false, error: 'not_found' };
+        if (found.reservation_status === 'CANCELLED') return { ok: true };
+        const out = await cancelReservationAsGuest(found, 'whatsapp_button', { forceEnabled: true });
+        return out.ok === true ? { ok: true } : { ok: false, error: out.error };
+    },
+    manageLink: async (tenantId, reservationId) => (await guestManageLink(tenantId, reservationId))?.url ?? null,
+    businessPhone: async tenantId => (await publicBusinessIdentity(tenantId)).phone || null,
+    agentHandles: async tenantId =>
+        (await whatsappAgent.getAgentPolicy(tenantId)).mode !== 'off'
+        && (await getFeatureFlag(tenantId, 'ai_messages_enabled', false))
+        && (await isFeatureEnabledForTenant(tenantId, 'whatsapp')),
 });
 
 // Quello che l'ospite dice della sua prenotazione (ritardo, note, allergie,

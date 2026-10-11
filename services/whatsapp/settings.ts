@@ -132,3 +132,90 @@ export async function saveAgentPolicy(tenantId: number, policy: WhatsAppAgentPol
         [tenantId, SETTINGS_KEY, JSON.stringify(policy)]
     );
 }
+
+// ---------------------------------------------------------------------------
+// Promemoria con tasti e «Farsi trovare»
+// ---------------------------------------------------------------------------
+
+/** Il promemoria della prenotazione con i tasti «Ci saremo / Devo
+ *  modificare / Annulla» (template BOOKING_REMINDER_QR) invece del link.
+ *  Quando parte resta deciso in Prenotazioni › Promemoria. */
+export interface WhatsAppRemindersPolicy {
+    quick_replies: boolean;
+}
+export const DEFAULT_REMINDERS_POLICY: WhatsAppRemindersPolicy = { quick_replies: false };
+
+/** Dove il locale mostra il suo WhatsApp ai clienti. */
+export interface WhatsAppEntryPolicy {
+    /** Pillola «WhatsApp» sulla pagina /prenota. */
+    show_on_booking_page: boolean;
+    /** «Scrivici su WhatsApp» in fondo al menu digitale. */
+    show_on_menu: boolean;
+    /** Il testo che il cliente trova già scritto aprendo la chat; vuoto = quello di serie. */
+    prefill_text: string;
+}
+export const DEFAULT_ENTRY_POLICY: WhatsAppEntryPolicy = { show_on_booking_page: false, show_on_menu: false, prefill_text: '' };
+export const ENTRY_PREFILL_MAX = 200;
+
+const REMINDERS_KEY = 'whatsapp_reminders_policy';
+const ENTRY_KEY = 'whatsapp_entry_policy';
+
+const isPlainObject = (v: unknown): v is Record<string, unknown> => !!v && typeof v === 'object' && !Array.isArray(v);
+
+export function normalizeRemindersPolicy(raw: unknown, base: WhatsAppRemindersPolicy = DEFAULT_REMINDERS_POLICY): WhatsAppRemindersPolicy | null {
+    if (!isPlainObject(raw)) return null;
+    const out = { ...base };
+    if (raw.quick_replies !== undefined) {
+        if (typeof raw.quick_replies !== 'boolean') return null;
+        out.quick_replies = raw.quick_replies;
+    }
+    return out;
+}
+
+export function normalizeEntryPolicy(raw: unknown, base: WhatsAppEntryPolicy = DEFAULT_ENTRY_POLICY): WhatsAppEntryPolicy | null {
+    if (!isPlainObject(raw)) return null;
+    const out = { ...base };
+    for (const k of ['show_on_booking_page', 'show_on_menu'] as const) {
+        if (raw[k] === undefined) continue;
+        if (typeof raw[k] !== 'boolean') return null;
+        out[k] = raw[k] as boolean;
+    }
+    if (raw.prefill_text !== undefined) {
+        if (typeof raw.prefill_text !== 'string') return null;
+        const text = raw.prefill_text.replace(/\s+/g, ' ').trim();
+        if (text.length > ENTRY_PREFILL_MAX) return null;
+        out.prefill_text = text;
+    }
+    return out;
+}
+
+async function readJson<T>(tenantId: number, key: string, normalize: (raw: unknown) => T | null, fallback: T): Promise<T> {
+    try {
+        const res = await queryWithRetry('SELECT text_value FROM app_settings WHERE tenant_id = $1 AND key = $2', [tenantId, key]);
+        const raw = res.rows[0]?.text_value;
+        if (typeof raw === 'string' && raw.trim()) {
+            const normalized = normalize(JSON.parse(raw));
+            if (normalized) return normalized;
+        }
+    } catch (err: any) {
+        console.error(`[whatsapp] lettura ${key} fallita:`, err?.message || err);
+    }
+    return { ...fallback };
+}
+
+async function writeJson(tenantId: number, key: string, value: unknown): Promise<void> {
+    await queryWithRetry(
+        `INSERT INTO app_settings (tenant_id, key, text_value, updated_at)
+         VALUES ($1, $2, $3, CURRENT_TIMESTAMP)
+         ON CONFLICT (tenant_id, key) DO UPDATE
+           SET text_value = EXCLUDED.text_value, updated_at = CURRENT_TIMESTAMP`,
+        [tenantId, key, JSON.stringify(value)]
+    );
+}
+
+export const getRemindersPolicy = (tenantId: number) =>
+    readJson(tenantId, REMINDERS_KEY, r => normalizeRemindersPolicy(r), DEFAULT_REMINDERS_POLICY);
+export const saveRemindersPolicy = (tenantId: number, p: WhatsAppRemindersPolicy) => writeJson(tenantId, REMINDERS_KEY, p);
+export const getEntryPolicy = (tenantId: number) =>
+    readJson(tenantId, ENTRY_KEY, r => normalizeEntryPolicy(r), DEFAULT_ENTRY_POLICY);
+export const saveEntryPolicy = (tenantId: number, p: WhatsAppEntryPolicy) => writeJson(tenantId, ENTRY_KEY, p);

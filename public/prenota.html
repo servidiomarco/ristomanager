@@ -1157,6 +1157,12 @@ a { color: var(--ds-pending-text); }
         addPill('tel:' + contact.voice.phone, contact.voice.display || contact.voice.phone,
             '<path d="M3 5a2 2 0 012-2h2.3a2 2 0 011.9 1.5l.7 2.8a2 2 0 01-.4 1.8l-1.3 1.3a16 16 0 006.4 6.4l1.3-1.3a2 2 0 011.8-.4l2.8.7a2 2 0 011.5 1.9V20a2 2 0 01-2 2h-1C9.7 22 2 14.3 2 5V4a1 1 0 011-1z"/>', false);
     }
+    // WhatsApp, se il locale l'ha acceso in Impostazioni › WhatsApp › Farsi
+    // trovare: apre la chat col testo già scritto.
+    if (contact?.whatsapp?.url) {
+        addPill(contact.whatsapp.url, 'WhatsApp',
+            '<path d="M21 11.5a8.4 8.4 0 01-12.5 7.4L3 21l2.1-5.4A8.5 8.5 0 1121 11.5z"/>', true);
+    }
     // "Dove siamo" quando l'indirizzo non è ancora scritto in Impostazioni:
     // il link alla mappa è la cosa che serve davvero, l'etichetta può aspettare.
     if (branding.maps_url) {

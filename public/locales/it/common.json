@@ -162,7 +162,11 @@
     "waUsage": "Consumi del mese",
     "waUsageHint": "Messaggi ricevuti e inviati, spesa dell'AI",
     "waAgent": "Agente automatico",
-    "waAgentHint": "Bozze, risposte o azioni da solo sui messaggi in arrivo"
+    "waAgentHint": "Bozze, risposte o azioni da solo sui messaggi in arrivo",
+    "waReminders": "Promemoria con tasti",
+    "waRemindersHint": "«Ci saremo», «Devo modificare», «Annulla» nel promemoria",
+    "waEntry": "Farsi trovare",
+    "waEntryHint": "Link e QR del tuo WhatsApp, su /prenota e nel menu"
   },
   "aria": {
     "openMenu": "Apri menu",

@@ -101,5 +101,32 @@
     "confirmCancel": "Chiedi conferma prima di annullare",
     "autoRules": "Quello che è spento lo propone. Sempre allo staff: caparre, banchetti, gruppi numerosi, cambi di sala e prenotazioni troppo vicine.",
     "simAction": "Farebbe da solo"
+  },
+  "reminders": {
+    "toggle": "Promemoria con i tasti",
+    "hint": "Il promemoria arriva con «Ci saremo», «Devo modificare» e «Annulla». «Annulla» chiede conferma e rispetta la soglia d'anticipo di «La tua prenotazione». Quando parte lo decidi in Prenotazioni › Promemoria.",
+    "template": "Template",
+    "templateReady": "attivo",
+    "templateMissing": "in attesa: finché non è attivo parte il promemoria di sempre",
+    "loadError": "Impostazioni non disponibili",
+    "saveError": "Non salvato"
+  },
+  "entry": {
+    "noNumber": "Collega prima un numero WhatsApp: il link porta a quello.",
+    "copied": "Copiato",
+    "copyFailed": "Non copiato: selezionalo a mano",
+    "saved": "Salvato",
+    "saveError": "Non salvato",
+    "loadError": "Impostazioni non disponibili",
+    "google": "Google Business: link per le prenotazioni",
+    "instagram": "Instagram: bio",
+    "instagramText": "Prenota su WhatsApp 👉 {{link}}",
+    "downloadQr": "Scarica il QR",
+    "prefill": "Testo già scritto",
+    "copy": "Copia",
+    "onBooking": "Mostra su /prenota",
+    "onMenu": "Mostra nel menu digitale",
+    "save": "Salva",
+    "readyTexts": "Testi pronti"
   }
 }

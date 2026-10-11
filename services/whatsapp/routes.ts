@@ -13,7 +13,11 @@ import { templateStatus } from './templates/status.js';
 import { whatsappUsage } from './usage.js';
 import { queryWithRetry } from '../../db.js';
 import { phoneDigitsVariants, phoneMatchKey } from '../../utils/text.js';
-import { getAgentPolicy, normalizeAgentPolicy, saveAgentPolicy } from './settings.js';
+import {
+    getAgentPolicy, normalizeAgentPolicy, saveAgentPolicy,
+    getRemindersPolicy, normalizeRemindersPolicy, saveRemindersPolicy,
+    getEntryPolicy, normalizeEntryPolicy, saveEntryPolicy,
+} from './settings.js';
 import { simulateRun } from './agent/queue.js';
 import { undoAutoAction, UNDOABLE_TOOLS } from './agent/autonomy.js';
 import { whatsappDeps } from './deps.js';
@@ -83,9 +87,14 @@ export function createWhatsAppRouter(): express.Router {
 
     // ── L'agente che parte da solo ──────────────────────────────────────
 
+    const allSettings = async (tenantId: number) => {
+        const [agent, reminders, entry] = await Promise.all([getAgentPolicy(tenantId), getRemindersPolicy(tenantId), getEntryPolicy(tenantId)]);
+        return { agent, reminders, entry };
+    };
+
     router.get('/settings', ...read, async (req, res) => {
         try {
-            res.json({ agent: await getAgentPolicy(req.tenantId!) });
+            res.json(await allSettings(req.tenantId!));
         } catch (err: any) {
             console.error('GET /whatsapp/settings error:', err);
             res.status(500).json({ error: 'Errore nel leggere le impostazioni' });
@@ -94,11 +103,20 @@ export function createWhatsAppRouter(): express.Router {
 
     router.put('/settings', authenticate, requirePermission('settings:full'), requireWhatsApp, async (req, res) => {
         try {
-            const current = await getAgentPolicy(req.tenantId!);
-            const next = normalizeAgentPolicy(req.body?.agent ?? {}, current);
-            if (!next) return res.status(400).json({ error: 'invalid_policy', message: 'Valori fuori dai limiti' });
-            await saveAgentPolicy(req.tenantId!, next);
-            res.json({ agent: next });
+            // Ogni sezione si salva solo se c'è: la card dell'agente non
+            // tocca i promemoria, e viceversa. Prima si valida tutto.
+            const tenantId = req.tenantId!;
+            const body = req.body ?? {};
+            const agent = body.agent !== undefined ? normalizeAgentPolicy(body.agent, await getAgentPolicy(tenantId)) : undefined;
+            const reminders = body.reminders !== undefined ? normalizeRemindersPolicy(body.reminders, await getRemindersPolicy(tenantId)) : undefined;
+            const entry = body.entry !== undefined ? normalizeEntryPolicy(body.entry, await getEntryPolicy(tenantId)) : undefined;
+            if (agent === null || reminders === null || entry === null) {
+                return res.status(400).json({ error: 'invalid_policy', message: 'Valori fuori dai limiti' });
+            }
+            if (agent) await saveAgentPolicy(tenantId, agent);
+            if (reminders) await saveRemindersPolicy(tenantId, reminders);
+            if (entry) await saveEntryPolicy(tenantId, entry);
+            res.json(await allSettings(tenantId));
         } catch (err: any) {
             console.error('PUT /whatsapp/settings error:', err);
             res.status(500).json({ error: 'Errore nel salvare le impostazioni' });

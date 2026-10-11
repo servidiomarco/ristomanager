@@ -101,5 +101,32 @@
     "confirmCancel": "Ask for confirmation before cancelling",
     "autoRules": "What is off, it proposes. Always left to staff: deposits, banquets, large groups, room changes and bookings too close.",
     "simAction": "Would do on its own"
+  },
+  "reminders": {
+    "toggle": "Reminder with buttons",
+    "hint": "The reminder comes with \"We'll be there\", \"I need to change\" and \"Cancel\". \"Cancel\" asks for confirmation and respects the notice period of \"Your booking\". When it is sent is set in Bookings › Reminders.",
+    "template": "Template",
+    "templateReady": "active",
+    "templateMissing": "pending: until it is active the usual reminder is sent",
+    "loadError": "Settings unavailable",
+    "saveError": "Not saved"
+  },
+  "entry": {
+    "noNumber": "Connect a WhatsApp number first: the link points to it.",
+    "copied": "Copied",
+    "copyFailed": "Not copied: select it by hand",
+    "saved": "Saved",
+    "saveError": "Not saved",
+    "loadError": "Settings unavailable",
+    "google": "Google Business: booking link",
+    "instagram": "Instagram: bio",
+    "instagramText": "Book on WhatsApp 👉 {{link}}",
+    "downloadQr": "Download QR",
+    "prefill": "Pre-filled text",
+    "copy": "Copy",
+    "onBooking": "Show on /prenota",
+    "onMenu": "Show in the digital menu",
+    "save": "Save",
+    "readyTexts": "Ready-made texts"
   }
 }

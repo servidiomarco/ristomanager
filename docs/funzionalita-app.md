@@ -566,6 +566,14 @@ Per i ristoranti con cassa **Passepartout Menù** (modulo dedicato). Tutto si re
 - Ogni azione fatta da sola arriva allo staff come notifica («Prenotata/Modificata/Annullata dall'agente WhatsApp») e compare nella chat con il tasto **«Annulla»**, che rimette la prenotazione com'era (il tavolo di prima, o uno equivalente se il suo è stato preso). Se nel frattempo qualcuno l'ha cambiata, «Annulla» non la tocca e lo dice. Con «La tua prenotazione» accesa, la risposta dopo una prenotazione o una modifica porta il link per gestirla.
 - **Prova l'agente**: nelle Impostazioni un cliente di prova scrive all'agente e si legge cosa risponderebbe e cosa farebbe da solo, senza mandare niente e senza toccare prenotazioni.
 
+**Promemoria con tasti** (Impostazioni › WhatsApp › Promemoria con tasti, spento di serie)
+- Il promemoria WhatsApp arriva con tre tasti: **«Ci saremo»** segna la conferma dell'ospite e lo ringrazia; **«Devo modificare»** passa la conversazione all'agente se lavora da solo, altrimenti manda il link «La tua prenotazione» (o dice che risponde una persona); **«Annulla»** chiede «Confermi?» e al «sì» annulla con le stesse regole della pagina dell'ospite (sotto la soglia d'anticipo dice di chiamare). Funziona anche con l'AI spenta.
+- Serve il template a tasti approvato da Meta: finché non è attivo parte il promemoria di sempre. Quando parte il promemoria resta deciso in Prenotazioni › Promemoria.
+
+**Farsi trovare** (Impostazioni › WhatsApp › Farsi trovare)
+- Il link wa.me del locale con un testo già scritto (di serie «Ciao! Vorrei prenotare un tavolo.»), il suo QR da scaricare e stampare, e i testi pronti per Google Business e la bio di Instagram.
+- Due interruttori: la pillola «WhatsApp» sulla pagina /prenota e «Scrivici su WhatsApp» in fondo al menu digitale.
+
 **Prenotazioni via WhatsApp**
 - Un messaggio come "15/12 20:00 4 Marco Rossi" (o in linguaggio naturale, interpretato dall'agente AI) diventa una **proposta di prenotazione** che lo staff conferma con un tocco (in modalità «Azioni» l'agente la registra da solo, se c'è posto).
 - L'agente **verifica la disponibilità** (anche più orari o zone insieme), conosce le prenotazioni già in agenda di quel numero e il nome del profilo WhatsApp (che propone, senza usarlo finché il cliente non lo conferma), e scrive lui la risposta: dice «fatto» solo per ciò che è stato davvero eseguito, «ti confermo a breve» per ciò che conferma lo staff. Una sola modifica per risposta.
@@ -911,6 +919,7 @@ Pagina unica a blocchi, con chip-àncora per saltare alla sezione e una **ricerc
 
 | Data | Sezione | Modifica |
 |---|---|---|
+| 2026-10-11 | Messaggi: WhatsApp e SMS, Impostazioni | **Promemoria WhatsApp con i tasti e «Farsi trovare».** Il promemoria può arrivare con «Ci saremo», «Devo modificare» e «Annulla»: il cliente risponde con un tocco, anche con l'AI spenta («Annulla» chiede conferma). In Impostazioni › WhatsApp › Farsi trovare trovi il link e il QR del tuo WhatsApp, i testi per Google e Instagram, e puoi mostrarlo su /prenota e nel menu digitale. |
 | 2026-10-11 | Messaggi: WhatsApp e SMS, Impostazioni | **L'agente WhatsApp può anche prenotare, spostare e annullare da solo.** Nuova modalità «Azioni» in Impostazioni › WhatsApp › Agente automatico: dove le regole lo permettono fa da sé, altrimenti propone allo staff (caparre, banchetti, gruppi numerosi, cambi di sala, prenotazioni troppo vicine). Prima di annullare chiede conferma al cliente. Ogni azione arriva come notifica e in chat ha il tasto «Annulla». |
 | 2026-10-11 | Messaggi: WhatsApp e SMS, Impostazioni | **L'agente WhatsApp lavora da solo, se vuoi.** In Impostazioni › WhatsApp › Agente automatico si sceglie «Bozze» (prepara la risposta a ogni messaggio) o «Risposte» (risponde da solo; le modifiche alle prenotazioni restano da confermare). Aspetta che il cliente finisca di scrivere, tace se scrive lo staff, ai «grazie» e ai risponditori automatici; in ogni conversazione si mette in pausa. «Prova l'agente» simula un cliente senza mandare niente. |
 | 2026-10-11 | Messaggi: WhatsApp e SMS, Prenotazioni, Reception | **Ritardi, note e allergie da WhatsApp.** «Arriviamo con 15 minuti di ritardo» diventa l'ora d'arrivo sulla card e in Reception, con la notifica; «ci saremo» conferma l'ospite; una richiesta o un piatto da preparare si aggiunge alle note (e al conteggio della cucina); le allergie, dopo il consenso del cliente, diventano le pillole Allergie/Intolleranze. Le note aggiunte da WhatsApp o da Sofia stanno in coda, separate come quelle del modulo. |

@@ -162,7 +162,11 @@
     "waUsage": "This month's usage",
     "waUsageHint": "Messages received and sent, AI spend",
     "waAgent": "Automatic agent",
-    "waAgentHint": "Drafts, replies or actions on its own for incoming messages"
+    "waAgentHint": "Drafts, replies or actions on its own for incoming messages",
+    "waReminders": "Reminder with buttons",
+    "waRemindersHint": "\"We'll be there\", \"I need to change\", \"Cancel\" in the reminder",
+    "waEntry": "Get found",
+    "waEntryHint": "Your WhatsApp link and QR, on /prenota and in the menu"
   },
   "aria": {
     "openMenu": "Open menu",

@@ -170,3 +170,37 @@ export const simulateAgent = (text: string, mode: Exclude<AgentMode, 'off'>): Pr
 
 export const resetAgentSimulation = (): Promise<{ ok: boolean }> =>
   apiRequest(`${API_URL}/whatsapp/agent/simulate`, { method: 'POST', headers: getHeaders(), body: JSON.stringify({ reset: true }) });
+
+// ── Promemoria con tasti e «Farsi trovare» ─────────────────────────────
+
+export interface RemindersPolicy {
+  quick_replies: boolean;
+}
+
+export interface EntryPolicy {
+  show_on_booking_page: boolean;
+  show_on_menu: boolean;
+  prefill_text: string;
+}
+
+export interface WhatsAppSettings {
+  agent: AgentPolicy;
+  /** Assenti su un backend precedente alla Fase 8. */
+  reminders?: RemindersPolicy;
+  entry?: EntryPolicy;
+}
+
+export const getWhatsAppSettings = (): Promise<WhatsAppSettings> =>
+  apiRequest(`${API_URL}/whatsapp/settings`, { headers: getHeaders() });
+
+export const saveWhatsAppSettings = (patch: { reminders?: Partial<RemindersPolicy>; entry?: Partial<EntryPolicy> }): Promise<WhatsAppSettings> =>
+  apiRequest(`${API_URL}/whatsapp/settings`, { method: 'PUT', headers: getHeaders(), body: JSON.stringify(patch) });
+
+/** Il testo che il cliente trova già scritto, se il locale non ne sceglie uno. */
+export const DEFAULT_WA_PREFILL = 'Ciao! Vorrei prenotare un tavolo.';
+
+export const waMeUrl = (phoneE164: string, text?: string | null): string => {
+  const digits = phoneE164.replace(/\D/g, '');
+  const t = (text ?? '').trim();
+  return `https://wa.me/${digits}${t ? `?text=${encodeURIComponent(t)}` : ''}`;
+};
