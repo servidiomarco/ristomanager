@@ -268,7 +268,7 @@ Il colpo d'occhio del "adesso", sempre sulla giornata corrente.
 
 - Riquadri live: **In arrivo, In sala, In uscita, Tavoli liberi** (contati come sulla mappa: unioni e tavoli nascosti inclusi).
 - KPI di giornata: prenotazioni, ospiti, tavoli, banchetti, divisi Pranzo / Cena / Giornata; indicatore di affluenza da Calmo a Sold out.
-- **Da confermare**: le richieste in sospeso si confermano o rifiutano direttamente da qui (con blocco se la caparra non è stata pagata, forzabile).
+- **Da confermare**: le richieste in sospeso si confermano o rifiutano direttamente da qui (con blocco se la caparra non è stata pagata, forzabile). Ogni richiesta dice da dove arriva: Web (pagina di prenotazione), WhatsApp, Sofia o telefono.
 - Attività di oggi, lista della spesa e **prodotti sotto scorta** con azioni rapide e collegamenti alle sezioni.
 - **Chi è in turno oggi** (sala, cucina, reception).
 - **Report AI di andamento**: una lettura in italiano dell'andamento degli ultimi 30 giorni, generata su richiesta.
@@ -887,6 +887,8 @@ Pagina unica a blocchi, con chip-àncora per saltare alla sezione e una **ricerc
 
 | Data | Sezione | Modifica |
 |---|---|---|
+| 2026-10-11 | Dashboard | Nelle richieste da confermare, quelle arrivate dalla pagina di prenotazione si chiamano «Web», non più «Google»: arrivano dal sito o dal link del locale, non da Google. |
+| 2026-10-11 | Prenotazione online (Piattaforma) | Il CRM riconosce la fonte `WEB` accanto alla storica `GOOGLE`: stesse regole di blacklist e canali di risposta, stessa icona e stesso filtro «Web» in Prenotazioni, un solo canale in Reportistica. Il form pubblico scrive ancora `GOOGLE` (costante `PUBLIC_BOOKING_SOURCE`): passerà a `WEB` quando questo rilascio è in produzione. |
 | 2026-10-11 | Agente vocale "Sofia" | **Se il cliente chiede per oggi, Sofia continua a dire «oggi».** Orari non disponibili, sala al completo, riepilogo e conferma usano «oggi» (o «domani») invece di «quel giorno» o della data per esteso. |
 | 2026-10-11 | Agente vocale "Sofia" | **La card della telefonata si vede di più.** Bordo più spesso e luminoso, con un alone che si nota anche di lato; nome più grande; colore dello stato anche su icona e riga di stato (oro squilla, verde col locale, viola Sofia) e cornetta che vibra mentre squilla. La chiamata che squilla sta in cima e resta in vista anche sopra i pannelli aperti. |
 | 2026-10-11 | Agente vocale "Sofia" | Nella card della telefonata il bordo gira finché la chiamata è in corso: viola mentre parla Sofia, oro mentre squilla, verde mentre si parla col locale. Così si vede subito se la linea è occupata. |
