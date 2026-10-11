@@ -22944,9 +22944,51 @@ app.delete('/suppliers/:id', authenticate, async (req, res) => {
 // STAFF MANAGEMENT ROUTES
 // ============================================
 
+// Ferie e assenze degli altri: le vede chi ha staff:leave (di default
+// titolare e general manager). Agli altri il server non le manda proprio —
+// nascondere solo in pagina lascerebbe il motivo di una malattia leggibile
+// a chiunque apra gli strumenti del browser. La sessione col PIN di sala
+// non lo ha: è fuori dai permessi di servizio.
+async function canSeeAllLeave(req: express.Request): Promise<boolean> {
+    if (!req.user) return false;
+    if (isPlatformScopedSession(req.user)) return true;
+    if (req.user.scope === 'service') return false;
+    return RolePermissionService.hasPermission(req.user.tenantId, req.user.role, 'staff:leave');
+}
+
+// La scheda collegata all'account di chi chiede: le proprie assenze si
+// vedono sempre col loro motivo, come in «Le mie ferie».
+async function myStaffId(tenantId: number, userId: number | undefined): Promise<string | null> {
+    if (!userId) return null;
+    const r = await queryWithRetry('SELECT id FROM staff_members WHERE tenant_id = $1 AND user_id = $2', [tenantId, userId]);
+    return r.rows[0]?.id ?? null;
+}
+
+// Un'assenza vista da chi non ha staff:leave: il riposo resta com'è (è il
+// piano dei turni, non un fatto personale), ferie, malattia e permesso
+// diventano «ASSENZA» senza note. Così la griglia dei turni sa che la
+// persona non c'è, ma non perché.
+const TIME_OFF_MASKED_TYPE = 'ASSENZA';
+const timeOffRowJson = (row: any, reveal: boolean) => {
+    const masked = !reveal && row.type !== 'RIPOSO';
+    return {
+        id: row.id,
+        staffId: row.staff_id,
+        startDate: row.start_date,
+        endDate: row.end_date,
+        type: masked ? TIME_OFF_MASKED_TYPE : row.type,
+        shift: row.shift,
+        notes: masked ? null : row.notes,
+        approved: row.approved,
+        createdAt: row.created_at
+    };
+};
+
 // La forma JSON di una scheda, unica per lista, dettaglio, creazione e
 // modifica. annual_leave_days è NUMERIC: pg lo restituisce come stringa.
-const staffRowJson = (row: any) => ({
+// I giorni di ferie l'anno sono dati di ferie: senza staff:leave arrivano
+// null (e il PUT li ignora, così chi non li vede non li cancella).
+const staffRowJson = (row: any, showLeave = true) => ({
     id: row.id,
     name: row.name,
     surname: row.surname,
@@ -22963,7 +23005,7 @@ const staffRowJson = (row: any) => ({
     createdAt: row.created_at,
     updatedAt: row.updated_at,
     userId: row.user_id ?? null,
-    annualLeaveDays: row.annual_leave_days != null ? Number(row.annual_leave_days) : null
+    annualLeaveDays: showLeave && row.annual_leave_days != null ? Number(row.annual_leave_days) : null
 });
 
 // Il collegamento scheda ↔ account è ciò che apre «Le mie ferie» al
@@ -23022,9 +23064,9 @@ app.get('/staff', authenticate, async (req, res) => {
 
         query += ' ORDER BY surname, name';
 
-        const result = await queryWithRetry(query, params);
+        const [result, showLeave] = await Promise.all([queryWithRetry(query, params), canSeeAllLeave(req)]);
 
-        const staff = result.rows.map(staffRowJson);
+        const staff = result.rows.map(row => staffRowJson(row, showLeave));
 
         res.json(staff);
     } catch (err) {
@@ -23036,12 +23078,14 @@ app.get('/staff', authenticate, async (req, res) => {
 // Create staff member
 app.post('/staff', authenticate, requirePermission('staff:full'), async (req, res) => {
     try {
-        const { name, surname, category, staffType, phone, email, role, hireDate, contractEndDate, weeklyRestDay, notes, userId, annualLeaveDays } = req.body;
+        const { name, surname, category, staffType, phone, email, role, hireDate, contractEndDate, weeklyRestDay, notes, userId } = req.body;
 
         if (!name || !surname || !category || !staffType) {
             return res.status(400).json({ error: 'Name, surname, category, and staffType are required' });
         }
 
+        const showLeave = await canSeeAllLeave(req);
+        const annualLeaveDays = showLeave ? req.body.annualLeaveDays : undefined;
         const leaveDays = annualLeaveDays === undefined ? { ok: true as const, value: null } : parseAnnualLeaveDays(annualLeaveDays);
         if (!leaveDays.ok) return res.status(400).json({ error: 'invalid_annual_leave_days' });
         const link = userId === undefined ? { ok: true as const, value: null } : await checkLinkableUser(req.tenantId!, userId, null);
@@ -23063,11 +23107,12 @@ app.post('/staff', authenticate, requirePermission('staff:full'), async (req, re
         );
 
         const row = result.rows[0];
-        const staffMember = staffRowJson(row);
+        const staffMember = staffRowJson(row, showLeave);
 
-        // Broadcast to all connected clients
+        // Broadcast to all connected clients — senza i giorni di ferie: la
+        // stanza del tenant la ascoltano anche i ruoli che non li vedono.
         const socketId = req.headers['x-socket-id'] as string;
-        if (socketService) socketService.broadcastToAll(req.tenantId!, 'staff:created', staffMember, socketId);
+        if (socketService) socketService.broadcastToAll(req.tenantId!, 'staff:created', staffRowJson(row, false), socketId);
 
         res.status(201).json(staffMember);
     } catch (err) {
@@ -23499,19 +23544,13 @@ app.get('/staff/time-off', authenticate, async (req, res) => {
 
         query += ' ORDER BY start_date DESC';
 
-        const result = await queryWithRetry(query, params);
+        const [result, seeAll, mine] = await Promise.all([
+            queryWithRetry(query, params),
+            canSeeAllLeave(req),
+            myStaffId(req.tenantId!, req.user?.userId),
+        ]);
 
-        const timeOffs = result.rows.map(row => ({
-            id: row.id,
-            staffId: row.staff_id,
-            startDate: row.start_date,
-            endDate: row.end_date,
-            type: row.type,
-            shift: row.shift,
-            notes: row.notes,
-            approved: row.approved,
-            createdAt: row.created_at
-        }));
+        const timeOffs = result.rows.map(row => timeOffRowJson(row, seeAll || row.staff_id === mine));
 
         res.json(timeOffs);
     } catch (err) {
@@ -23531,6 +23570,13 @@ app.post('/staff/time-off', authenticate, requirePermission('staff:full'), async
 
         if (shift && shift !== 'LUNCH' && shift !== 'DINNER') {
             return res.status(400).json({ error: 'shift must be LUNCH, DINNER, or null' });
+        }
+
+        // Senza staff:leave si registrano solo i riposi: ferie, malattia e
+        // permesso le segna chi le può vedere.
+        const seeAll = await canSeeAllLeave(req);
+        if (!seeAll && type !== 'RIPOSO') {
+            return res.status(403).json({ error: 'leave_permission_required' });
         }
 
         // Lo staff deve appartenere al tenant: senza il controllo si potrebbe
@@ -23556,21 +23602,12 @@ app.post('/staff/time-off', authenticate, requirePermission('staff:full'), async
         );
 
         const row = result.rows[0];
-        const timeOff = {
-            id: row.id,
-            staffId: row.staff_id,
-            startDate: row.start_date,
-            endDate: row.end_date,
-            type: row.type,
-            shift: row.shift,
-            notes: row.notes,
-            approved: row.approved,
-            createdAt: row.created_at
-        };
+        const timeOff = timeOffRowJson(row, true);
 
-        // Broadcast
+        // Broadcast: solo chi e di chi. Lo ascolta tutto il tenant, e chi ne
+        // ha bisogno (il piano ferie) rilegge dalle route, che filtrano.
         const socketId = req.headers['x-socket-id'] as string;
-        if (socketService) socketService.broadcastToAll(req.tenantId!, 'timeoff:created', timeOff, socketId);
+        if (socketService) socketService.broadcastToAll(req.tenantId!, 'timeoff:created', { id: row.id, staffId: row.staff_id }, socketId);
 
         res.status(201).json(timeOff);
     } catch (err) {
@@ -23593,54 +23630,106 @@ app.put('/staff/time-off/:id', authenticate, requirePermission('staff:full'), as
         // client can clear it (full day) by sending null; COALESCE wouldn't allow that.
         const shiftProvided = 'shift' in req.body;
 
+        if (!STAFF_UUID_RE.test(String(id))) {
+            return res.status(404).json({ error: 'Time off record not found' });
+        }
+
         // Il vecchio intervallo e il nuovo: spostare un'assenza cambia i giorni
         // da cui esce come quelli in cui entra.
         const prevOff = await queryWithRetry(
-            `SELECT staff_id, to_char(start_date, 'YYYY-MM-DD') AS start_date, to_char(end_date, 'YYYY-MM-DD') AS end_date
+            `SELECT staff_id, type, to_char(start_date, 'YYYY-MM-DD') AS start_date, to_char(end_date, 'YYYY-MM-DD') AS end_date
                FROM staff_time_off WHERE id = $1 AND tenant_id = $2`,
             [id, req.tenantId!]
         );
+        // Senza staff:leave si toccano solo i riposi, e restano riposi.
+        if (prevOff.rows[0] && !(await canSeeAllLeave(req))
+            && (prevOff.rows[0].type !== 'RIPOSO' || (type != null && type !== 'RIPOSO'))) {
+            return res.status(403).json({ error: 'leave_permission_required' });
+        }
+        // Le date si correggono anche a cose fatte (ferie passate, già
+        // approvate): l'unico vincolo è un intervallo che stia in piedi.
+        if ((startDate != null && !isIsoDay(startDate)) || (endDate != null && !isIsoDay(endDate))) {
+            return res.status(400).json({ error: 'invalid_dates' });
+        }
         if (prevOff.rows[0]) {
             const p = prevOff.rows[0];
+            if (String(endDate ?? p.end_date) < String(startDate ?? p.start_date)) {
+                return res.status(400).json({ error: 'invalid_dates' });
+            }
             await noteShiftChange(req.tenantId!, String(p.staff_id), [
                 ...timeOffDates(p.start_date, p.end_date),
                 ...timeOffDates(String(startDate ?? p.start_date), String(endDate ?? p.end_date)),
             ], req.user?.userId ?? null);
         }
 
-        const result = await queryWithRetry(
-            `UPDATE staff_time_off SET
-                start_date = COALESCE($1, start_date),
-                end_date = COALESCE($2, end_date),
-                type = COALESCE($3, type),
-                shift = CASE WHEN $4::boolean THEN $5 ELSE shift END,
-                notes = COALESCE($6, notes),
-                approved = COALESCE($7, approved)
-             WHERE id = $8 AND tenant_id = $9
-             RETURNING *`,
-            [startDate, endDate, type, shiftProvided, shift ?? null, notes, approved, id, req.tenantId!]
-        );
+        // Ferie nate da una richiesta approvata: la richiesta segue l'assenza,
+        // o il dipendente in «Le mie ferie» e il piano leggerebbero le date di
+        // prima. Se l'assenza smette di essere ferie (era malattia), la
+        // richiesta passa ad annullata, come quando la si cancella.
+        const outcome = await withTenant(req.tenantId!, async client => {
+            const upd = await client.query(
+                `UPDATE staff_time_off SET
+                    start_date = COALESCE($1, start_date),
+                    end_date = COALESCE($2, end_date),
+                    type = COALESCE($3, type),
+                    shift = CASE WHEN $4::boolean THEN $5 ELSE shift END,
+                    notes = COALESCE($6, notes),
+                    approved = COALESCE($7, approved)
+                 WHERE id = $8 AND tenant_id = $9
+                 RETURNING *`,
+                [startDate, endDate, type, shiftProvided, shift ?? null, notes, approved, id, req.tenantId!]
+            );
+            const row = upd.rows[0];
+            if (!row) return { row: null, requestIds: [] as string[] };
+            const linked = row.type === 'VACANZA'
+                ? await client.query(
+                    `UPDATE staff_leave_requests SET start_date = $3, end_date = $4
+                      WHERE time_off_id = $1 AND tenant_id = $2 AND status = 'APPROVED'
+                        AND (start_date <> $3::date OR end_date <> $4::date)
+                      RETURNING id`,
+                    [row.id, req.tenantId!, row.start_date, row.end_date]
+                )
+                : await client.query(
+                    `UPDATE staff_leave_requests
+                        SET status = 'CANCELLED', time_off_id = NULL, decided_by_user_id = $3, decided_at = now()
+                      WHERE time_off_id = $1 AND tenant_id = $2 AND status = 'APPROVED'
+                      RETURNING id`,
+                    [row.id, req.tenantId!, req.user?.userId ?? null]
+                );
+            return { row, requestIds: linked.rows.map((r: any) => String(r.id)) };
+        });
 
-        if (result.rows.length === 0) {
+        if (!outcome.row) {
             return res.status(404).json({ error: 'Time off record not found' });
         }
 
-        const row = result.rows[0];
-        const timeOff = {
-            id: row.id,
-            staffId: row.staff_id,
-            startDate: row.start_date,
-            endDate: row.end_date,
-            type: row.type,
-            shift: row.shift,
-            notes: row.notes,
-            approved: row.approved,
-            createdAt: row.created_at
-        };
+        const row = outcome.row;
+        const timeOff = timeOffRowJson(row, true);
 
-        // Broadcast
+        // Broadcast: solo chi e di chi, come per la creazione.
         const socketId = req.headers['x-socket-id'] as string;
-        if (socketService) socketService.broadcastToAll(req.tenantId!, 'timeoff:updated', timeOff, socketId);
+        if (socketService) socketService.broadcastToAll(req.tenantId!, 'timeoff:updated', { id: row.id, staffId: row.staff_id }, socketId);
+        if (socketService && outcome.requestIds.length > 0) {
+            socketService.broadcastToAll(req.tenantId!, 'leave:changed', { ids: outcome.requestIds });
+        }
+        // Ferie approvate spostate quando non sono ancora finite: il
+        // dipendente lo sa come quando gliele approvano. Per quelle passate
+        // è una correzione del registro, niente notifica.
+        const startIso = leaveIsoDay(row.start_date);
+        const endIso = leaveIsoDay(row.end_date);
+        if (row.type === 'VACANZA' && outcome.requestIds.length > 0 && endIso >= getRomeDatePart(new Date())) {
+            const who = await queryWithRetry('SELECT user_id FROM staff_members WHERE id = $1 AND tenant_id = $2', [row.staff_id, req.tenantId!]);
+            const staffUserId = who.rows[0]?.user_id ?? null;
+            if (staffUserId && staffUserId !== req.user?.userId) {
+                void pushSendToUser(staffUserId, {
+                    title: 'Ferie modificate',
+                    body: formatLeaveRange(startIso, endIso),
+                    url: '/',
+                    tag: `leave-decision-${outcome.requestIds[0]}`,
+                    category: 'staff',
+                })?.catch(err => console.warn('[ferie] notifica al dipendente fallita:', err?.message || err));
+            }
+        }
 
         res.json(timeOff);
     } catch (err) {
@@ -23661,10 +23750,15 @@ app.delete('/staff/time-off/:id', authenticate, requirePermission('staff:full'),
         // (ON DELETE SET NULL) l'avrebbe lasciata «approvata» senza assenza,
         // e il dipendente la vedrebbe ancora confermata.
         const prevOff = await queryWithRetry(
-            `SELECT staff_id, to_char(start_date, 'YYYY-MM-DD') AS start_date, to_char(end_date, 'YYYY-MM-DD') AS end_date
+            `SELECT staff_id, type, to_char(start_date, 'YYYY-MM-DD') AS start_date, to_char(end_date, 'YYYY-MM-DD') AS end_date
                FROM staff_time_off WHERE id = $1 AND tenant_id = $2`,
             [id, req.tenantId!]
         );
+        // Senza staff:leave si cancellano solo i riposi: togliere ferie
+        // approvate annullerebbe la richiesta da cui nascono.
+        if (prevOff.rows[0] && prevOff.rows[0].type !== 'RIPOSO' && !(await canSeeAllLeave(req))) {
+            return res.status(403).json({ error: 'leave_permission_required' });
+        }
         if (prevOff.rows[0]) {
             const p = prevOff.rows[0];
             await noteShiftChange(req.tenantId!, String(p.staff_id), timeOffDates(p.start_date, p.end_date), req.user?.userId ?? null);
@@ -23786,8 +23880,10 @@ app.get('/staff/presence', authenticate, async (req, res) => {
 // PIANO FERIE (richieste, monte ferie, proposta automatica)
 // IMPORTANT: specific paths BEFORE /staff/:id, come per shifts/time-off.
 //
-// Due porte. Il responsabile: staff:view per leggere il piano, staff:full
-// per decidere, inserire per conto di un dipendente e cambiare le regole.
+// Due porte. Il responsabile: staff:leave per leggere il piano (di default
+// titolare e general manager: le ferie degli altri non sono di chi ha solo
+// staff:view), staff:leave + staff:full per decidere, inserire per conto di
+// un dipendente e cambiare le regole.
 // Il dipendente: /staff/my-leave, SENZA permessi di matrice — lo autorizza
 // il collegamento fra il suo account e la scheda (staff_members.user_id),
 // che solo chi ha staff:full può creare. Vede e tocca solo le proprie.
@@ -23963,18 +24059,8 @@ const leaveRequestJson = (row: any, isOpen: ServiceOpen) => ({
     decidedByName: row.decided_by_name ?? null,
     decidedAt: row.decided_at ?? null,
     decisionNote: row.decision_note ?? null,
-    createdAt: row.created_at,
-});
-
-const timeOffRowJson = (row: any) => ({
-    id: row.id,
-    staffId: row.staff_id,
-    startDate: row.start_date,
-    endDate: row.end_date,
-    type: row.type,
-    shift: row.shift,
-    notes: row.notes,
-    approved: row.approved,
+    // L'assenza in calendario delle ferie approvate: è lei che si modifica.
+    timeOffId: row.time_off_id ?? null,
     createdAt: row.created_at,
 });
 
@@ -24051,13 +24137,17 @@ async function insertLeaveRequest(
     return r.rows[0];
 }
 
-// Chi decide sulle ferie è chi ha staff:full nella matrice di QUESTO
-// ristorante: i ruoli si leggono da role_permissions, non da una lista
-// fissa, così un titolare che apre la gestione al MANAGER lo trova avvisato.
+// Chi decide sulle ferie è chi ha staff:leave e staff:full nella matrice
+// di QUESTO ristorante: i ruoli si leggono da role_permissions, non da una
+// lista fissa, così un titolare che apre le ferie al MANAGER lo trova
+// avvisato. Con il solo staff:full la notifica no: rivelerebbe le ferie di
+// un collega a chi non le può vedere (11/10/2026, i cuochi le ricevevano).
 async function notifyLeaveManagers(tenantId: number, excludeUserId: number | null, title: string, body: string, tag: string): Promise<void> {
     try {
         const r = await queryWithRetry(
-            `SELECT DISTINCT role FROM role_permissions WHERE tenant_id = $1 AND permission = 'staff:full'`,
+            `SELECT role FROM role_permissions
+              WHERE tenant_id = $1 AND permission IN ('staff:full', 'staff:leave')
+              GROUP BY role HAVING COUNT(DISTINCT permission) = 2`,
             [tenantId]
         );
         const roles = r.rows.map((x: any) => String(x.role));
@@ -24077,7 +24167,7 @@ async function loadMyStaffRow(tenantId: number, userId: number | undefined): Pro
 // Il piano di un anno: richieste, monte per persona, assenze in calendario
 // e copertura giorno per giorno. Le richieste in attesa arrivano anche se
 // cadono in un altro anno: sono la coda da smaltire, non un dato del piano.
-app.get('/staff/leave-plan', authenticate, requirePermission('staff:view'), async (req, res) => {
+app.get('/staff/leave-plan', authenticate, requirePermission('staff:leave'), async (req, res) => {
     try {
         const tenantId = req.tenantId!;
         const today = getRomeDatePart(new Date());
@@ -24153,7 +24243,7 @@ app.get('/staff/leave-plan', authenticate, requirePermission('staff:view'), asyn
 
 // Il numero sul segmento «Ferie» di Personale e, per persona, sulla sua
 // scheda: leggero apposta, lo si chiede a ogni apertura della pagina.
-app.get('/staff/leave-requests/pending-count', authenticate, requirePermission('staff:view'), async (req, res) => {
+app.get('/staff/leave-requests/pending-count', authenticate, requirePermission('staff:leave'), async (req, res) => {
     try {
         const r = await queryWithRetry(
             `SELECT staff_id, COUNT(*)::int AS n FROM staff_leave_requests
@@ -24171,7 +24261,7 @@ app.get('/staff/leave-requests/pending-count', authenticate, requirePermission('
     }
 });
 
-app.put('/staff/leave-settings', authenticate, requirePermission('staff:full'), async (req, res) => {
+app.put('/staff/leave-settings', authenticate, requirePermission('staff:full'), requirePermission('staff:leave'), async (req, res) => {
     try {
         const b = req.body ?? {};
         const days = parseAnnualLeaveDays(b.defaultAnnualDays ?? null);
@@ -24217,7 +24307,7 @@ app.put('/staff/leave-settings', authenticate, requirePermission('staff:full'), 
 // Il responsabile inserisce una richiesta per conto di un dipendente (chi
 // la chiede a voce, chi non ha l'app). Nasce in attesa come le altre: la
 // decisione resta un passo distinto e passa dalla stessa proposta.
-app.post('/staff/leave-requests', authenticate, requirePermission('staff:full'), async (req, res) => {
+app.post('/staff/leave-requests', authenticate, requirePermission('staff:full'), requirePermission('staff:leave'), async (req, res) => {
     try {
         const tenantId = req.tenantId!;
         const { staffId, startDate, endDate, note } = req.body ?? {};
@@ -24243,7 +24333,7 @@ app.post('/staff/leave-requests', authenticate, requirePermission('staff:full'),
 // in blocco). Una transazione sola: se una riga fallisce a metà non resta
 // un piano applicato per tre quarti. Approvare crea l'assenza VACANZA —
 // è da lì che presenze e calendario turni vedono le ferie.
-app.post('/staff/leave-requests/decide', authenticate, requirePermission('staff:full'), async (req, res) => {
+app.post('/staff/leave-requests/decide', authenticate, requirePermission('staff:full'), requirePermission('staff:leave'), async (req, res) => {
     try {
         const tenantId = req.tenantId!;
         const userId = req.user?.userId ?? null;
@@ -24332,7 +24422,7 @@ app.post('/staff/leave-requests/decide', authenticate, requirePermission('staff:
         const done = outcome.results.filter(r => r.ok);
         const socketId = req.headers['x-socket-id'] as string;
         if (socketService) {
-            for (const t of outcome.createdTimeOffs) socketService.broadcastToAll(tenantId, 'timeoff:created', timeOffRowJson(t), socketId);
+            for (const t of outcome.createdTimeOffs) socketService.broadcastToAll(tenantId, 'timeoff:created', { id: t.id, staffId: t.staff_id }, socketId);
             for (const id of outcome.deletedTimeOffIds) socketService.broadcastToAll(tenantId, 'timeoff:deleted', { id }, socketId);
             if (done.length > 0) socketService.broadcastToAll(tenantId, 'leave:changed', { ids: done.map(r => r.id) }, socketId);
         }
@@ -24368,7 +24458,7 @@ app.post('/staff/leave-requests/decide', authenticate, requirePermission('staff:
 // La proposta: su TUTTE le richieste in attesa, con la copertura minima e
 // il monte di ciascuno. Non scrive niente — il responsabile la rilegge,
 // la ritocca e la applica da /decide.
-app.post('/staff/leave-plan/proposal', authenticate, requirePermission('staff:full'), async (req, res) => {
+app.post('/staff/leave-plan/proposal', authenticate, requirePermission('staff:full'), requirePermission('staff:leave'), async (req, res) => {
     try {
         const tenantId = req.tenantId!;
         const pendingRs = await queryWithRetry(
@@ -24993,7 +25083,7 @@ app.get('/staff/:id', authenticate, async (req, res) => {
         }
 
         const row = result.rows[0];
-        res.json(staffRowJson(row));
+        res.json(staffRowJson(row, await canSeeAllLeave(req)));
     } catch (err) {
         console.error(err);
         res.status(500).json({ error: 'Internal server error' });
@@ -25004,13 +25094,17 @@ app.get('/staff/:id', authenticate, async (req, res) => {
 app.put('/staff/:id', authenticate, requirePermission('staff:full'), async (req, res) => {
     try {
         const { id } = req.params;
-        const { name, surname, category, staffType, phone, email, role, hireDate, contractEndDate, weeklyRestDay, notes, isActive, userId, annualLeaveDays } = req.body;
+        const { name, surname, category, staffType, phone, email, role, hireDate, contractEndDate, weeklyRestDay, notes, isActive, userId } = req.body;
 
         // Account collegato e giorni di ferie: stessa regola del riposo
         // settimanale — undefined lascia com'è, null svuota.
         if (!STAFF_UUID_RE.test(String(id))) {
             return res.status(404).json({ error: 'Staff member not found' });
         }
+        // Chi non vede i giorni di ferie non li può nemmeno scrivere: il
+        // campo, se arriva, si ignora.
+        const showLeave = await canSeeAllLeave(req);
+        const annualLeaveDays = showLeave ? req.body.annualLeaveDays : undefined;
         const leaveDays = annualLeaveDays === undefined ? null : parseAnnualLeaveDays(annualLeaveDays);
         if (leaveDays && !leaveDays.ok) return res.status(400).json({ error: 'invalid_annual_leave_days' });
         const link = userId === undefined ? null : await checkLinkableUser(req.tenantId!, userId, String(id));
@@ -25067,11 +25161,12 @@ app.put('/staff/:id', authenticate, requirePermission('staff:full'), async (req,
         }
 
         const row = result.rows[0];
-        const staffMember = staffRowJson(row);
+        const staffMember = staffRowJson(row, showLeave);
 
-        // Broadcast to all connected clients
+        // Broadcast to all connected clients, senza i giorni di ferie come
+        // per la creazione.
         const socketId = req.headers['x-socket-id'] as string;
-        if (socketService) socketService.broadcastToAll(req.tenantId!, 'staff:updated', staffMember, socketId);
+        if (socketService) socketService.broadcastToAll(req.tenantId!, 'staff:updated', staffRowJson(row, false), socketId);
 
         res.json(staffMember);
     } catch (err) {

@@ -172,8 +172,11 @@ export const DOMAIN_EVENTS: Record<string, DomainEventSpec> = {
     'shift:created': spec('cloud'),
     'shift:updated': spec('cloud'),
     'shift:deleted': spec('cloud'),
-    'timeoff:created': spec('cloud'),
-    'timeoff:updated': spec('cloud'),
+    // Le assenze viaggiano come { id, staffId } (schema 2, 11/10/2026): il
+    // tipo e le note restano alle route, che li danno solo a chi ha
+    // staff:leave.
+    'timeoff:created': spec('cloud', 2),
+    'timeoff:updated': spec('cloud', 2),
     'timeoff:deleted': spec('cloud'),
     // Piano ferie: un solo tipo, il client rilegge il piano o le proprie
     // richieste — il payload dice solo cosa è cambiato.
