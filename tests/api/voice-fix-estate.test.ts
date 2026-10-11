@@ -56,8 +56,13 @@ describe('fix estate 2026 del canale voce', () => {
         expect(res.status).toBe(200);
         expect(res.body.date_readback).toBe('oggi');
         expect(res.body.requested_time_available).toBe(false);
-        // Con o senza orari quel giorno della settimana, la frase parte da "Oggi".
-        expect(res.body.message).toMatch(/^Oggi /);
+        // Con o senza orari quel giorno della settimana, la frase parte da
+        // "Oggi" — tranne quando le 21:15 sono «adesso» (test lanciato fra
+        // le 21 e la chiusura): allora si propone subito, senza nominare il
+        // giorno (chiamata di Rebecca Marchese, vedi slot-proposal.test.ts).
+        if (!/^Posso prenotarle /.test(res.body.message)) {
+            expect(res.body.message).toMatch(/^Oggi /);
+        }
         expect(res.body.message).not.toContain('quel giorno');
     });
 
