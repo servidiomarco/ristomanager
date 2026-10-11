@@ -1,8 +1,9 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Building2, FileText, Percent, Loader2, ChevronDown, AlertTriangle } from 'lucide-react';
+import { Building2, FileText, Percent, Loader2, AlertTriangle } from 'lucide-react';
 import { billsApiService, type FiscalSettings, type FiscalVatMap } from '../services/billsApiService';
 import { useAuth } from '../contexts/AuthContext';
 import { VAT_RATES, type FiscalProviderSetting } from '../types';
+import { SettingsSummary, settingsCardClass } from './SettingsCard';
 
 interface Props {
     showToast: (msg: string, kind?: 'success' | 'error' | 'info') => void;
@@ -100,27 +101,22 @@ export const FiscalSettingsManager: React.FC<Props> = ({ showToast }) => {
     const vatValid = vat === '' || /^\d{11}$/.test(vat);
     const esercenteComplete = Boolean(settings.vat_number && settings.seller?.business_name);
 
+    // «contents»: le tre card sono figlie della griglia di Impostazioni, non
+    // una colonna dentro una sua cella.
     return (
-        <div className="space-y-3">
+        <div className="contents">
             {/* ── Esercente: P.IVA, denominazione e sede ─────────────────── */}
-            <details className="group bg-[var(--ds-surface)] rounded-[var(--ds-radius)] shadow-[var(--ds-shadow-card)] overflow-hidden">
-                <summary className="flex items-center justify-between gap-3 px-4 py-3 cursor-pointer select-none list-none [&::-webkit-details-marker]:hidden hover:bg-[var(--ds-surface-row)] transition-colors">
-                    <div className="flex items-center gap-3 min-w-0">
-                        <div className="w-10 h-10 rounded-[var(--ds-radius)] bg-[var(--ds-surface-row)] flex items-center justify-center text-[var(--ds-arriving-text)] flex-shrink-0">
-                            <Building2 className="w-5 h-5" />
-                        </div>
-                        <div className="min-w-0">
-                            <h4 className="font-medium text-[14px] text-[var(--ds-text-primary)]">Dati dell'esercente</h4>
-                            <p className="text-[13px] text-[var(--ds-text-muted)] truncate">P.IVA, denominazione e sede: compaiono su scontrini e fatture.</p>
-                        </div>
-                    </div>
-                    <div className="flex items-center gap-2 flex-shrink-0">
+            <details className={settingsCardClass}>
+                <SettingsSummary
+                    icon={Building2}
+                    title="Dati dell'esercente"
+                    description="P.IVA, denominazione e sede: compaiono su scontrini e fatture."
+                    trailing={
                         <span className={`text-[12px] font-medium ${esercenteComplete ? 'text-[var(--ds-seated-text)]' : 'text-[var(--ds-pending-text)]'}`}>
                             {esercenteComplete ? settings.vat_number : 'Da completare'}
                         </span>
-                        <ChevronDown className="w-4 h-4 text-[var(--ds-text-muted)] flex-shrink-0 transition-transform group-open:rotate-180" />
-                    </div>
-                </summary>
+                    }
+                />
                 <div className="px-4 pb-4 pt-3 border-t border-[var(--ds-border)] space-y-3">
                     <label className="block sm:max-w-xs">
                         <span className="mb-1.5 block text-[12px] font-medium text-[var(--ds-text-primary)]">P.IVA <span className="font-normal text-[var(--ds-text-muted)]">(11 cifre, senza IT)</span></span>
@@ -231,24 +227,18 @@ export const FiscalSettingsManager: React.FC<Props> = ({ showToast }) => {
             </details>
 
             {/* ── Scontrino elettronico: scelta del driver fiscale ────────── */}
-            <details className="group bg-[var(--ds-surface)] rounded-[var(--ds-radius)] shadow-[var(--ds-shadow-card)] overflow-hidden">
-                <summary className="flex items-center justify-between gap-3 px-4 py-3 cursor-pointer select-none list-none [&::-webkit-details-marker]:hidden hover:bg-[var(--ds-surface-row)] transition-colors">
-                    <div className="flex items-center gap-3 min-w-0">
-                        <div className="w-10 h-10 rounded-[var(--ds-radius)] bg-[var(--ds-surface-row)] flex items-center justify-center text-[var(--ds-arriving-text)] flex-shrink-0">
-                            <FileText className="w-5 h-5" />
-                        </div>
-                        <div className="min-w-0">
-                            <h4 className="font-medium text-[14px] text-[var(--ds-text-primary)]">Scontrino elettronico</h4>
-                            <p className="text-[13px] text-[var(--ds-text-muted)] truncate">Documento commerciale alla chiusura del conto, via provider cloud.</p>
-                        </div>
-                    </div>
-                    <div className="flex items-center gap-2 flex-shrink-0">
+            <details className={settingsCardClass}>
+                <SettingsSummary
+                    icon={FileText}
+                    tone={active ? 'positive' : 'neutral'}
+                    title="Scontrino elettronico"
+                    description="Documento commerciale alla chiusura del conto, via provider cloud."
+                    trailing={
                         <span className={`text-[12px] font-medium ${active ? 'text-[var(--ds-seated-text)]' : 'text-[var(--ds-text-subtle)]'}`}>
                             {active ? PROVIDER_LABELS[settings.provider] : 'Disattivato'}
                         </span>
-                        <ChevronDown className="w-4 h-4 text-[var(--ds-text-muted)] flex-shrink-0 transition-transform group-open:rotate-180" />
-                    </div>
-                </summary>
+                    }
+                />
                 <div className="px-4 pb-4 pt-3 border-t border-[var(--ds-border)] space-y-3">
                     <p className="text-[13px] text-[var(--ds-text-muted)] leading-relaxed">
                         Con un provider attivo, alla chiusura di un conto saldato per intero lo scontrino parte da solo verso l'Agenzia delle Entrate. Un documento fallito si ritenta dal conto, nella sezione Pagamenti.
@@ -289,19 +279,12 @@ export const FiscalSettingsManager: React.FC<Props> = ({ showToast }) => {
             </details>
 
             {/* ── Mappatura IVA: default piatti e voci di sistema ─────────── */}
-            <details className="group bg-[var(--ds-surface)] rounded-[var(--ds-radius)] shadow-[var(--ds-shadow-card)] overflow-hidden">
-                <summary className="flex items-center justify-between gap-3 px-4 py-3 cursor-pointer select-none list-none [&::-webkit-details-marker]:hidden hover:bg-[var(--ds-surface-row)] transition-colors">
-                    <div className="flex items-center gap-3 min-w-0">
-                        <div className="w-10 h-10 rounded-[var(--ds-radius)] bg-[var(--ds-surface-row)] flex items-center justify-center text-[var(--ds-arriving-text)] flex-shrink-0">
-                            <Percent className="w-5 h-5" />
-                        </div>
-                        <div className="min-w-0">
-                            <h4 className="font-medium text-[14px] text-[var(--ds-text-primary)]">Mappatura IVA</h4>
-                            <p className="text-[13px] text-[var(--ds-text-muted)] truncate">Aliquote di default: piatti, coperto, servizio e conti senza righe.</p>
-                        </div>
-                    </div>
-                    <ChevronDown className="w-4 h-4 text-[var(--ds-text-muted)] flex-shrink-0 transition-transform group-open:rotate-180" />
-                </summary>
+            <details className={settingsCardClass}>
+                <SettingsSummary
+                    icon={Percent}
+                    title="Mappatura IVA"
+                    description="Aliquote di default: piatti, coperto, servizio e conti senza righe."
+                />
                 <div className="px-4 pb-4 pt-3 border-t border-[var(--ds-border)] space-y-3">
                     <p className="text-[13px] text-[var(--ds-text-muted)] leading-relaxed">
                         Valgono per le battiture nuove: le righe già battute conservano la loro aliquota. "Consumazione generica" è la voce unica dei conti chiusi senza comanda. Gli sconti non compaiono: riducono l'imponibile delle righe su cui cadono, non hanno un'aliquota propria.

@@ -1,11 +1,12 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Star, Loader2, ChevronDown, ExternalLink } from 'lucide-react';
+import { Star, Loader2, ExternalLink } from 'lucide-react';
 import {
     getReviewSettings, updateReviewSettings,
     type ReviewSettings, type ReviewRequestTiming, type ReviewRequestAudience, type ReviewReplyAutomation,
 } from '../services/reviewsApiService';
 import { useAuth } from '../contexts/AuthContext';
+import { SettingsSummary, settingsCardClass } from './SettingsCard';
 
 /* ── Recensioni ───────────────────────────────────────────────────────────
    L'interruttore della richiesta post-visita e le sue regole in una card
@@ -106,23 +107,13 @@ export const ReviewSettingsCard: React.FC<Props> = ({ showToast }) => {
     const placeIdDirty = placeIdDraft.trim() !== (settings.google_place_id || '');
 
     return (
-        <details className="group bg-[var(--ds-surface)] rounded-[var(--ds-radius)] shadow-[var(--ds-shadow-card)] overflow-hidden">
-            <summary className="flex items-center justify-between gap-3 px-4 py-3 cursor-pointer select-none list-none [&::-webkit-details-marker]:hidden hover:bg-[var(--ds-surface-row)] transition-colors">
-                <div className="flex items-center gap-3 min-w-0">
-                    <div className="w-10 h-10 rounded-[var(--ds-radius)] bg-[var(--ds-surface-row)] flex items-center justify-center text-[var(--ds-text-secondary)] flex-shrink-0">
-                        <Star className="w-5 h-5" />
-                    </div>
-                    <div className="min-w-0">
-                        <h4 className="font-medium text-[14px] text-[var(--ds-text-primary)]">{t('rev.title', 'Richiesta di recensione')}</h4>
-                        <p className="text-[13px] text-[var(--ds-text-muted)] truncate">
-                            {t('rev.subtitle', 'Dopo la visita, il cliente riceve il link per recensire su Google.')}
-                        </p>
-                    </div>
-                </div>
-                <div className="flex items-center gap-2 flex-shrink-0">
-                    <span className={`text-[12px] font-medium ${enabled ? 'text-[var(--ds-seated-text)]' : 'text-[var(--ds-text-subtle)]'}`}>
-                        {enabled ? t('rev.on', 'Attiva') : t('rev.off', 'Disattivata')}
-                    </span>
+        <details className={settingsCardClass}>
+            <SettingsSummary
+                icon={Star}
+                tone={enabled ? 'positive' : 'neutral'}
+                title={t('rev.title', 'Richiesta di recensione')}
+                description={t('rev.subtitle', 'Dopo la visita, il cliente riceve il link per recensire su Google.')}
+                trailing={
                     <button
                         type="button" role="switch" aria-checked={enabled}
                         aria-label={t('rev.toggleAria', '{{azione}} richiesta di recensione', { azione: enabled ? t('rev.switchOff', 'Disattiva') : t('rev.switchOn', 'Attiva') })}
@@ -135,9 +126,8 @@ export const ReviewSettingsCard: React.FC<Props> = ({ showToast }) => {
                         <span aria-hidden="true"
                               className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition-transform ${enabled ? 'translate-x-5' : 'translate-x-0.5'} translate-y-0.5`} />
                     </button>
-                    <ChevronDown className="w-4 h-4 text-[var(--ds-text-muted)] flex-shrink-0 transition-transform group-open:rotate-180" />
-                </div>
-            </summary>
+                }
+            />
 
             <div className="border-t border-[var(--ds-border)] px-4 py-4 space-y-5">
                 <div className="rounded-[var(--ds-radius)] bg-[var(--ds-surface-row)] border border-[var(--ds-border)] px-3 py-2.5 text-[13px] leading-relaxed text-[var(--ds-text-muted)]">

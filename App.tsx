@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
-import { LayoutDashboard, Grid, Settings, ChevronRight, ChevronDown, ChevronUp, ChefHat, PanelLeft, Calendar, CalendarDays, Bell, X, AlertTriangle, LogOut, Users, UserCheck, FileText, UsersRound, Sun, Moon, Sunset, MoreHorizontal, Search, UtensilsCrossed, Plus, BookUser, Boxes, Clock, ShoppingCart, ListChecks, ShieldCheck, Phone, ConciergeBell, Zap, PartyPopper, DoorClosed, StickyNote, CreditCard, MessageCircle, Mail, Kanban, ClipboardList, CookingPot, BellRing, MessagesSquare, Gauge, Building2, Milestone, Ban, Sparkles, Landmark, Percent, Calculator, BarChart3, Star, ShoppingBag, LifeBuoy, PlugZap, Radio, Thermometer, SlidersHorizontal, Tag, Scale, CalendarCheck, CalendarClock, Wand2, QrCode, AudioLines, Megaphone } from 'lucide-react';
+import { LayoutDashboard, Grid, Settings, ChevronRight, ChevronDown, ChevronUp, ChefHat, PanelLeft, Calendar, CalendarDays, Bell, X, AlertTriangle, LogOut, Users, UserCheck, FileText, UsersRound, Sun, Moon, Sunset, MoreHorizontal, Search, UtensilsCrossed, Plus, BookUser, Boxes, Clock, ShoppingCart, ListChecks, ShieldCheck, Phone, ConciergeBell, Zap, PartyPopper, DoorClosed, StickyNote, CreditCard, MessageCircle, Mail, Kanban, ClipboardList, CookingPot, BellRing, MessagesSquare, Gauge, Building2, Milestone, Ban, Landmark, Percent, Calculator, BarChart3, Star, ShoppingBag, LifeBuoy, Radio, Thermometer, SlidersHorizontal, Tag, Scale, CalendarCheck, Wand2, QrCode, AudioLines, Megaphone } from 'lucide-react';
 import { ViewState, Room, Table, Dish, RestaurantMenu, Reservation, TableStatus, TableShape, BanquetMenu, PaymentStatus, Shift, UserRole, ReservationStatus } from './types';
 import { Dashboard } from './components/Dashboard';
 import { FloorPlan } from './components/FloorPlan';
@@ -57,6 +57,7 @@ import { ScheduledClosuresManager } from './components/ScheduledClosuresManager'
 import { RemindersManager } from './components/RemindersManager';
 import { ScheduledTasksManager } from './components/ScheduledTasksManager';
 import { useSettingsSearch } from './components/settingsSearch';
+import { SettingsSection, SettingsIcon, SettingsDisclosure, SettingsNavCard, SettingsVisibleContext, settingsCardClass, settingsGridClass, settingsWideClass } from './components/SettingsCard';
 import { ReservationNotesManager } from './components/ReservationNotesManager';
 import { ReservationAllergensManager } from './components/ReservationAllergensManager';
 import { AutoDepositManager } from './components/AutoDepositManager';
@@ -363,121 +364,44 @@ const OPERATOR_LANG_KEY = 'ristocrm_operator_lang';
 const SALA_VIEWS: ViewState[] = [ViewState.COMANDE, ViewState.CASSA, ViewState.CUCINA, ViewState.PASSE];
 
 /* ── Blocchi della pagina Impostazioni ────────────────────────────────────
-   Impostazioni è tornata una voce piatta della sidebar e una pagina unica:
-   il sottomenu costringeva a sapere in anticipo in quale delle dodici voci
-   stava una regolazione. Ora la pagina impila pochi blocchi tematici — le
-   card sono raggruppate per natura — e questa lista alimenta solo la riga
-   di chip-àncora in testa, che salta al blocco senza stato né routing.
-   `guard` nasconde il blocco a chi non ha i permessi delle sue card. */
-const SETTINGS_GROUPS: {
-  id: string;
-  labelKey: string;
-  label: string;
-  Icon: React.ComponentType<{ size?: number; className?: string }>;
-  guard?: 'admin' | 'pay_at_table' | 'reviews' | 'takeaway' | 'passepartout' | 'haccp' | 'whatsapp';
-}[] = [
-  { id: 'imp-profilo', labelKey: 'settings.tabProfile', label: 'Profilo', Icon: UserCheck },
-  { id: 'imp-ristorante', labelKey: 'settings.tabRestaurant', label: 'Ristorante', Icon: Clock },
-  { id: 'imp-attivita', labelKey: 'settings.tabScheduled', label: 'Attività programmate', Icon: CalendarClock },
-  { id: 'imp-prenotazioni', labelKey: 'nav.items.reservations', label: 'Prenotazioni', Icon: Calendar },
-  { id: 'imp-asporto', labelKey: 'nav.items.takeaway', label: 'Asporto', Icon: ShoppingBag, guard: 'takeaway' },
-  { id: 'imp-pagamenti', labelKey: 'nav.items.payments', label: 'Pagamenti', Icon: CreditCard },
-  { id: 'imp-fiscalita', labelKey: 'nav.items.fiscal', label: 'Fiscalità', Icon: Landmark, guard: 'pay_at_table' },
-  { id: 'imp-passepartout', labelKey: 'settings.tabPassepartout', label: 'Passepartout', Icon: PlugZap, guard: 'passepartout' },
-  { id: 'imp-haccp', labelKey: 'settings.tabHaccp', label: 'HACCP', Icon: ShieldCheck, guard: 'haccp' },
-  { id: 'imp-comunicazioni', labelKey: 'nav.groups.communications', label: 'Comunicazioni', Icon: MessagesSquare },
-  { id: 'imp-whatsapp', labelKey: 'settings.tabWhatsapp', label: 'WhatsApp', Icon: MessageCircle, guard: 'whatsapp' },
-  { id: 'imp-recensioni', labelKey: 'nav.items.reviews', label: 'Recensioni', Icon: Star, guard: 'reviews' },
-  { id: 'imp-ai', labelKey: 'settings.tabAi', label: 'AI', Icon: Sparkles },
-  { id: 'imp-amministrazione', labelKey: 'settings.tabAdmin', label: 'Amministrazione', Icon: Users, guard: 'admin' },
+   Impostazioni è una voce piatta della sidebar: il sottomenu costringeva a
+   sapere in anticipo in quale delle dodici voci stava una regolazione. La
+   pagina raccoglie i blocchi tematici in poche schede (`tab`), ognuna con i
+   suoi blocchi uno sotto l'altro; la ricerca invece guarda in tutte.
+   `guard` nasconde il blocco a chi non ha i permessi delle sue card, e una
+   scheda senza blocchi visibili sparisce. */
+type SettingsTabId = 'profilo' | 'locale' | 'prenotazioni' | 'cassa' | 'comunicazioni' | 'ai' | 'amministrazione';
+
+const SETTINGS_TABS: { id: SettingsTabId; labelKey: string; label: string }[] = [
+  { id: 'profilo', labelKey: 'settings.tabProfile', label: 'Profilo' },
+  { id: 'locale', labelKey: 'settings.tabVenue', label: 'Locale' },
+  { id: 'prenotazioni', labelKey: 'nav.items.reservations', label: 'Prenotazioni' },
+  { id: 'cassa', labelKey: 'settings.tabTill', label: 'Cassa' },
+  { id: 'comunicazioni', labelKey: 'nav.groups.communications', label: 'Comunicazioni' },
+  { id: 'ai', labelKey: 'settings.tabAi', label: 'AI' },
+  { id: 'amministrazione', labelKey: 'settings.tabAdmin', label: 'Amministrazione' },
 ];
 
-/* ── Impostazioni ─────────────────────────────────────────────────────────
-   Tre forme, ripetute quindici volte in quella pagina: un'etichetta di
-   sezione, una card che si apre, una card che porta altrove. Erano scritte a
-   mano ogni volta, con la stessa manciata di classi legacy ricopiate — e ogni
-   copia era un posto in cui la pagina poteva divergere da sola.
-
-   Le etichette restano in tondo: erano in maiuscolo con 0.08em di spaziatura,
-   che a 11px cancella la forma della parola senza renderla più leggibile
-   (§5.2). Peso e colore portano la gerarchia. */
-const SettingsSection: React.FC<{ id?: string; label: string; children: React.ReactNode }> = ({ id, label, children }) => (
-  // scroll-mt: quando i chip-àncora saltano qui, l'intestazione non finisce
-  // incollata al bordo superiore della zona che scorre. I data-imp-* sono i
-  // segni che legge la ricerca (components/settingsSearch.ts): le card da
-  // filtrare sono le figlie di [data-imp-lista], o del contenuto se manca.
-  <section id={id} className="mb-6 scroll-mt-20" data-imp-sezione="" data-imp-etichetta={label}>
-    <h3 className="mb-2 px-1 text-[13px] font-semibold text-[var(--ds-text-muted)]">{label}</h3>
-    <div data-imp-contenuto="">{children}</div>
-  </section>
-);
-
-/** L'icona quadrata a sinistra di ogni riga di impostazioni. */
-const SettingsIcon: React.FC<{
-  icon: React.ComponentType<{ className?: string }>;
-  tone?: 'neutral' | 'pending' | 'positive';
-}> = ({ icon: Icon, tone = 'neutral' }) => (
-  <span
-    className={`inline-flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-[var(--ds-radius)] ${
-      tone === 'pending' ? 'bg-[var(--ds-pending-tint)] text-[var(--ds-pending-text)]'
-      : tone === 'positive' ? 'bg-[var(--ds-seated-tint)] text-[var(--ds-seated-text)]'
-      : 'bg-[var(--ds-surface-row)] text-[var(--ds-text-primary)]'
-    }`}
-  >
-    <Icon className="h-5 w-5" />
-  </span>
-);
-
-/** Una card che si apre in posto. Resta un <details>: l'apertura non è stato
- *  applicativo e non deve passare per React. */
-const SettingsDisclosure: React.FC<{
-  icon: React.ComponentType<{ className?: string }>;
-  iconTone?: 'neutral' | 'pending' | 'positive';
-  title: string;
-  description: string;
-  children: React.ReactNode;
-}> = ({ icon, iconTone, title, description, children }) => (
-  <details className="group overflow-hidden rounded-[var(--ds-radius)] bg-[var(--ds-surface)] shadow-[var(--ds-shadow-card)]">
-    {/* min-h 44px e nessun marcatore nativo: la riga intera è il bersaglio. */}
-    <summary className="flex min-h-[64px] cursor-pointer select-none list-none items-center justify-between gap-3 p-3 transition-colors hover:bg-[var(--ds-surface-row)] [&::-webkit-details-marker]:hidden">
-      <span className="flex min-w-0 items-center gap-3">
-        <SettingsIcon icon={icon} tone={iconTone} />
-        <span className="min-w-0">
-          <span className="block text-[15px] font-semibold text-[var(--ds-text-primary)]">{title}</span>
-          <span className="block text-[13px] leading-snug text-[var(--ds-text-muted)]">{description}</span>
-        </span>
-      </span>
-      <span
-        className="inline-flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-[var(--ds-radius-control)] text-[var(--ds-text-muted)] transition-transform group-open:rotate-180"
-        aria-hidden
-      >
-        <ChevronDown className="h-4 w-4" />
-      </span>
-    </summary>
-    <div className="border-t border-[var(--ds-border)] px-3 pb-4 pt-3 sm:px-4">{children}</div>
-  </details>
-);
-
-/** Una card che porta da un'altra parte: stessa anatomia, chevron a destra. */
-const SettingsNavCard: React.FC<{
-  icon: React.ComponentType<{ className?: string }>;
-  title: string;
-  description: string;
-  onClick: () => void;
-}> = ({ icon, title, description, onClick }) => (
-  <button
-    type="button"
-    onClick={onClick}
-    className="flex min-h-[64px] items-center gap-3 rounded-[var(--ds-radius)] bg-[var(--ds-surface)] p-3 text-left shadow-[var(--ds-shadow-card)] transition-colors hover:bg-[var(--ds-surface-row)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
-  >
-    <SettingsIcon icon={icon} />
-    <span className="min-w-0 flex-1">
-      <span className="block text-[15px] font-semibold text-[var(--ds-text-primary)]">{title}</span>
-      <span className="block text-[13px] leading-snug text-[var(--ds-text-muted)]">{description}</span>
-    </span>
-    <ChevronRight className="h-4 w-4 flex-shrink-0 text-[var(--ds-text-muted)]" aria-hidden />
-  </button>
-);
+const SETTINGS_GROUPS: {
+  id: string;
+  tab: SettingsTabId;
+  guard?: 'admin' | 'pay_at_table' | 'reviews' | 'takeaway' | 'passepartout' | 'haccp' | 'whatsapp';
+}[] = [
+  { id: 'imp-profilo', tab: 'profilo' },
+  { id: 'imp-ristorante', tab: 'locale' },
+  { id: 'imp-attivita', tab: 'locale' },
+  { id: 'imp-haccp', tab: 'locale', guard: 'haccp' },
+  { id: 'imp-prenotazioni', tab: 'prenotazioni' },
+  { id: 'imp-asporto', tab: 'prenotazioni', guard: 'takeaway' },
+  { id: 'imp-pagamenti', tab: 'cassa' },
+  { id: 'imp-fiscalita', tab: 'cassa', guard: 'pay_at_table' },
+  { id: 'imp-passepartout', tab: 'cassa', guard: 'passepartout' },
+  { id: 'imp-comunicazioni', tab: 'comunicazioni' },
+  { id: 'imp-whatsapp', tab: 'comunicazioni', guard: 'whatsapp' },
+  { id: 'imp-recensioni', tab: 'comunicazioni', guard: 'reviews' },
+  { id: 'imp-ai', tab: 'ai' },
+  { id: 'imp-amministrazione', tab: 'amministrazione', guard: 'admin' },
+];
 
 const App: React.FC = () => {
   const { user, isAuthenticated, isLoading: authLoading, logout, canAccessView, canManageUsers, hasPermission, hasFeature, getAccessibleViews, canViewLogs, updatePreferences } = useAuth();
@@ -491,7 +415,11 @@ const App: React.FC = () => {
   // Ricerca in Impostazioni: filtra le card della pagina mentre si scrive.
   // Si svuota uscendo, così al ritorno la pagina è intera.
   const [settingsQuery, setSettingsQuery] = useState('');
+  // La scheda di Impostazioni a schermo. Resta quella mentre si gira per
+  // l'app: tornando si ritrova dove si era.
+  const [settingsTab, setSettingsTab] = useState<SettingsTabId>('profilo');
   const settingsRootRef = useRef<HTMLDivElement>(null);
+  const settingsScrollRef = useRef<HTMLDivElement>(null);
   const settingsMatches = useSettingsSearch(settingsRootRef, view === ViewState.SETTINGS ? settingsQuery : '', view === ViewState.SETTINGS);
   useEffect(() => { if (view !== ViewState.SETTINGS) setSettingsQuery(''); }, [view]);
   // L'ultima vista di lavoro prima dell'Aiuto: la richiesta la porta nel
@@ -1432,6 +1360,10 @@ const App: React.FC = () => {
     // veniva anche interrotta). Si salta subito, senza animazione, e si
     // corregge quando le card hanno finito di caricare.
     const id = pendingSettingsSection;
+    // Il blocco sta in una scheda: prima la si apre, poi si salta (i salti
+    // partono dopo il primo render, quando il blocco non è più nascosto).
+    const group = SETTINGS_GROUPS.find(g => g.id === id);
+    if (group) setSettingsTab(group.tab);
     const jump = () => document.getElementById(id)?.scrollIntoView({ block: 'start' });
     const timers = [100, 700, 1500].map(ms => window.setTimeout(jump, ms));
     const done = window.setTimeout(() => setPendingSettingsSection(null), 1600);
@@ -2361,6 +2293,17 @@ const App: React.FC = () => {
     : g.guard === 'whatsapp' ? hasFeature('whatsapp')
     : true
   );
+  // Le schede con almeno un blocco visibile. Se quella scelta non ne ha più
+  // (permessi o piano cambiati), si torna alla prima.
+  const visibleSettingsTabs = SETTINGS_TABS.filter(tab => visibleSettingsGroups.some(g => g.tab === tab.id));
+  const activeSettingsTab: SettingsTabId = visibleSettingsTabs.some(tab => tab.id === settingsTab)
+    ? settingsTab
+    : (visibleSettingsTabs[0]?.id ?? 'profilo');
+  // Mentre si cerca le schede non contano: la ricerca guarda in tutti i
+  // blocchi, e sono i suoi segni a nascondere quelli senza risultati.
+  const settingsSearching = settingsQuery.trim() !== '';
+  const isSettingsSectionVisible = (id?: string) =>
+    settingsSearching || !id || SETTINGS_GROUPS.find(g => g.id === id)?.tab === activeSettingsTab;
 
   // ── Comunicazioni, mobile ────────────────────────────────────────────────
   // One bottom tab stands in for three views. The channels the user can't
@@ -3487,40 +3430,54 @@ const App: React.FC = () => {
               centrata sta DENTRO la zona che scorre, altrimenti la barra di
               scorrimento finirebbe in mezzo alla pagina invece che al bordo. */}
           <div className="flex h-full min-h-0 flex-col">
-          <div className="min-h-0 flex-1 overflow-y-auto">
-          <div className="mx-auto max-w-4xl p-4 sm:p-6 lg:p-8">
+          <div ref={settingsScrollRef} className="min-h-0 flex-1 overflow-y-auto">
+          {/* @container: la griglia delle card passa a due colonne sulla
+              larghezza della colonna, non della finestra — la sidebar
+              chiusa o aperta cambia lo spazio senza cambiare il viewport. */}
+          <div className="@container mx-auto max-w-5xl p-4 sm:p-6 lg:p-8">
 
-            {/* Ricerca: resta in cima mentre la pagina scorre, e filtra le card
-                sul testo che hanno già a schermo (components/settingsSearch.ts). */}
-            <div className="sticky top-0 z-10 -mx-4 mb-3 bg-[var(--ds-canvas)] px-4 pb-3 pt-1 sm:mx-0 sm:px-0">
-              <SearchField
-                value={settingsQuery}
-                onChange={setSettingsQuery}
-                onKeyDown={e => { if (e.key === 'Escape') setSettingsQuery(''); }}
-                placeholder={t('settings.searchPlaceholder', 'Cerca nelle impostazioni')}
-                ariaLabel={t('settings.searchPlaceholder', 'Cerca nelle impostazioni')}
-              />
+            {/* Testata: le schede e la ricerca, incollate in cima mentre la
+                pagina scorre. Sul telefono la ricerca sta sopra, a tutta
+                larghezza; da 48rem di colonna stanno su una riga. La ricerca
+                filtra le card sul testo che hanno già a schermo
+                (components/settingsSearch.ts) e guarda in tutte le schede:
+                mentre si cerca le schede si tolgono di mezzo, ma sul largo
+                tengono il posto, così il campo non salta sotto il cursore. */}
+            <div className="sticky top-0 z-10 -mx-4 mb-6 flex flex-col gap-3 bg-[var(--ds-canvas)] px-4 pb-3 pt-1 sm:mx-0 sm:px-0 @3xl:flex-row @3xl:items-center">
+              <div
+                className={`min-w-0 @3xl:flex-1 ${settingsSearching ? '@max-3xl:hidden @3xl:invisible' : ''}`}
+                aria-hidden={settingsSearching || undefined}
+              >
+                {/* Il binario prende la larghezza delle sue schede, non della
+                    riga: è un gruppo di schede, non una barra. Se non ci sta,
+                    scorre (SegmentedControl, overflow «scroll»). */}
+                <div className="flex">
+                  <div className="min-w-0">
+                    <SegmentedControl<SettingsTabId>
+                      value={activeSettingsTab}
+                      onChange={id => {
+                        setSettingsTab(id);
+                        settingsScrollRef.current?.scrollTo({ top: 0 });
+                      }}
+                      ariaLabel={t('settings.tabsAria', 'Schede delle impostazioni')}
+                      overflow="scroll"
+                      equalWidth={false}
+                      size="sm"
+                      options={visibleSettingsTabs.map(tab => ({ value: tab.id, label: t(tab.labelKey, tab.label) }))}
+                    />
+                  </div>
+                </div>
+              </div>
+              <div className="order-first @3xl:order-none @3xl:w-72 @3xl:flex-shrink-0">
+                <SearchField
+                  value={settingsQuery}
+                  onChange={setSettingsQuery}
+                  onKeyDown={e => { if (e.key === 'Escape') setSettingsQuery(''); }}
+                  placeholder={t('settings.searchPlaceholder', 'Cerca nelle impostazioni')}
+                  ariaLabel={t('settings.searchPlaceholder', 'Cerca nelle impostazioni')}
+                />
+              </div>
             </div>
-
-            {/* Indice della pagina: chip-àncora che saltano al blocco. Nessuno
-                stato — la pagina è unica e i blocchi sono sempre tutti
-                montati, i chip fanno solo scorrere. Mentre si cerca spariscono:
-                porterebbero a blocchi nascosti. */}
-            {settingsMatches === null && (
-            <div className="-mx-4 mb-4 flex gap-2 overflow-x-auto px-4 pb-1 sm:mx-0 sm:flex-wrap sm:overflow-visible sm:px-0">
-              {visibleSettingsGroups.map(g => (
-                <button
-                  key={g.id}
-                  type="button"
-                  onClick={() => document.getElementById(g.id)?.scrollIntoView({ behavior: 'smooth', block: 'start' })}
-                  className="inline-flex h-9 flex-shrink-0 items-center gap-1.5 rounded-[var(--ds-radius-control)] bg-[var(--ds-surface)] px-3.5 text-[13px] font-medium text-[var(--ds-text-secondary)] shadow-[var(--ds-shadow-card)] transition-colors hover:text-[var(--ds-text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
-                >
-                  <g.Icon size={14} className="flex-shrink-0" />
-                  {t(g.labelKey, g.label)}
-                </button>
-              ))}
-            </div>
-            )}
 
             {settingsMatches === 0 && (
               <p className="px-1 py-12 text-center text-[14px] text-[var(--ds-text-muted)]">
@@ -3528,12 +3485,13 @@ const App: React.FC = () => {
               </p>
             )}
 
+            <SettingsVisibleContext.Provider value={isSettingsSectionVisible}>
             <div ref={settingsRootRef}>
 
             {/* Preferenze personali: valgono per chi è collegato (e per questo
                 dispositivo, nel caso delle push), non per il ristorante. */}
-            <SettingsSection id="imp-profilo" label={t('settings.tabProfile')}>
-              <div className="space-y-3" data-imp-lista="">
+            <SettingsSection id="imp-profilo" label={t('settings.tabProfile')} description={t('settings.sectionProfileHint', 'Valgono per te, su ogni dispositivo.')}>
+              <div className={settingsGridClass} data-imp-lista="">
               <div className="rounded-[var(--ds-radius)] bg-[var(--ds-surface)] p-4 shadow-[var(--ds-shadow-card)]">
                 <label htmlFor="preferred-landing" className="mb-1 block text-[15px] font-semibold text-[var(--ds-text-primary)]">
                   {t('settings.landingPage')}
@@ -3663,8 +3621,8 @@ const App: React.FC = () => {
 
             {/* Il ristorante in quanto luogo: quando è aperto, cosa è chiuso,
                 le routine di servizio, sala e cucina, l'identità legale. */}
-            <SettingsSection id="imp-ristorante" label={t('settings.tabRestaurant')}>
-              <div className="space-y-3" data-imp-lista="">
+            <SettingsSection id="imp-ristorante" label={t('settings.tabRestaurant')} description={t('settings.sectionRestaurantHint', 'Orari, chiusure, sala e cucina, dati del locale.')}>
+              <div className={settingsGridClass} data-imp-lista="">
                 <SettingsDisclosure
                   icon={Clock}
                   title={t('settings.openingHours')}
@@ -3691,20 +3649,26 @@ const App: React.FC = () => {
                 che compaiono in Attività per una squadra (ex promemoria cucina
                 dei banchetti e pane, ora modificabili) e i promemoria, che
                 mandano solo una notifica. */}
-            <SettingsSection id="imp-attivita" label={t('settings.tabScheduled', 'Attività programmate')}>
-              <div className="space-y-3" data-imp-lista="">
-                <CardErrorBoundary label={t('settings.tabScheduled', 'Attività programmate')}>
-                  <ScheduledTasksManager showToast={addToast} />
-                </CardErrorBoundary>
-                <RemindersManager showToast={addToast} />
+            <SettingsSection id="imp-attivita" label={t('settings.tabScheduled', 'Attività programmate')} description={t('settings.sectionScheduledHint', 'Compiti e promemoria che il locale si ricorda da solo.')}>
+              <div className={settingsGridClass} data-imp-lista="">
+                {/* Due liste già aperte: a metà larghezza ogni titolo andava
+                    a capo. Stanno una sotto l'altra, su tutta la riga. */}
+                <div className={settingsWideClass}>
+                  <CardErrorBoundary label={t('settings.tabScheduled', 'Attività programmate')}>
+                    <ScheduledTasksManager showToast={addToast} />
+                  </CardErrorBoundary>
+                </div>
+                <div className={settingsWideClass}>
+                  <RemindersManager showToast={addToast} />
+                </div>
               </div>
             </SettingsSection>
 
             {/* Tutto ciò che governa come nascono e si comportano le
                 prenotazioni: canali di ingresso, risposte all'ospite, opzioni
                 del modal, caparra, blacklist, logica tavoli. */}
-            <SettingsSection id="imp-prenotazioni" label={t('nav.items.reservations')}>
-              <div className="space-y-3" data-imp-lista="">
+            <SettingsSection id="imp-prenotazioni" label={t('nav.items.reservations')} description={t('settings.sectionReservationsHint', 'Come arrivano le prenotazioni e cosa riceve l\'ospite.')}>
+              <div className={settingsGridClass} data-imp-lista="">
                 {/* Solo il canale web: la scheda di Sofia sta nella sezione AI. */}
                 <FeatureTogglesManager showToast={addToast} only="web" />
                 <SettingsDisclosure
@@ -3738,7 +3702,6 @@ const App: React.FC = () => {
 
                 <SettingsDisclosure
                   icon={AlertTriangle}
-                  iconTone="pending"
                   title={t('settings.allergens')}
                   description={t('settings.allergensHint')}
                 >
@@ -3750,7 +3713,6 @@ const App: React.FC = () => {
                 {hasFeature('web_booking') && (
                   <SettingsDisclosure
                     icon={CreditCard}
-                    iconTone="positive"
                     title={t('settings.autoDeposit')}
                     description={t('settings.autoDepositHint')}
                   >
@@ -3762,7 +3724,6 @@ const App: React.FC = () => {
                     fonte per fonte — niente più scelta hardcoded. */}
                 <SettingsDisclosure
                   icon={Ban}
-                  iconTone="pending"
                   title="Blacklist"
                   description={t('settings.blacklistHint')}
                 >
@@ -3775,30 +3736,28 @@ const App: React.FC = () => {
                 minuti di preparazione, stop per data. Visibile solo col
                 modulo venduto. */}
             {hasFeature('takeaway') && (
-              <SettingsSection id="imp-asporto" label={t('nav.items.takeaway')}>
-                <CardErrorBoundary label={t('settings.takeaway')}>
-                  <TakeawaySettingsCard showToast={addToast} />
-                </CardErrorBoundary>
+              <SettingsSection id="imp-asporto" label={t('nav.items.takeaway')} description={t('settings.sectionTakeawayHint', 'Capienza, tempi di preparazione e stop degli ordini.')}>
+                <div className={settingsGridClass} data-imp-lista="">
+                  <CardErrorBoundary label={t('settings.takeaway')}>
+                    <TakeawaySettingsCard showToast={addToast} />
+                  </CardErrorBoundary>
+                </div>
               </SettingsSection>
             )}
 
             {/* Gateway e regole dei pagamenti. */}
-            <SettingsSection id="imp-pagamenti" label={t('nav.items.payments')}>
-              <div className="space-y-3" data-imp-lista="">
-                <div className="rounded-[var(--ds-radius)] bg-[var(--ds-surface)] p-3 shadow-[var(--ds-shadow-card)]">
-                  <div className="flex min-h-[40px] items-center justify-between gap-3">
-                    <div className="flex min-w-0 items-center gap-3">
-                      <SettingsIcon icon={CreditCard} />
-                      <div className="min-w-0">
-                        <h4 className="text-[15px] font-semibold text-[var(--ds-text-primary)]">Stripe Connect</h4>
-                        <p className="text-[13px] text-[var(--ds-text-muted)]">{t('settings.paymentGateway')}</p>
-                      </div>
-                    </div>
-                    <StatusPill tone="positive" className="flex-shrink-0">
-                      <span className="h-1.5 w-1.5 rounded-full bg-[var(--ds-seated-solid)]" aria-hidden />
-                      {t('settings.activeSimulated')}
-                    </StatusPill>
+            <SettingsSection id="imp-pagamenti" label={t('nav.items.payments')} description={t('settings.sectionPaymentsHint', 'Incassi online, conto al tavolo, coperto e servizio.')}>
+              <div className={settingsGridClass} data-imp-lista="">
+                <div className={`${settingsCardClass} flex min-h-[72px] items-center gap-3 px-4 py-3`}>
+                  <SettingsIcon icon={CreditCard} tone="positive" />
+                  <div className="min-w-0 flex-1">
+                    <h4 className="text-[14px] font-semibold text-[var(--ds-text-primary)]">Stripe Connect</h4>
+                    <p className="text-[13px] leading-snug text-[var(--ds-text-muted)]">{t('settings.paymentGateway')}</p>
                   </div>
+                  <StatusPill tone="positive" className="flex-shrink-0">
+                    <span className="h-1.5 w-1.5 rounded-full bg-[var(--ds-seated-solid)]" aria-hidden />
+                    {t('settings.activeSimulated')}
+                  </StatusPill>
                 </div>
                 <CardErrorBoundary label="Revolut">
                   <RevolutIntegrationCard showToast={addToast} />
@@ -3826,7 +3785,6 @@ const App: React.FC = () => {
                     N ore, col messaggio delle prenotazioni non confermate. */}
                 <SettingsDisclosure
                   icon={CreditCard}
-                  iconTone="pending"
                   title={t('settings.linkExpiry')}
                   description={t('settings.linkExpiryHint')}
                 >
@@ -3840,8 +3798,8 @@ const App: React.FC = () => {
                 tavolo nel piano, perché l'emissione parte dalla sua
                 chiusura (stesso gate del chip in SETTINGS_GROUPS). */}
             {hasFeature('pay_at_table') && (
-              <SettingsSection id="imp-fiscalita" label={t('nav.items.fiscal')}>
-                <div className="space-y-3" data-imp-lista="">
+              <SettingsSection id="imp-fiscalita" label={t('nav.items.fiscal')} description={t('settings.sectionFiscalHint', 'Dati dell\'esercente, scontrino elettronico e aliquote.')}>
+                <div className={settingsGridClass} data-imp-lista="">
                   <CardErrorBoundary label={t('nav.items.fiscal')}>
                     <FiscalSettingsManager showToast={addToast} />
                   </CardErrorBoundary>
@@ -3864,8 +3822,8 @@ const App: React.FC = () => {
                 per chi decide cosa finisce nella cassa del locale (le route
                 sono settings:full). */}
             {hasFeature('passepartout') && hasPermission('settings:full') && (
-              <SettingsSection id="imp-passepartout" label={t('settings.tabPassepartout', 'Passepartout')}>
-                <div className="space-y-3" data-imp-lista="">
+              <SettingsSection id="imp-passepartout" label={t('settings.tabPassepartout', 'Passepartout')} description={t('settings.sectionPassepartoutHint', 'Cosa passa tra Sympotia e la cassa del locale.')}>
+                <div className={settingsGridClass} data-imp-lista="">
                   <CardErrorBoundary label="Passepartout">
                     <VerificaCassa showToast={addToast} />
                   </CardErrorBoundary>
@@ -3899,8 +3857,8 @@ const App: React.FC = () => {
                 le card di HACCP › Configura, che resta per chi gestisce
                 l'HACCP senza le Impostazioni; le route vogliono haccp:manage. */}
             {hasPermission('haccp:manage') && (
-              <SettingsSection id="imp-haccp" label={t('settings.tabHaccp', 'HACCP')}>
-                <div className="space-y-3" data-imp-lista="">
+              <SettingsSection id="imp-haccp" label={t('settings.tabHaccp', 'HACCP')} description={t('settings.sectionHaccpHint', 'Sensori, postazioni, limiti del manuale ed etichette.')}>
+                <div className={settingsGridClass} data-imp-lista="">
                   <SettingsDisclosure
                     icon={Radio}
                     title={t('settings.haccpSensors', 'Sensori di temperatura')}
@@ -3944,8 +3902,8 @@ const App: React.FC = () => {
             {/* I canali con cui il ristorante scrive e riceve: email in
                 uscita e in entrata, allegati. Le risposte AI ai messaggi
                 stanno nella sezione AI. */}
-            <SettingsSection id="imp-comunicazioni" label={t('nav.groups.communications')}>
-              <div className="space-y-3" data-imp-lista="">
+            <SettingsSection id="imp-comunicazioni" label={t('settings.sectionEmail', 'Email e chat')} description={t('settings.sectionEmailHint', 'Posta in uscita e in arrivo, allegati, frasi pronte della chat staff.')}>
+              <div className={settingsGridClass} data-imp-lista="">
                 <CardErrorBoundary label={t('settings.smtp')}>
                   <SmtpIntegrationCard showToast={addToast} />
                 </CardErrorBoundary>
@@ -3965,8 +3923,8 @@ const App: React.FC = () => {
                 l'agente che legge i messaggi e i consumi del mese. L'agente
                 stava in AI: qui sta col canale su cui lavora. */}
             {hasFeature('whatsapp') && (
-              <SettingsSection id="imp-whatsapp" label={t('settings.tabWhatsapp', 'WhatsApp')}>
-                <div className="space-y-3" data-imp-lista="">
+              <SettingsSection id="imp-whatsapp" label={t('settings.tabWhatsapp', 'WhatsApp')} description={t('settings.sectionWhatsappHint', 'Numero, template, agente e campagne.')}>
+                <div className={settingsGridClass} data-imp-lista="">
                   <SettingsDisclosure
                     icon={Phone}
                     title={t('settings.waNumber', 'Numero e stato')}
@@ -3990,6 +3948,7 @@ const App: React.FC = () => {
                   </CardErrorBoundary>
                   <SettingsDisclosure
                     icon={Wand2}
+                    iconTone="ai"
                     title={t('settings.waAgent', 'Agente automatico')}
                     description={t('settings.waAgentHint', 'Bozze, risposte o azioni da solo sui messaggi in arrivo')}
                   >
@@ -4059,46 +4018,54 @@ const App: React.FC = () => {
                 visita e — col profilo collegato — risposte dalla pagina
                 Recensioni. Visibile solo col modulo venduto. */}
             {hasFeature('reviews') && (
-              <SettingsSection id="imp-recensioni" label={t('nav.items.reviews')}>
-                <CardErrorBoundary label={t('settings.reviewRequest')}>
-                  <ReviewSettingsCard showToast={addToast} />
-                </CardErrorBoundary>
+              <SettingsSection id="imp-recensioni" label={t('nav.items.reviews')} description={t('settings.sectionReviewsHint', 'La richiesta di recensione dopo la visita.')}>
+                <div className={settingsGridClass} data-imp-lista="">
+                  <CardErrorBoundary label={t('settings.reviewRequest')}>
+                    <ReviewSettingsCard showToast={addToast} />
+                  </CardErrorBoundary>
+                </div>
               </SettingsSection>
             )}
 
             {/* Tutto ciò che è guidato dall'AI in un posto solo: Sofia al
                 telefono (con le sue regolazioni), le risposte AI ai messaggi
                 WhatsApp e il prompt della logica tavoli. */}
-            <SettingsSection id="imp-ai" label="AI">
-              <div className="space-y-3" data-imp-lista="">
+            <SettingsSection id="imp-ai" label="AI" description={t('settings.sectionAiHint', 'Sofia al telefono e le istruzioni per l\'AI.')}>
+              <div className={settingsGridClass} data-imp-lista="">
                 <FeatureTogglesManager showToast={addToast} only="voice" />
-                {/* Minuti del mese contro quelli inclusi nell'add-on e tetto
-                    degli extra: solo per chi ha Sofia. */}
-                {hasFeature('voice') && (
-                  <CardErrorBoundary label={t('settings.voiceUsage', 'Minuti di Sofia')}>
-                    <VoiceUsageCard showToast={addToast} />
-                  </CardErrorBoundary>
-                )}
-                {/* Chi risponde al numero di Sofia: lei subito, o prima il
-                    cellulare del locale (docs/telefono-piano.md). */}
-                {hasFeature('voice') && (
-                  <CardErrorBoundary label={t('settings.phoneRouting', 'Chi risponde al telefono')}>
-                    <PhoneRoutingCard showToast={addToast} />
-                  </CardErrorBoundary>
-                )}
                 {/* Istruzioni testuali per una futura assegnazione tavoli
-                    guidata da AI; oggi il testo è solo salvato. */}
+                    guidata da AI; oggi il testo è solo salvato. Sta accanto
+                    a Sofia: le due card che si aprono fanno una riga, quelle
+                    già aperte sotto prendono tutta la larghezza. */}
                 <CardErrorBoundary label={t('settings.aiTablePrompt')}>
                   <TableAssignmentAiPromptCard showToast={addToast} />
                 </CardErrorBoundary>
+                {/* Chi risponde al numero di Sofia: lei subito, o prima il
+                    cellulare del locale (docs/telefono-piano.md). */}
+                {hasFeature('voice') && (
+                  <div className={settingsWideClass}>
+                    <CardErrorBoundary label={t('settings.phoneRouting', 'Chi risponde al telefono')}>
+                      <PhoneRoutingCard showToast={addToast} />
+                    </CardErrorBoundary>
+                  </div>
+                )}
+                {/* Minuti del mese contro quelli inclusi nell'add-on e tetto
+                    degli extra: solo per chi ha Sofia. */}
+                {hasFeature('voice') && (
+                  <div className={settingsWideClass}>
+                    <CardErrorBoundary label={t('settings.voiceUsage', 'Minuti di Sofia')}>
+                      <VoiceUsageCard showToast={addToast} />
+                    </CardErrorBoundary>
+                  </div>
+                )}
               </div>
             </SettingsSection>
 
             {/* Utenti, ruoli e log: visibile solo a chi può usarne
                 almeno una card. */}
             {(canManageUsers() || canViewLogs()) && (
-              <SettingsSection id="imp-amministrazione" label={t('settings.tabAdmin')}>
-                <div className="grid grid-cols-1 gap-3 md:grid-cols-2" data-imp-lista="">
+              <SettingsSection id="imp-amministrazione" label={t('settings.tabAdmin')} description={t('settings.sectionAdminHint', 'Utenti, permessi dei ruoli e registro delle operazioni.')}>
+                <div className={settingsGridClass} data-imp-lista="">
                   {canManageUsers() && (
                     <>
                       <SettingsNavCard
@@ -4127,6 +4094,7 @@ const App: React.FC = () => {
               </SettingsSection>
             )}
             </div>{/* /settingsRootRef */}
+            </SettingsVisibleContext.Provider>
           </div>
           </div>
           </div>

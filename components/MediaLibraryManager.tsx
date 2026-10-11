@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next';
 import { Paperclip, Loader2, Upload, Trash2, FileText, Image as ImageIcon, Film, Music } from 'lucide-react';
 import { listMedia, uploadMedia, deleteMedia, type MediaFile } from '../services/mediaApiService';
 import { useAuth } from '../contexts/AuthContext';
+import { SettingsSummary, settingsCardClass } from './SettingsCard';
 
 /* ── Libreria media ───────────────────────────────────────────────────────
    File che si mandano più volte agli stessi clienti: il menù di Ferragosto,
@@ -88,22 +89,14 @@ export const MediaLibraryManager: React.FC<Props> = ({ showToast }) => {
     };
 
     return (
-        <details className="group bg-[var(--ds-surface)] rounded-[var(--ds-radius)] shadow-[var(--ds-shadow-card)] overflow-hidden">
-            <summary className="flex items-center justify-between gap-3 px-4 py-3 cursor-pointer select-none list-none [&::-webkit-details-marker]:hidden hover:bg-[var(--ds-surface-row)] transition-colors">
-                <div className="flex items-center gap-3 min-w-0">
-                    <div className="w-10 h-10 rounded-[var(--ds-radius)] bg-[var(--ds-surface-row)] flex items-center justify-center text-[var(--ds-arriving-text)] flex-shrink-0">
-                        <Paperclip className="h-5 w-5" aria-hidden />
-                    </div>
-                    <div className="min-w-0">
-                        <h4 className="font-medium text-[14px] text-[var(--ds-text-primary)]">Media</h4>
-                        <p className="text-[13px] text-[var(--ds-text-muted)] truncate">
-                            {loading ? t('media.loading', 'Caricamento…')
-                                : files.length === 0 ? t('media.empty', 'Nessun file: carica il menù o la piantina')
-                                : `${files.length} file pronti da allegare ai messaggi`}
-                        </p>
-                    </div>
-                </div>
-            </summary>
+        <details className={settingsCardClass}>
+            <SettingsSummary
+                icon={Paperclip}
+                title="Media"
+                description={loading ? t('media.loading', 'Caricamento…')
+                    : files.length === 0 ? t('media.empty', 'Nessun file: carica il menù o la piantina')
+                    : `${files.length} file pronti da allegare ai messaggi`}
+            />
 
             <div className="border-t border-[var(--ds-border)] px-4 py-4 space-y-4">
                 <p className="text-[13px] leading-relaxed text-[var(--ds-text-muted)]">

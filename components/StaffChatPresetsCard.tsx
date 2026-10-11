@@ -1,11 +1,12 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { MessagesSquare, Save, Loader2, ChevronDown, Plus, X as XIcon, RotateCcw } from 'lucide-react';
+import { MessagesSquare, Save, Loader2, Plus, X as XIcon, RotateCcw } from 'lucide-react';
 import { Loader } from './Loader';
 import { staffChatApiService } from '../services/staffChatApiService';
 import { STAFF_MESSAGE_PRESETS } from '../services/staffChat';
 import { useAuth } from '../contexts/AuthContext';
 import { dsInput } from './ds';
+import { SettingsSummary, settingsCardClass } from './SettingsCard';
 
 interface Props {
   showToast: (msg: string, kind?: 'success' | 'error' | 'info') => void;
@@ -66,20 +67,13 @@ export const StaffChatPresetsCard: React.FC<Props> = ({ showToast }) => {
   };
 
   return (
-    <details className="group bg-[var(--ds-surface)] rounded-[var(--ds-radius)] shadow-[var(--ds-shadow-card)] overflow-hidden"
+    <details className={settingsCardClass}
       open={expanded} onToggle={e => setExpanded((e.target as HTMLDetailsElement).open)}>
-      <summary className="flex items-center justify-between gap-3 px-4 py-3 cursor-pointer select-none list-none [&::-webkit-details-marker]:hidden hover:bg-[var(--ds-surface-row)] transition-colors">
-        <div className="flex items-center gap-3 min-w-0">
-          <div className="w-10 h-10 rounded-[var(--ds-radius)] bg-[var(--ds-surface-row)] flex items-center justify-center text-[var(--ds-text-primary)] flex-shrink-0">
-            <MessagesSquare className="w-5 h-5" />
-          </div>
-          <div className="min-w-0">
-            <h4 className="font-medium text-[14px] text-[var(--ds-text-primary)]">Messaggi rapidi chat staff</h4>
-            <p className="text-[13px] text-[var(--ds-text-muted)]">Le frasi a un tap del composer ("Piatto finito", "Serve un runner"…): scrivile come le direbbe la tua brigata.</p>
-          </div>
-        </div>
-        <ChevronDown className="w-5 h-5 text-[var(--ds-text-muted)] flex-shrink-0 transition-transform group-open:rotate-180" />
-      </summary>
+      <SettingsSummary
+        icon={MessagesSquare}
+        title="Messaggi rapidi chat staff"
+        description={'Le frasi a un tap del composer ("Piatto finito", "Serve un runner"…): scrivile come le direbbe la tua brigata.'}
+      />
 
       <div className="px-4 pb-4 pt-1 border-t border-[var(--ds-border)]">
         {loading ? (
