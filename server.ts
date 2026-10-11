@@ -30876,15 +30876,17 @@ function findVoiceDateBlock(date: string, shift: 'LUNCH' | 'DINNER', blocks: Voi
 // date readback keeps weekday+day coherent (same reason as check-availability);
 // callback_hours is operator-written free text ("dalle 9:00 alle 12:00") and
 // stays as written even in the English branch — it's the operator's wording.
-function buildVoiceDateBlockMessage(date: string, shift: 'LUNCH' | 'DINNER', block: VoiceDateBlock, language?: string | null): string {
+// dayLabel ("oggi") sostituisce la data quando chi chiama ne conosce già una
+// forma migliore — un blocco per oggi si dice "per oggi", non "per domenica 11 ottobre".
+function buildVoiceDateBlockMessage(date: string, shift: 'LUNCH' | 'DINNER', block: VoiceDateBlock, language?: string | null, dayLabel?: string): string {
     if (isEnglishGuest(normalizeLanguageCode(language))) {
         const shiftLabel = block.shift === 'ALL' ? '' : (shift === 'LUNCH' ? ' for lunch' : ' for dinner');
         const when = block.callback_hours?.trim() || 'during the restaurant opening hours';
-        return `For ${formatItalianDateReadback(date, 'en')}${shiftLabel} bookings are handled personally by our staff, so I cannot register it myself. Please call back ${when} to speak with an operator. Thank you!`;
+        return `For ${dayLabel || formatItalianDateReadback(date, 'en')}${shiftLabel} bookings are handled personally by our staff, so I cannot register it myself. Please call back ${when} to speak with an operator. Thank you!`;
     }
     const shiftLabel = block.shift === 'ALL' ? '' : (shift === 'LUNCH' ? ' a pranzo' : ' a cena');
     const when = block.callback_hours?.trim() || 'negli orari di apertura del ristorante';
-    return `Per ${formatItalianDateReadback(date)}${shiftLabel} le prenotazioni vengono gestite personalmente dal nostro staff, quindi non posso registrarla io. La invitiamo a richiamare ${when} per parlare con un operatore. Grazie!`;
+    return `Per ${dayLabel || formatItalianDateReadback(date)}${shiftLabel} le prenotazioni vengono gestite personalmente dal nostro staff, quindi non posso registrarla io. La invitiamo a richiamare ${when} per parlare con un operatore. Grazie!`;
 }
 
 function isValidScheduleEntry(e: any): e is ScheduledSuspension {
