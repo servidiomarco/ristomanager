@@ -19,3 +19,4 @@ export { twilioMediaAuthHeader, parseTwilioInbound, twilioSignature } from './pr
 export type {
     WhatsAppSender, TwilioSender, OutboundConfirmationResult, WhatsAppTemplateOpts, InboundMessage,
 } from './types.js';
+export { createWhatsAppRouter } from './routes.js';

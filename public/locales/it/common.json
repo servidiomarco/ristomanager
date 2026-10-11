@@ -153,7 +153,14 @@
     "voiceUsage": "Minuti di Sofia",
     "tabScheduled": "Attività programmate",
     "searchPlaceholder": "Cerca nelle impostazioni",
-    "searchEmpty": "Nessuna impostazione per «{{q}}»"
+    "searchEmpty": "Nessuna impostazione per «{{q}}»",
+    "tabWhatsapp": "WhatsApp",
+    "waNumber": "Numero e stato",
+    "waNumberHint": "Da quale numero scrive il locale, e se manda",
+    "waTemplates": "Template",
+    "waTemplatesHint": "I messaggi approvati da Meta, uno per tipo",
+    "waUsage": "Consumi del mese",
+    "waUsageHint": "Messaggi ricevuti e inviati, spesa dell'AI"
   },
   "aria": {
     "openMenu": "Apri menu",

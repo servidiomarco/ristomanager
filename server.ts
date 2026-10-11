@@ -49,6 +49,7 @@ import {
     configureWhatsApp, isWhatsAppReady, isSmsReady, getSender, backendBaseUrl,
     sendWhatsAppText, sendTwilioSms, logOutboundMessage, logInboundMessage,
     handleTwilioWhatsAppInbound, validateTwilioSignature, pickTemplate, twilioMediaAuthHeader,
+    createWhatsAppRouter,
     type OutboundConfirmationResult, type WhatsAppTemplateOpts,
 } from './services/whatsapp/index.js';
 import { AI_KEY_INVALID, AI_KEY_INVALID_MESSAGE, isAiKeyInvalid } from './utils/aiErrors.js';
@@ -29346,6 +29347,10 @@ app.use('/food-cost', createFoodCostRouter({
         return Object.entries(prefs).filter(([, p]) => p?.wine === true || p?.bar === true).map(([c]) => c);
     },
 }));
+
+// Impostazioni › WhatsApp: stato del numero, template, consumi del mese
+// (services/whatsapp/routes.ts).
+app.use('/whatsapp', createWhatsAppRouter());
 
 // Fatture fornitori: dall'XML della fattura al carico del magazzino e ai
 // prezzi del food cost. Le rotte stanno in services/fattureFornitoriRoutes.ts;

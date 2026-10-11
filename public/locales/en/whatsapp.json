@@ -1,0 +1,61 @@
+{
+  "loading": "Loading…",
+  "status": {
+    "copy": "Copy",
+    "loadError": "Status unavailable",
+    "twilioEnv": "Twilio · main account",
+    "provider": "Provider: {{p}}",
+    "connected": "Connected",
+    "notConnectedTitle": "No number connected",
+    "notConnected": "Messages to guests go out by email, if configured. Connecting the restaurant's own number comes with an upcoming update.",
+    "sms": "SMS fallback",
+    "on": "On",
+    "off": "Off",
+    "webhookInbound": "Incoming messages",
+    "webhookStatus": "Message status"
+  },
+  "templates": {
+    "loadError": "Templates unavailable",
+    "missing": "not set",
+    "approved": "active",
+    "pending": "in review",
+    "unsubmitted": "to submit to Meta",
+    "rejected": "rejected",
+    "unknown": "set",
+    "hint": "Without an active template the message goes out by SMS or email.",
+    "group": {
+      "prenotazioni": "Bookings",
+      "caparre": "Deposits",
+      "conto": "Bill",
+      "recensioni": "Reviews",
+      "banchetti": "Banquets"
+    },
+    "name": {
+      "BOOKING_RECEIVED": "Request received",
+      "BOOKING_CONFIRMED": "Booking confirmed",
+      "BOOKING_CONFIRMED_LINK": "Confirmed, with «Manage»",
+      "BOOKING_CONFIRMED_LINK_MAPS": "Confirmed, with «Manage» and «Directions»",
+      "BOOKING_REMINDER": "Reminder",
+      "BOOKING_REMINDER_LINK": "Reminder, with «Manage»",
+      "BOOKING_UPDATED": "Booking changed",
+      "BOOKING_DECLINED": "Booking declined",
+      "BOOKING_DEPOSIT_REQUEST": "Deposit request (Revolut)",
+      "BOOKING_DEPOSIT_REQUEST_SUMUP": "Deposit request (SumUp)",
+      "BOOKING_DEPOSIT_CONFIRMED": "Deposit received",
+      "TABLE_BILL_LINK_CTA": "Table bill, with button",
+      "TABLE_BILL_LINK": "Table bill, with card",
+      "TAKEAWAY_BILL_LINK_CTA": "Takeaway bill",
+      "REVIEW_REQUEST": "Review request",
+      "BANQUET_QUOTE": "Banquet quote"
+    }
+  },
+  "usage": {
+    "loadError": "Usage unavailable",
+    "inbound": "received",
+    "staff": "written by staff",
+    "automatic": "automatic",
+    "failed": "not delivered",
+    "sms": "SMS sent: {{n}}",
+    "ai": "Messaging AI: {{runs}} requests, {{cost}}"
+  }
+}

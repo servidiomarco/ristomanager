@@ -7,7 +7,7 @@ import { backendBaseUrl } from './config.js';
 const webhookTokenCache = new Map<number, { token: string | null; at: number }>();
 const WEBHOOK_TOKEN_TTL_MS = 60_000;
 
-async function tenantWebhookToken(tenantId: number): Promise<string | null> {
+export async function tenantWebhookToken(tenantId: number): Promise<string | null> {
     const cached = webhookTokenCache.get(tenantId);
     if (cached && Date.now() - cached.at <= WEBHOOK_TOKEN_TTL_MS) return cached.token;
     try {

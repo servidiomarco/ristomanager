@@ -549,6 +549,10 @@ Per i ristoranti con cassa **Passepartout Menù** (modulo dedicato). Tutto si re
 - **Posizioni, nome del profilo e bottoni**: una posizione condivisa dal cliente arriva in chat come link a Google Maps (prima andava persa); la notifica di un nuovo messaggio mostra il nome del profilo WhatsApp invece del solo numero; un messaggio arrivato due volte per un ritentativo del provider compare una volta sola.
 - **Gli invii automatici non entrano in Messaggi**: la richiesta di recensione post-visita non compare né in lista né in chat, perché non è uno scambio e riempirebbe l'inbox ogni sera. Resta però tracciata dove serve — nello storico messaggi della prenotazione e nello stato della richiesta. Le conferme, invece, restano visibili: sono la traccia di «al cliente è arrivata la conferma?».
 
+**Impostazioni › WhatsApp**
+- Una sezione propria con tutto il canale: **Numero e stato** (il numero da cui scrive il locale, se manda, se il ripiego SMS è attivo, gli indirizzi da dare al provider), **Template** (ogni messaggio automatico, in italiano e in inglese, con lo stato dell'approvazione di Meta: attivo, in approvazione, rifiutato col motivo, o non impostato — e allora parte via SMS o email), **Messaggi con AI** (spostata qui da Impostazioni › AI) e **Consumi del mese** (messaggi ricevuti, scritti dallo staff, automatici e non consegnati, SMS inviati e spesa dell'AI dei messaggi).
+- Si apre anche da un link diretto (`?view=SETTINGS&section=imp-whatsapp`).
+
 **Messaggi automatici al cliente**
 - Conferma, promemoria, avviso di modifica, disdetta, richiesta e conferma caparra, link del conto: partono da **template WhatsApp approvati** (anche in inglese per gli ospiti stranieri — mai messaggi ibridi) con **fallback automatico a SMS** se il destinatario non è raggiungibile su WhatsApp.
 - **Ordine dei canali configurabile per fonte** di prenotazione (es. web: WhatsApp → SMS + copia email; telefono: solo SMS), con scalata automatica al canale successivo in caso di errore.
@@ -884,6 +888,7 @@ Pagina unica a blocchi, con chip-àncora per saltare alla sezione e una **ricerc
 
 | Data | Sezione | Modifica |
 |---|---|---|
+| 2026-10-11 | Messaggi: WhatsApp e SMS, Impostazioni | **Impostazioni › WhatsApp.** Una sezione nuova riunisce il canale: da quale numero scrive il locale e se manda, lo stato di ogni template approvato da Meta (in italiano e in inglese), i Messaggi con AI e i consumi del mese, con i messaggi non consegnati e la spesa dell'AI. |
 | 2026-10-11 | Messaggi: WhatsApp e SMS | Una posizione condivisa dal cliente su WhatsApp ora arriva in chat come link a Google Maps, la notifica di un nuovo messaggio mostra il nome del profilo WhatsApp, e un messaggio ripetuto dal provider compare una volta sola. |
 | 2026-10-11 | Piattaforma | WhatsApp e SMS partono dal mittente del ristorante: le credenziali Twilio in env valgono solo per i tenant in `WHATSAPP_ENV_TENANT_IDS` (di serie il Frantoio); gli altri non scrivono più dal numero e coi template del Frantoio. L'esito di consegna torna al ristorante che ha mandato (callback col token). Codice nel nuovo modulo `services/whatsapp/`. |
 | 2026-10-10 | Agente vocale "Sofia", Impostazioni | **Cordless del locale.** In Impostazioni › AI › «Chi risponde al telefono» si aggiunge un cordless (base DECT IP o app SIP): squilla insieme al CRM e ai cellulari, col nome del cliente sul display, e chiama i clienti col numero del locale. Il registro dice quale cordless ha risposto. Dal CRM e dal cordless si chiamano solo fissi e cellulari italiani. |

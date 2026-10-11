@@ -1,0 +1,61 @@
+{
+  "loading": "Caricamento…",
+  "status": {
+    "copy": "Copia",
+    "loadError": "Stato non disponibile",
+    "twilioEnv": "Twilio · account principale",
+    "provider": "Provider: {{p}}",
+    "connected": "Collegato",
+    "notConnectedTitle": "Nessun numero collegato",
+    "notConnected": "I messaggi ai clienti partono per email, se configurata. Il collegamento del numero del locale arriva con un prossimo aggiornamento.",
+    "sms": "Ripiego SMS",
+    "on": "Attivo",
+    "off": "Spento",
+    "webhookInbound": "Messaggi in arrivo",
+    "webhookStatus": "Esito dei messaggi"
+  },
+  "templates": {
+    "loadError": "Template non disponibili",
+    "missing": "non impostato",
+    "approved": "attivo",
+    "pending": "in approvazione",
+    "unsubmitted": "da inviare a Meta",
+    "rejected": "rifiutato",
+    "unknown": "impostato",
+    "hint": "Senza un template attivo il messaggio parte via SMS o email.",
+    "group": {
+      "prenotazioni": "Prenotazioni",
+      "caparre": "Caparre",
+      "conto": "Conto",
+      "recensioni": "Recensioni",
+      "banchetti": "Banchetti"
+    },
+    "name": {
+      "BOOKING_RECEIVED": "Richiesta ricevuta",
+      "BOOKING_CONFIRMED": "Prenotazione confermata",
+      "BOOKING_CONFIRMED_LINK": "Confermata, con «Gestisci»",
+      "BOOKING_CONFIRMED_LINK_MAPS": "Confermata, con «Gestisci» e «Come raggiungerci»",
+      "BOOKING_REMINDER": "Promemoria",
+      "BOOKING_REMINDER_LINK": "Promemoria, con «Gestisci»",
+      "BOOKING_UPDATED": "Prenotazione modificata",
+      "BOOKING_DECLINED": "Prenotazione non accettata",
+      "BOOKING_DEPOSIT_REQUEST": "Richiesta di caparra (Revolut)",
+      "BOOKING_DEPOSIT_REQUEST_SUMUP": "Richiesta di caparra (SumUp)",
+      "BOOKING_DEPOSIT_CONFIRMED": "Caparra ricevuta",
+      "TABLE_BILL_LINK_CTA": "Conto al tavolo, col pulsante",
+      "TABLE_BILL_LINK": "Conto al tavolo, con la scheda",
+      "TAKEAWAY_BILL_LINK_CTA": "Conto dell'asporto",
+      "REVIEW_REQUEST": "Richiesta di recensione",
+      "BANQUET_QUOTE": "Preventivo del banchetto"
+    }
+  },
+  "usage": {
+    "loadError": "Consumi non disponibili",
+    "inbound": "ricevuti",
+    "staff": "scritti dallo staff",
+    "automatic": "automatici",
+    "failed": "non consegnati",
+    "sms": "SMS inviati: {{n}}",
+    "ai": "AI dei messaggi: {{runs}} richieste, {{cost}}"
+  }
+}
