@@ -82,5 +82,6 @@
   "agentUndoFailed": "Non annullata",
   "transcriptPending": "Trascrizione in corso…",
   "transcriptFailed": "Trascrizione non riuscita",
-  "transcriptLabel": "Trascrizione"
+  "transcriptLabel": "Trascrizione",
+  "campaigns": "Campagne"
 }

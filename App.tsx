@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
-import { LayoutDashboard, Grid, Settings, ChevronRight, ChevronDown, ChevronUp, ChefHat, PanelLeft, Calendar, CalendarDays, Bell, X, AlertTriangle, LogOut, Users, UserCheck, FileText, UsersRound, Sun, Moon, Sunset, MoreHorizontal, Search, UtensilsCrossed, Plus, BookUser, Boxes, Clock, ShoppingCart, ListChecks, ShieldCheck, Phone, ConciergeBell, Zap, PartyPopper, DoorClosed, StickyNote, CreditCard, MessageCircle, Mail, Kanban, ClipboardList, CookingPot, BellRing, MessagesSquare, Gauge, Building2, Milestone, Ban, Sparkles, Landmark, Percent, Calculator, BarChart3, Star, ShoppingBag, LifeBuoy, PlugZap, Radio, Thermometer, SlidersHorizontal, Tag, Scale, CalendarCheck, CalendarClock, Wand2, QrCode, AudioLines } from 'lucide-react';
+import { LayoutDashboard, Grid, Settings, ChevronRight, ChevronDown, ChevronUp, ChefHat, PanelLeft, Calendar, CalendarDays, Bell, X, AlertTriangle, LogOut, Users, UserCheck, FileText, UsersRound, Sun, Moon, Sunset, MoreHorizontal, Search, UtensilsCrossed, Plus, BookUser, Boxes, Clock, ShoppingCart, ListChecks, ShieldCheck, Phone, ConciergeBell, Zap, PartyPopper, DoorClosed, StickyNote, CreditCard, MessageCircle, Mail, Kanban, ClipboardList, CookingPot, BellRing, MessagesSquare, Gauge, Building2, Milestone, Ban, Sparkles, Landmark, Percent, Calculator, BarChart3, Star, ShoppingBag, LifeBuoy, PlugZap, Radio, Thermometer, SlidersHorizontal, Tag, Scale, CalendarCheck, CalendarClock, Wand2, QrCode, AudioLines, Megaphone } from 'lucide-react';
 import { ViewState, Room, Table, Dish, RestaurantMenu, Reservation, TableStatus, TableShape, BanquetMenu, PaymentStatus, Shift, UserRole, ReservationStatus } from './types';
 import { Dashboard } from './components/Dashboard';
 import { FloorPlan } from './components/FloorPlan';
@@ -77,6 +77,7 @@ import { WhatsAppRemindersCard } from './components/whatsapp/WhatsAppRemindersCa
 import { WhatsAppEntryCard } from './components/whatsapp/WhatsAppEntryCard';
 import { WhatsAppMediaCard } from './components/whatsapp/WhatsAppMediaCard';
 import { WhatsAppTakeawayCard } from './components/whatsapp/WhatsAppTakeawayCard';
+import { WhatsAppCampaignsCard } from './components/whatsapp/WhatsAppCampaignsCard';
 import { ReviewSettingsCard } from './components/ReviewSettingsCard';
 import { RecensioniPage } from './components/RecensioniPage';
 import { MediaLibraryManager } from './components/MediaLibraryManager';
@@ -3285,6 +3286,7 @@ const App: React.FC = () => {
             reservations={reservations}
             openPhoneDigits={pendingInboxPhone}
             onOpenedPhone={() => setPendingInboxPhone(null)}
+            showToast={addToast}
             onCreateReservationFromContact={({ phone_digits, ...prefill }) => {
               // Remember which conversation to link the new booking back to,
               // so it becomes reopenable from the chat after creation.
@@ -4020,6 +4022,15 @@ const App: React.FC = () => {
                   >
                     <CardErrorBoundary label={t('settings.waTakeaway', 'Asporto in chat')}>
                       <WhatsAppTakeawayCard showToast={addToast} />
+                    </CardErrorBoundary>
+                  </SettingsDisclosure>
+                  <SettingsDisclosure
+                    icon={Megaphone}
+                    title={t('settings.waCampaigns', 'Campagne')}
+                    description={t('settings.waCampaignsHint', 'Promozioni ai clienti col consenso: orari, pause, tetto di spesa')}
+                  >
+                    <CardErrorBoundary label={t('settings.waCampaigns', 'Campagne')}>
+                      <WhatsAppCampaignsCard showToast={addToast} />
                     </CardErrorBoundary>
                   </SettingsDisclosure>
                   <SettingsDisclosure

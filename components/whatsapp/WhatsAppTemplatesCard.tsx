@@ -10,7 +10,7 @@ import { getWhatsAppTemplates, type WhatsAppTemplateRow, type TemplateApproval }
    niente — il messaggio scende su SMS o email — ma senza questa scheda non
    lo si vedeva da nessuna parte. */
 
-const GROUP_ORDER: WhatsAppTemplateRow['group'][] = ['prenotazioni', 'caparre', 'conto', 'asporto', 'recensioni', 'banchetti'];
+const GROUP_ORDER: WhatsAppTemplateRow['group'][] = ['prenotazioni', 'caparre', 'conto', 'asporto', 'recensioni', 'banchetti', 'marketing'];
 
 const tone = (configured: boolean, approval: TemplateApproval | null): PillTone => {
   if (!configured) return 'neutral';

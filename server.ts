@@ -57,9 +57,11 @@ import {
     configureWhatsApp, isWhatsAppReady, isSmsReady, getSender, backendBaseUrl,
     sendWhatsAppText, sendTwilioSms, logOutboundMessage, logInboundMessage,
     handleTwilioWhatsAppInbound, validateTwilioSignature, pickTemplate, twilioMediaAuthHeader,
+    handleMetaWebhook, handleMetaWebhookVerify,
     createWhatsAppRouter, isWindowOpen, configureReservationButtons, publicWhatsAppLink, getRemindersPolicy,
     configureWhatsAppMedia, fetchInboundMedia, MediaFetchError, agentMessageBody, photosForAgent,
     notifyTakeawayReady, getTakeawayPolicy,
+    recordMarketingConsent, registerStopHook, configureCampaigns, campaignsTick,
     type OutboundConfirmationResult, type WhatsAppTemplateOpts,
 } from './services/whatsapp/index.js';
 import { AI_KEY_INVALID, AI_KEY_INVALID_MESSAGE, isAiKeyInvalid } from './utils/aiErrors.js';
@@ -962,16 +964,26 @@ async function handleTwilioWhatsAppStatus(tenantId: number, req: express.Request
     console.log(`[Twilio] Status: ${MessageSid} → ${MessageStatus} (to ${To})${errSuffix}`);
     res.status(200).send();
 
+    if (!MessageSid || !MessageStatus) return;
+    await persistDeliveryStatus(
+        tenantId, String(MessageSid), String(MessageStatus),
+        ErrorCode ? String(ErrorCode) : null,
+        ErrorCode ? `${ErrorCode}${ErrorMessage ? ` (${ErrorMessage})` : ''}` : null
+    );
+}
+
+/**
+ * Lo stato di consegna di un messaggio, da Twilio o da Meta (services/
+ * whatsapp/webhooks.ts): la conferma della prenotazione, la riga
+ * dell'inbox, il ripiego su SMS per gli errori WhatsApp definitivi.
+ */
+async function persistDeliveryStatus(tenantId: number, MessageSid: string, rawStatus: string, ErrorCode: string | null, errText: string | null): Promise<void> {
     // Persist the delivery status on the reservation, if we tracked this SID.
     // Twilio delivers callbacks out of order; only advance the status when the
     // new state is meaningful (delivered/failed/undelivered), and only stamp
     // confirmation_delivered_at once, on the first 'delivered' event.
-    if (!MessageSid || !MessageStatus) return;
     try {
-        const status = String(MessageStatus).toLowerCase();
-        const errText = ErrorCode
-            ? `${ErrorCode}${ErrorMessage ? ` (${ErrorMessage})` : ''}`
-            : null;
+        const status = String(rawStatus).toLowerCase();
         const updated = await queryWithRetry(
             `UPDATE reservations
              SET confirmation_status = $1::text,
@@ -1041,6 +1053,13 @@ async function handleTwilioWhatsAppStatus(tenantId: number, req: express.Request
         console.warn('[Twilio] status persist failed:', err?.message || err);
     }
 }
+
+// Il numero WhatsApp di un locale sull'API Cloud di Meta (Fase 12a): un solo
+// indirizzo per tutti, il ristorante viene da phone_number_id. Il corpo JSON
+// arriva già letto, col grezzo in req.rawBody per la firma.
+app.get('/webhook/meta-whatsapp', (req, res) => handleMetaWebhookVerify(req, res));
+// rls-bypass: webhook di Meta senza JWT; ogni messaggio gira poi nel contesto del tenant del numero
+app.post('/webhook/meta-whatsapp', (req, res) => { void handleMetaWebhook(req, res); });
 
 // Alias tenant 1 finché i provider non sono riconfigurati sui path con token.
 app.post('/webhook/twilio-whatsapp-status', twilioUrlEncoded, (req, res) => { void runWithTenantContext(PUBLIC_TENANT_ID, () => handleTwilioWhatsAppStatus(PUBLIC_TENANT_ID, req, res)); });
@@ -13473,7 +13492,7 @@ app.get('/messages/:id/media/:index', authenticate, requirePermission('reservati
         } catch (err: any) {
             if (err instanceof MediaFetchError) {
                 if (err.status === 502) console.warn(`[media] ${err.message} per il messaggio ${id}`);
-                const message = err.status === 400 ? 'Host non consentito' : err.status === 503 ? 'Twilio non configurato' : 'Allegato non recuperabile';
+                const message = err.status === 400 ? 'Host non consentito' : err.status === 503 ? 'WhatsApp non collegato' : 'Allegato non recuperabile';
                 return res.status(err.status === 413 ? 502 : err.status).json({ error: message });
             }
             throw err;
@@ -18286,6 +18305,7 @@ const SCHEDULER_LOCK_HEALTH_RETENTION = 761009;
 const SCHEDULER_LOCK_HACCP_SENSORS = 761010;
 const SCHEDULER_LOCK_BOOKING_REMINDERS = 761011;
 const SCHEDULER_LOCK_WHATSAPP_AGENT = 761012;
+const SCHEDULER_LOCK_WHATSAPP_CAMPAIGNS = 761013;
 
 // Il lock advisory è di SESSIONE: va preso su un client dedicato tenuto per
 // tutta la durata del tick (sul pool condiviso un'altra query potrebbe
@@ -19363,6 +19383,16 @@ const startWhatsAppAgentScheduler = () => {
     setInterval(lockedTick, tickMs);
 };
 
+// Le campagne WhatsApp (services/whatsapp/campaigns/send.ts): un gruppo di
+// messaggi al minuto per campagna, nella fascia oraria del locale. Il lock
+// evita che due repliche mandino allo stesso destinatario.
+const startWhatsAppCampaignsScheduler = () => {
+    const tickMs = Number(process.env.WA_CAMPAIGN_TICK_MS) || 60_000;
+    const lockedTick = () => runSchedulerTickWithLock(SCHEDULER_LOCK_WHATSAPP_CAMPAIGNS, 'whatsapp-campaigns', () => campaignsTick())
+        .catch((err: any) => console.error('[whatsapp-campaigns] lock wrapper failed:', err?.message || err));
+    setInterval(lockedTick, tickMs);
+};
+
 // ============================================
 // CUSTOMERS (rubrica) - require authentication
 // ============================================
@@ -19491,21 +19521,11 @@ const setCustomerMarketingConsent = async (
     phone: string | null | undefined,
     consent: boolean | null | undefined
 ): Promise<void> => {
-    try {
-        if (consent === null || consent === undefined) return;
-        if (!phone || !String(phone).trim()) return;
-        const phoneDigits = String(phone).replace(/\D/g, '');
-        if (!phoneDigits) return;
-        await queryWithRetry(
-            `UPDATE customers
-             SET consent_marketing = $2, consent_marketing_updated_at = CURRENT_TIMESTAMP
-             WHERE tenant_id = $3
-               AND regexp_replace(COALESCE(phone, ''), '\\D', '', 'g') = $1`,
-            [phoneDigits, consent, tenantId]
-        );
-    } catch (err) {
-        console.error('setCustomerMarketingConsent failed:', err);
-    }
+    // Dal 11/10/2026 passa dal registro dei consensi (services/whatsapp/
+    // campaigns/consent.ts): stessa scheda, più la traccia di chi e quando.
+    if (consent === null || consent === undefined) return;
+    if (!phone || !String(phone).trim()) return;
+    await recordMarketingConsent(tenantId, phone, consent, 'staff');
 };
 
 // Keep the rubrica name in sync when a reservation is renamed. Looks up the
@@ -32925,6 +32945,12 @@ async function handlePublicTakeawayOrderCreate(tenantId: number, req: express.Re
 
         const view = await loadTakeawayView(tenantId, orderId);
         try { socketService?.broadcastToAll(tenantId, 'takeaway:created', view); } catch (_) {}
+        // La casella delle promozioni, facoltativa: con un sì il cliente entra
+        // in rubrica (se non c'era) col suo consenso registrato.
+        if (body.consent_marketing === true) {
+            await upsertCustomerFromReservation(tenantId, name, phone, null, null, null).catch(() => null);
+            await recordMarketingConsent(tenantId, phone, true, 'takeaway_form');
+        }
         // Il banco deve accorgersene anche a CRM chiuso: push come le
         // prenotazioni voce. Best-effort, l'ordine è comunque in board.
         const pieces = view.items.reduce((sum: number, i: any) => sum + Number(i.qty), 0);
@@ -37562,6 +37588,9 @@ const handlePublicReservationCreate = async (tenantId: number, req: express.Requ
         // questa prenotazione non ne aveva una (selettore non toccato, browser
         // non rilevabile), la eredita.
         const resolvedLanguage = await upsertCustomerFromReservation(tenantId, customer_name, phoneE164, emailNormalized, null, language);
+        // La casella delle promozioni, facoltativa: solo un sì esplicito
+        // entra nel registro dei consensi.
+        if (body.consent_marketing === true && phoneE164) await recordMarketingConsent(tenantId, phoneE164, true, 'booking_form');
         if (resolvedLanguage && !created.language) {
             queryWithRetry(
                 `UPDATE reservations SET language = $1 WHERE id = $2 AND tenant_id = $3`,
@@ -38070,7 +38099,7 @@ app.post('/debug/whatsapp-test', authenticate, requireFeature('whatsapp'), requi
     if (useTwilio) {
         // Il mittente è quello del ristorante (services/whatsapp/config.ts):
         // un locale senza numero proprio non prova più dal numero del Frantoio.
-        if (!sender) {
+        if (!sender || sender.provider !== 'twilio') {
             return res.status(500).json({
                 error: 'missing_twilio_config',
                 message: 'Nessun mittente WhatsApp per questo locale',
@@ -45592,6 +45621,7 @@ app.delete('/sala/profiles/:id', authenticate, requirePermission('settings:full'
 configureWhatsApp({
     broadcastToAll: (tenantId, event, payload) => { socketService?.broadcastToAll(tenantId, event, payload); },
     broadcastReservationsUpdatedByIds: ids => broadcastReservationsUpdatedByIds(ids),
+    persistDeliveryStatus: (tenantId, sid, status, errorCode, errText) => persistDeliveryStatus(tenantId, sid, status, errorCode, errText),
 });
 
 // L'agente WhatsApp che parte da solo: la coda chiede a server.ts il
@@ -45633,6 +45663,15 @@ configureReservationButtons({
         && (await getFeatureFlag(tenantId, 'ai_messages_enabled', false))
         && (await isFeatureEnabledForTenant(tenantId, 'whatsapp')),
 });
+
+// Le campagne (services/whatsapp/campaigns/): nome del locale nel template,
+// modalità legale per il marketing; e «STOP» su WhatsApp, che revoca il
+// consenso prima dei tasti e dell'agente.
+configureCampaigns({
+    businessName: async tenantId => (await publicBusinessIdentity(tenantId)).name,
+    marketingAllowed: async tenantId => (await getLegalConfig(tenantId)).legal_mode === 'advanced',
+});
+registerStopHook(async tenantId => (await publicBusinessIdentity(tenantId)).name);
 
 // Vocali trascritti all'arrivo (services/whatsapp/media/). Registrata DOPO
 // i tasti perché entrambe si mettono in testa agli agganci: così gira per
@@ -46124,6 +46163,12 @@ const startServer = async () => {
                         console.log('✅ WhatsApp agent scheduler started (15 s)');
                     } catch (schedErr) {
                         console.error('WhatsApp agent scheduler failed to start:', schedErr);
+                    }
+                    if (!isServiceNode) try {
+                        startWhatsAppCampaignsScheduler();
+                        console.log('✅ WhatsApp campaigns scheduler started (60 s)');
+                    } catch (schedErr) {
+                        console.error('WhatsApp campaigns scheduler failed to start:', schedErr);
                     }
                     if (!isServiceNode) try {
                         startBookingReminderScheduler();

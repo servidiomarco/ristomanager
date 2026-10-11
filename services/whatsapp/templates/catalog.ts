@@ -17,7 +17,7 @@ export interface TemplateDef {
     /** Come la vede chi apre le Impostazioni. */
     label: string;
     category: 'UTILITY' | 'MARKETING';
-    group: 'prenotazioni' | 'caparre' | 'conto' | 'recensioni' | 'banchetti' | 'asporto';
+    group: 'prenotazioni' | 'caparre' | 'conto' | 'recensioni' | 'banchetti' | 'asporto' | 'marketing';
     /** Le lingue per cui il template esiste (o è previsto). */
     languages: TemplateLanguage[];
 }
@@ -51,4 +51,8 @@ export const TEMPLATE_CATALOG: readonly TemplateDef[] = [
     // scripts/create-whatsapp-template-asporto-pronto.mjs; si usa con
     // «Avvisa quando l'ordine è pronto» acceso, fuori dalla finestra di 24 ore.
     { key: 'TAKEAWAY_READY', label: 'Ordine d\'asporto pronto', category: 'UTILITY', group: 'asporto', languages: ['it', 'en'] },
+    // scripts/create-whatsapp-template-campagna.mjs: il messaggio delle
+    // campagne, col tasto «Stop promozioni». MARKETING: Meta lo fa pagare a
+    // tariffa piena e lo consegna solo a chi non ha bloccato il marketing.
+    { key: 'CAMPAIGN', label: 'Campagna (con «Stop promozioni»)', category: 'MARKETING', group: 'marketing', languages: ['it', 'en'] },
 ];

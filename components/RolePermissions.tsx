@@ -67,7 +67,8 @@ const PERMISSION_LABELS: Record<string, { key: string; it: string }> = {
   'inventory:full':          { key: 'perm.p.edit', it: 'Modifica' },
   'inventory:invoices':      { key: 'perm.p.inventoryInvoices', it: 'Fatture fornitori e prezzi d\'acquisto' },
   'foodcost:view':           { key: 'perm.p.foodcostView', it: 'Visualizza costi e margini' },
-  'foodcost:manage':         { key: 'perm.p.foodcostManage', it: 'Modifica prezzi e schede' }
+  'foodcost:manage':         { key: 'perm.p.foodcostManage', it: 'Modifica prezzi e schede' },
+  'campaigns:manage':        { key: 'perm.p.campaignsManage', it: 'Crea e manda campagne WhatsApp' }
 };
 
 const API_BASE_URL = import.meta.env.VITE_API_URL || 'https://ristomanager-production.up.railway.app';
