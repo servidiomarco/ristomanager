@@ -579,6 +579,12 @@ Per i ristoranti con cassa **Passepartout Menù** (modulo dedicato). Tutto si re
 - In modalità «Azioni» l'ordine entra da solo (si può spegnere con «Ordini d'asporto»); nelle altre è una proposta che lo staff conferma, e il cliente riceve il riepilogo col numero.
 - **Avvisa quando l'ordine è pronto**: quando l'ordine passa a «Pronto», dal banco o dal monitor di cucina, il cliente riceve un WhatsApp, una volta sola. Fuori dalle 24 ore serve il template «Ordine d'asporto pronto».
 
+**Campagne WhatsApp** (Messaggi › Campagne, col tasto in alto; regole in Impostazioni › WhatsApp › Campagne; titolare e direzione)
+- Un messaggio promozionale ai clienti che hanno dato il consenso alle promozioni, con un segmento: chi non torna da almeno N giorni, chi è venuto almeno N volte, solo VIP, per lingua. Prima di partire si vedono quanti lo ricevono e quanto costa circa; il tasto «Avvia» chiede una conferma con la cifra.
+- Non lo ricevono mai: chi non ha il consenso, chi ha scritto STOP o toccato «Stop promozioni», chi è in blacklist, chi ha un no-show negli ultimi 90 giorni, chi ha ricevuto una campagna da meno dei giorni di pausa scelti. Il consenso si ricontrolla un attimo prima di ogni invio.
+- L'invio va a piccoli gruppi, nella fascia oraria scelta, e si ferma da solo al tetto di spesa del mese. Arriva come «Ciao Mario, una novità da …: …» col tasto «Stop promozioni»; serve il template approvato da Meta e la modalità legale avanzata.
+- **Consensi**: su /prenota e /ordina c'è una casella facoltativa, mai spuntata di serie, per ricevere le promozioni su WhatsApp. Ogni consenso dato o revocato (dai moduli, dallo staff, con STOP) resta registrato con la fonte e la data. A «STOP» il cliente riceve subito la conferma; i messaggi sulle sue prenotazioni continuano ad arrivare.
+
 **Farsi trovare** (Impostazioni › WhatsApp › Farsi trovare)
 - Il link wa.me del locale con un testo già scritto (di serie «Ciao! Vorrei prenotare un tavolo.»), il suo QR da scaricare e stampare, e i testi pronti per Google Business e la bio di Instagram.
 - Due interruttori: la pillola «WhatsApp» sulla pagina /prenota e «Scrivici su WhatsApp» in fondo al menu digitale.
@@ -928,6 +934,7 @@ Pagina unica a blocchi, con chip-àncora per saltare alla sezione e una **ricerc
 
 | Data | Sezione | Modifica |
 |---|---|---|
+| 2026-10-11 | Messaggi: WhatsApp e SMS, Clienti, Impostazioni | **Campagne WhatsApp.** Da Messaggi › Campagne mandi una promozione ai clienti che hanno dato il consenso, scegliendo chi (non tornano da un po', clienti fedeli, VIP, lingua) e vedendo prima quanti sono e quanto costa. Chi scrive STOP non riceve più niente; su /prenota e /ordina c'è la casella facoltativa per le promozioni. Regole e tetto di spesa in Impostazioni › WhatsApp › Campagne. |
 | 2026-10-11 | Asporto, Messaggi: WhatsApp e SMS, Impostazioni | **Ordini d'asporto su WhatsApp e «il tuo ordine è pronto».** Con l'add-on Asporto, in Impostazioni › WhatsApp › Asporto in chat l'agente prende gli ordini in chat con le regole del banco (capienza, stop, tempi di preparazione) e, se vuoi, il cliente riceve un WhatsApp quando l'ordine è pronto. |
 | 2026-10-11 | Messaggi: WhatsApp e SMS, Impostazioni | **Vocali trascritti e foto lette dall'agente.** In Impostazioni › WhatsApp › Vocali e foto: i vocali dei clienti compaiono anche scritti in Messaggi e l'agente li legge; l'agente può anche guardare le foto che il cliente manda. |
 | 2026-10-11 | Messaggi: WhatsApp e SMS, Impostazioni | **Promemoria WhatsApp con i tasti e «Farsi trovare».** Il promemoria può arrivare con «Ci saremo», «Devo modificare» e «Annulla»: il cliente risponde con un tocco, anche con l'AI spenta («Annulla» chiede conferma). In Impostazioni › WhatsApp › Farsi trovare trovi il link e il QR del tuo WhatsApp, i testi per Google e Instagram, e puoi mostrarlo su /prenota e nel menu digitale. |

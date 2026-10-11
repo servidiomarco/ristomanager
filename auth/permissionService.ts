@@ -12,7 +12,7 @@ export const ALL_PERMISSIONS: { feature: string; permissions: Permission[] }[] =
   { feature: 'Prenotazioni', permissions: ['reservations:view', 'reservations:full'] },
   { feature: 'Reception', permissions: ['reception:view'] },
   { feature: 'Personale', permissions: ['staff:view', 'staff:full', 'staff:leave', 'staff:payments'] },
-  { feature: 'Clienti', permissions: ['customers:view', 'customers:full'] },
+  { feature: 'Clienti', permissions: ['customers:view', 'customers:full', 'campaigns:manage'] },
   { feature: 'Inventario', permissions: ['inventory:view', 'inventory:full', 'inventory:invoices'] },
   { feature: 'Impostazioni', permissions: ['settings:view', 'settings:full'] },
   { feature: 'Gestione Utenti', permissions: ['users:view', 'users:full'] },

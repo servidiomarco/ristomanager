@@ -123,6 +123,8 @@ export default async function globalSetup(): Promise<() => Promise<void>> {
             // solo per un locale con l'agente acceso (di serie è spento).
             WA_AGENT_DEBOUNCE_MS: '300',
             WA_AGENT_TICK_MS: '250',
+            // Le campagne (Fase 11): lo sweep ogni 300 ms invece che al minuto.
+            WA_CAMPAIGN_TICK_MS: '300',
             JWT_REFRESH_SECRET: 'test-jwt-refresh-secret',
             // Telefono (Fase 2): i webhook voce verificano la firma Twilio, e
             // register-call va a uno stub locale che il test della voce

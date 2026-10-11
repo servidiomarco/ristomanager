@@ -82,5 +82,6 @@
   "agentUndoFailed": "Not undone",
   "transcriptPending": "Transcribing…",
   "transcriptFailed": "Transcription failed",
-  "transcriptLabel": "Transcript"
+  "transcriptLabel": "Transcript",
+  "campaigns": "Campaigns"
 }

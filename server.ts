@@ -60,6 +60,7 @@ import {
     createWhatsAppRouter, isWindowOpen, configureReservationButtons, publicWhatsAppLink, getRemindersPolicy,
     configureWhatsAppMedia, fetchInboundMedia, MediaFetchError, agentMessageBody, photosForAgent,
     notifyTakeawayReady, getTakeawayPolicy,
+    recordMarketingConsent, registerStopHook, configureCampaigns, campaignsTick,
     type OutboundConfirmationResult, type WhatsAppTemplateOpts,
 } from './services/whatsapp/index.js';
 import { AI_KEY_INVALID, AI_KEY_INVALID_MESSAGE, isAiKeyInvalid } from './utils/aiErrors.js';
@@ -18286,6 +18287,7 @@ const SCHEDULER_LOCK_HEALTH_RETENTION = 761009;
 const SCHEDULER_LOCK_HACCP_SENSORS = 761010;
 const SCHEDULER_LOCK_BOOKING_REMINDERS = 761011;
 const SCHEDULER_LOCK_WHATSAPP_AGENT = 761012;
+const SCHEDULER_LOCK_WHATSAPP_CAMPAIGNS = 761013;
 
 // Il lock advisory è di SESSIONE: va preso su un client dedicato tenuto per
 // tutta la durata del tick (sul pool condiviso un'altra query potrebbe
@@ -19363,6 +19365,16 @@ const startWhatsAppAgentScheduler = () => {
     setInterval(lockedTick, tickMs);
 };
 
+// Le campagne WhatsApp (services/whatsapp/campaigns/send.ts): un gruppo di
+// messaggi al minuto per campagna, nella fascia oraria del locale. Il lock
+// evita che due repliche mandino allo stesso destinatario.
+const startWhatsAppCampaignsScheduler = () => {
+    const tickMs = Number(process.env.WA_CAMPAIGN_TICK_MS) || 60_000;
+    const lockedTick = () => runSchedulerTickWithLock(SCHEDULER_LOCK_WHATSAPP_CAMPAIGNS, 'whatsapp-campaigns', () => campaignsTick())
+        .catch((err: any) => console.error('[whatsapp-campaigns] lock wrapper failed:', err?.message || err));
+    setInterval(lockedTick, tickMs);
+};
+
 // ============================================
 // CUSTOMERS (rubrica) - require authentication
 // ============================================
@@ -19491,21 +19503,11 @@ const setCustomerMarketingConsent = async (
     phone: string | null | undefined,
     consent: boolean | null | undefined
 ): Promise<void> => {
-    try {
-        if (consent === null || consent === undefined) return;
-        if (!phone || !String(phone).trim()) return;
-        const phoneDigits = String(phone).replace(/\D/g, '');
-        if (!phoneDigits) return;
-        await queryWithRetry(
-            `UPDATE customers
-             SET consent_marketing = $2, consent_marketing_updated_at = CURRENT_TIMESTAMP
-             WHERE tenant_id = $3
-               AND regexp_replace(COALESCE(phone, ''), '\\D', '', 'g') = $1`,
-            [phoneDigits, consent, tenantId]
-        );
-    } catch (err) {
-        console.error('setCustomerMarketingConsent failed:', err);
-    }
+    // Dal 11/10/2026 passa dal registro dei consensi (services/whatsapp/
+    // campaigns/consent.ts): stessa scheda, più la traccia di chi e quando.
+    if (consent === null || consent === undefined) return;
+    if (!phone || !String(phone).trim()) return;
+    await recordMarketingConsent(tenantId, phone, consent, 'staff');
 };
 
 // Keep the rubrica name in sync when a reservation is renamed. Looks up the
@@ -32923,6 +32925,12 @@ async function handlePublicTakeawayOrderCreate(tenantId: number, req: express.Re
 
         const view = await loadTakeawayView(tenantId, orderId);
         try { socketService?.broadcastToAll(tenantId, 'takeaway:created', view); } catch (_) {}
+        // La casella delle promozioni, facoltativa: con un sì il cliente entra
+        // in rubrica (se non c'era) col suo consenso registrato.
+        if (body.consent_marketing === true) {
+            await upsertCustomerFromReservation(tenantId, name, phone, null, null, null).catch(() => null);
+            await recordMarketingConsent(tenantId, phone, true, 'takeaway_form');
+        }
         // Il banco deve accorgersene anche a CRM chiuso: push come le
         // prenotazioni voce. Best-effort, l'ordine è comunque in board.
         const pieces = view.items.reduce((sum: number, i: any) => sum + Number(i.qty), 0);
@@ -37560,6 +37568,9 @@ const handlePublicReservationCreate = async (tenantId: number, req: express.Requ
         // questa prenotazione non ne aveva una (selettore non toccato, browser
         // non rilevabile), la eredita.
         const resolvedLanguage = await upsertCustomerFromReservation(tenantId, customer_name, phoneE164, emailNormalized, null, language);
+        // La casella delle promozioni, facoltativa: solo un sì esplicito
+        // entra nel registro dei consensi.
+        if (body.consent_marketing === true && phoneE164) await recordMarketingConsent(tenantId, phoneE164, true, 'booking_form');
         if (resolvedLanguage && !created.language) {
             queryWithRetry(
                 `UPDATE reservations SET language = $1 WHERE id = $2 AND tenant_id = $3`,
@@ -45632,6 +45643,15 @@ configureReservationButtons({
         && (await isFeatureEnabledForTenant(tenantId, 'whatsapp')),
 });
 
+// Le campagne (services/whatsapp/campaigns/): nome del locale nel template,
+// modalità legale per il marketing; e «STOP» su WhatsApp, che revoca il
+// consenso prima dei tasti e dell'agente.
+configureCampaigns({
+    businessName: async tenantId => (await publicBusinessIdentity(tenantId)).name,
+    marketingAllowed: async tenantId => (await getLegalConfig(tenantId)).legal_mode === 'advanced',
+});
+registerStopHook(async tenantId => (await publicBusinessIdentity(tenantId)).name);
+
 // Vocali trascritti all'arrivo (services/whatsapp/media/). Registrata DOPO
 // i tasti perché entrambe si mettono in testa agli agganci: così gira per
 // prima, e tasti e coda dell'agente trovano il vocale già scritto.
@@ -46122,6 +46142,12 @@ const startServer = async () => {
                         console.log('✅ WhatsApp agent scheduler started (15 s)');
                     } catch (schedErr) {
                         console.error('WhatsApp agent scheduler failed to start:', schedErr);
+                    }
+                    if (!isServiceNode) try {
+                        startWhatsAppCampaignsScheduler();
+                        console.log('✅ WhatsApp campaigns scheduler started (60 s)');
+                    } catch (schedErr) {
+                        console.error('WhatsApp campaigns scheduler failed to start:', schedErr);
                     }
                     if (!isServiceNode) try {
                         startBookingReminderScheduler();
