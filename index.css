@@ -1120,6 +1120,56 @@ body {
   .ds-ai-frame { animation: none; }
 }
 
+/* Il telaio della chiamata (CallBanner). Stesso meccanismo di .ds-ai-frame,
+   ma qui al telefono c'e' una persona del locale, non Sofia: il movimento
+   dice «la linea e' viva». Due stati, due famiglie:
+   - squilla → `pending` (serve qualcuno che risponda), due archi e un giro
+     veloce, come uno squillo;
+   - in corso → `seated` (live, la stessa della durata nella card), un arco
+     e un giro calmo.
+   Prima la card di una chiamata presa dal locale aveva un bordo fermo, uguale
+   a quella appena finita: da lontano non si capiva se si stava parlando.
+   Senza movimento (reduce-motion) il bordo resta pieno nel colore dello
+   stato, cosi' lo stato si legge lo stesso. */
+.ds-call-frame {
+  --ds-call-accent: var(--ds-seated-solid);
+  padding: 2px;
+  border-radius: var(--ds-radius);
+  background: conic-gradient(
+    from var(--ds-live-angle),
+    var(--ds-border) 0deg,
+    var(--ds-border) 50deg,
+    var(--ds-call-accent) 140deg,
+    var(--ds-border) 230deg,
+    var(--ds-border) 360deg
+  );
+  animation: ds-live-sweep 3s linear infinite;
+}
+
+.ds-call-frame--ring {
+  --ds-call-accent: var(--ds-pending-solid);
+  background: conic-gradient(
+    from var(--ds-live-angle),
+    var(--ds-border) 0deg,
+    var(--ds-call-accent) 60deg,
+    var(--ds-border) 120deg,
+    var(--ds-border) 180deg,
+    var(--ds-call-accent) 240deg,
+    var(--ds-border) 300deg,
+    var(--ds-border) 360deg
+  );
+  animation-duration: 1.6s;
+}
+
+/* Al buio i `-solid` su fondo scuro si vedono appena: l'arco usa i `-text`,
+   che sono le varianti chiare delle stesse famiglie. */
+.dark .ds-call-frame { --ds-call-accent: var(--ds-seated-text); }
+.dark .ds-call-frame--ring { --ds-call-accent: var(--ds-pending-text); }
+
+@media (prefers-reduced-motion: reduce) {
+  .ds-call-frame { animation: none; background: var(--ds-call-accent); }
+}
+
 /* Motion here is decorative — the deck reads identically without it. */
 @media (prefers-reduced-motion: reduce) {
   .ds-live-frame { animation: none; }

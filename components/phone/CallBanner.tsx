@@ -18,9 +18,10 @@ import { chime } from '../../utils/chime';
    destra appena sotto la testata, per non coprirne ricerca, campanella e
    «+» (i toast stanno in basso); su telefono in alto, a tutta larghezza.
 
-   Il telaio che gira è .ds-ai-frame: «la macchina sta lavorando, guarda».
-   Si ferma quando la chiamata finisce, e la card mostra l'esito per qualche
-   secondo prima di sparire. Una chiamata presa dal locale lascia scrivere
+   Finché la chiamata è viva il bordo gira: .ds-ai-frame mentre parla Sofia
+   («la macchina sta lavorando, guarda»), .ds-call-frame quando squilla o
+   parla il locale. Si ferma quando la chiamata finisce, e la card mostra
+   l'esito per qualche secondo prima di sparire. Una chiamata presa dal locale lascia scrivere
    una nota: mentre la si scrive la card resta, e la nota torna nella card
    la volta dopo che lo stesso numero chiama. */
 
@@ -53,6 +54,20 @@ const displayPhone = (e164: string): string => {
     ? `${national.slice(0, 3)} ${national.slice(3, 6)} ${national.slice(6)}`
     : national;
 };
+
+// Il bordo della card: Sofia al telefono, squilla, si parla col locale,
+// oppure finita (fermo).
+type Frame = 'ai' | 'ring' | 'call' | null;
+const frameClass = (f: Frame): string =>
+  f === 'ai' ? 'ds-ai-frame'
+  : f === 'ring' ? 'ds-call-frame ds-call-frame--ring'
+  : f === 'call' ? 'ds-call-frame'
+  : 'rounded-[var(--ds-radius)] border border-[var(--ds-border)]';
+// Raggio interno = raggio della cornice − il suo spessore (1,5 px Sofia, 2 px telefono).
+const innerRadius = (f: Frame): string =>
+  f === 'ai' ? 'rounded-[calc(var(--ds-radius)-1.5px)]'
+  : f ? 'rounded-[calc(var(--ds-radius)-2px)]'
+  : 'rounded-[var(--ds-radius)]';
 
 const readMuted = (): boolean => {
   try { return localStorage.getItem(MUTE_KEY) === '1'; } catch { return false; }
@@ -264,19 +279,21 @@ export const CallBanner: React.FC<{
   return (
     <div className="pointer-events-none fixed inset-x-2 top-2 z-[58] flex flex-col gap-2 md:inset-x-auto md:right-4 md:top-[88px] md:w-[380px]">
       {orphan && (
-        <div role="status" aria-live="polite" className="pointer-events-auto rounded-[var(--ds-radius)] border border-[var(--ds-arriving-solid)] bg-[var(--ds-surface)] p-3 shadow-[var(--ds-shadow-raised)]" style={{ animation: 'tileIn 200ms ease-out both' }}>
-          <div className="flex items-start gap-3">
-            <Avatar icon={orphan.direction === 'out' ? PhoneOutgoing : PhoneIncoming} tone="info" />
-            <div className="min-w-0 flex-1">
-              <p className="text-[12px] font-medium text-[var(--ds-arriving-text)]">
-                {orphan.direction === 'out' ? t('phone.outgoing') : t('phone.incomingHere')}
-              </p>
-              <p className="truncate text-[16px] font-semibold tabular-nums text-[var(--ds-text-primary)]">
-                {orphan.number ? displayPhone(orphan.number) : t('phone.hiddenNumber')}
-              </p>
+        <div role="status" aria-live="polite" className={`pointer-events-auto shadow-[var(--ds-shadow-raised)] ${frameClass(orphan === soft.incoming ? 'ring' : 'call')}`} style={{ animation: 'tileIn 200ms ease-out both' }}>
+          <div className={`${innerRadius('call')} bg-[var(--ds-surface)] p-3`}>
+            <div className="flex items-start gap-3">
+              <Avatar icon={orphan.direction === 'out' ? PhoneOutgoing : PhoneIncoming} tone="info" />
+              <div className="min-w-0 flex-1">
+                <p className="text-[12px] font-medium text-[var(--ds-arriving-text)]">
+                  {orphan.direction === 'out' ? t('phone.outgoing') : t('phone.incomingHere')}
+                </p>
+                <p className="truncate text-[16px] font-semibold tabular-nums text-[var(--ds-text-primary)]">
+                  {orphan.number ? displayPhone(orphan.number) : t('phone.hiddenNumber')}
+                </p>
+              </div>
             </div>
+            {orphan === soft.incoming ? ringButtons : inCallBar(orphan, { phone: orphan.number })}
           </div>
-          {orphan === soft.incoming ? ringButtons : inCallBar(orphan, { phone: orphan.number })}
         </div>
       )}
       {visible.map(call => {
@@ -294,8 +311,11 @@ export const CallBanner: React.FC<{
           : stage === 'ringing' ? t('phone.ringing')
           : stage === 'staff' ? (call.answeredByName ? t('phone.staffBy', { name: call.answeredByName }) : t('phone.staff'))
           : t('phone.sofiaTalking');
-        // Il telaio che gira dice «la macchina sta lavorando»: solo con Sofia.
-        const live = !ended && stage === 'sofia';
+        const frame: Frame = ended ? null
+          : isHere(soft.active, call.id) ? 'call'
+          : isHere(soft.incoming, call.id) || stage === 'ringing' ? 'ring'
+          : stage === 'staff' ? 'call'
+          : 'ai';
         // La bacchetta solo dove c'è Sofia di mezzo; il resto è telefono.
         const HeadIcon = ended
           ? (ended.outcome === 'answered' ? PhoneCall : ended.outcome === 'missed' ? PhoneIncoming : Wand2)
@@ -305,10 +325,10 @@ export const CallBanner: React.FC<{
             key={call.id}
             role="status"
             aria-live="polite"
-            className={`pointer-events-auto shadow-[var(--ds-shadow-raised)] ${live ? 'ds-ai-frame' : `rounded-[var(--ds-radius)] border ${ended ? 'border-[var(--ds-border)]' : 'border-[var(--ds-arriving-solid)]'}`}`}
+            className={`pointer-events-auto shadow-[var(--ds-shadow-raised)] ${frameClass(frame)}`}
             style={{ animation: 'tileIn 200ms ease-out both' }}
           >
-            <div className={`${live ? 'rounded-[calc(var(--ds-radius)-1.5px)]' : 'rounded-[var(--ds-radius)]'} bg-[var(--ds-surface)] p-3`}>
+            <div className={`${innerRadius(frame)} bg-[var(--ds-surface)] p-3`}>
               <div className="flex items-start gap-3">
                 {/* La cornetta e non le iniziali: è una chiamata, non una scheda. */}
                 <Avatar icon={Phone} tone={customer?.is_blacklisted ? 'critical' : 'info'} />

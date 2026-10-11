@@ -184,6 +184,7 @@ Agente conversazionale AI (ElevenLabs) che **risponde al telefono del ristorante
 **Chi chiama, mentre Sofia parla**
 - Appena Sofia risponde, in alto a destra nel CRM compare **chi sta chiamando**: nome o numero, VIP, blacklist, no-show, visite con l'ultima data, allergie e le prossime prenotazioni. Un tocco sul nome apre la scheda cliente, uno sulla prenotazione la apre in Prenotazioni.
 - A chiamata finita la card mostra l'esito (ha prenotato, vuole essere richiamato, da ricontattare) per qualche secondo, poi sparisce; da lì si apre Chiamate.
+- Finché la chiamata è in corso il bordo della card gira: viola mentre parla Sofia, oro mentre squilla, verde mentre risponde il locale. A chiamata finita il bordo si ferma.
 - Suona un breve avviso, che si silenzia su ogni dispositivo dalla campanella della card. La vedono titolare, direzione, manager e reception, su ogni schermo dell'app (anche dove la barra in alto è nascosta).
 
 **Sympotia davanti al numero di Sofia** (si attiva quando il numero di Sofia viene collegato a Sympotia)
@@ -885,6 +886,7 @@ Pagina unica a blocchi, con chip-àncora per saltare alla sezione e una **ricerc
 
 | Data | Sezione | Modifica |
 |---|---|---|
+| 2026-10-11 | Agente vocale "Sofia" | Nella card della telefonata il bordo gira finché la chiamata è in corso: viola mentre parla Sofia, oro mentre squilla, verde mentre si parla col locale. Così si vede subito se la linea è occupata. |
 | 2026-10-11 | Personale; Utenti, ruoli e permessi | **Le ferie degli altri le vedono solo Proprietario e General Manager.** Nuovo permesso «Ferie e assenze di tutti» nella matrice: piano ferie, richieste, giorni di ferie l'anno e motivo delle assenze sono suoi. Manager e Cucina vedono ancora i turni, ma l'assenza di un collega compare come «Assente», senza motivo; registrano solo i riposi. Le proprie assenze restano visibili a ciascuno. La Cucina non modifica più turni e schede del personale. Proprietario e General Manager possono correggere le ferie anche già approvate o passate: «Modifica» nel piano ferie o la matita sull'assenza nella scheda; la richiesta e il monte ferie seguono le nuove date. |
 | 2026-10-10 | Agente vocale "Sofia", Impostazioni | **Cordless del locale.** In Impostazioni › AI › «Chi risponde al telefono» si aggiunge un cordless (base DECT IP o app SIP): squilla insieme al CRM e ai cellulari, col nome del cliente sul display, e chiama i clienti col numero del locale. Il registro dice quale cordless ha risposto. Dal CRM e dal cordless si chiamano solo fissi e cellulari italiani. |
 | 2026-10-10 | Agente vocale "Sofia", Impostazioni, Chiamate | **Chi risponde adesso.** In Impostazioni › AI si aggiungono fasce orarie con una regola diversa (per esempio Sofia la sera); in testata la pastiglia «Sofia» o «Locale» passa il telefono a Sofia, o lo riprende, per un'ora, due ore o fino a stanotte. In Chiamate c'è il **Registro** di tutte le chiamate, con chi ha risposto, le perse e le chiamate fatte dal CRM. A fine chiamata si lascia una nota, che torna nella card quando il cliente richiama, e la prenotazione fatta al telefono resta legata alla chiamata. |
