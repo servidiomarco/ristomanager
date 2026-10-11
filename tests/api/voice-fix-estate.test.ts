@@ -43,6 +43,22 @@ describe('fix estate 2026 del canale voce', () => {
         expect(res.body.nearest_slots).toEqual(['21:00', '21:30']);
         expect(res.body.message).toContain('21:00');
         expect(res.body.message).toContain('21:30');
+        expect(res.body.message).toMatch(/^Mercoledì 21 luglio alle 21:15 /);
+    });
+
+    it('check_availability per oggi: dice "oggi", non "quel giorno" (chiamata dell\'11/10/2026)', async () => {
+        const res = await api().post('/webhook/elevenlabs/check-availability').send({
+            date: 'oggi',
+            shift: 'DINNER',
+            guests: 2,
+            time: '21:15',
+        });
+        expect(res.status).toBe(200);
+        expect(res.body.date_readback).toBe('oggi');
+        expect(res.body.requested_time_available).toBe(false);
+        // Con o senza orari quel giorno della settimana, la frase parte da "Oggi".
+        expect(res.body.message).toMatch(/^Oggi /);
+        expect(res.body.message).not.toContain('quel giorno');
     });
 
     it('check_availability con orario in griglia: requested_time_available true', async () => {
