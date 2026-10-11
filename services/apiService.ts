@@ -1440,6 +1440,9 @@ export interface ChannelSettings {
   // Messaggio iniziale di Sofia; '' = default di sistema. {nome} → nome del
   // chiamante quando noto.
   voice_first_message: string;
+  // Fin dove l'ospite prenota da solo (pagina /prenota e modifica dal link):
+  // 7, 14 o null = libera. Il backend di prima non la manda.
+  public_booking_horizon_days?: number | null;
 }
 
 // Occupazione corrente per sala, mostrata accanto al limite in Impostazioni.

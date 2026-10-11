@@ -1230,7 +1230,12 @@ a { color: var(--ds-pending-text); }
         d.setUTCDate(d.getUTCDate() + n);
         return d.toISOString().slice(0, 10);
     };
-    const HORIZON_DAYS = 60;
+    // Fin dove si prenota lo sceglie il locale: 7 o 14 giorni, oppure libera
+    // (null), che il server chiude a un anno. Il server rifiuta comunque le
+    // date fuori: qui serve solo a non offrirle.
+    const HORIZON_LIMIT = Number.isInteger(contact?.bookingHorizonDays) ? contact.bookingHorizonDays : null;
+    const HORIZON_DAYS = HORIZON_LIMIT
+        ?? (Number.isInteger(contact?.bookingHorizonFreeDays) ? contact.bookingHorizonFreeDays : 365);
     const today = romeToday();
     const lastBookable = addDays(today, HORIZON_DAYS);
 
@@ -1359,16 +1364,20 @@ a { color: var(--ds-pending-text); }
         for (let i = 0; i < 14; i++) {
             const iso = addDays(today, i);
             const status = state.calendar.get(iso);
+            // Con 7 giorni la striscia (14) ha giorni oltre il limite: spenti
+            // come i chiusi, ma detti «non disponibile», non «chiuso».
+            const beyond = iso > lastBookable;
             const b = document.createElement('button');
             b.type = 'button';
-            b.className = 'day' + (status === 'busy' ? ' day--busy' : '');
+            b.className = 'day' + (status === 'busy' && !beyond ? ' day--busy' : '');
             b.setAttribute('aria-pressed', String(state.date === iso));
-            b.disabled = status === 'closed';
+            b.disabled = status === 'closed' || beyond;
             b.innerHTML =
                 '<span class="day__dow">' + dow[mondayIndex(iso)] + '</span>' +
                 '<span class="day__num">' + Number(iso.slice(8)) + '</span>' +
-                (status && status !== 'closed' ? '<span class="day__dot"></span>' : '<span class="day__dot" style="visibility:hidden"></span>');
-            b.setAttribute('aria-label', fmtDayLong(iso) + (status === 'closed' ? t('quando.closedSuffix') : ''));
+                (status && status !== 'closed' && !beyond ? '<span class="day__dot"></span>' : '<span class="day__dot" style="visibility:hidden"></span>');
+            b.setAttribute('aria-label', fmtDayLong(iso)
+                + (beyond ? t('quando.unavailableSuffix') : status === 'closed' ? t('quando.closedSuffix') : ''));
             b.addEventListener('click', () => pickDate(iso));
             host.appendChild(b);
         }
@@ -1381,7 +1390,10 @@ a { color: var(--ds-pending-text); }
         $('monthLabel').textContent = fmtMonthYear(start);
         $('monthPrev').disabled = start <= monthStart(today);
         $('monthNext').disabled = start >= monthStart(lastBookable);
-        $('calFoot').textContent = t('quando.horizon', { days: HORIZON_DAYS });
+        // La riga sotto il mese solo con un limite scelto: «fino a 365 giorni»
+        // per la libera non dice niente a chi prenota.
+        $('calFoot').textContent = HORIZON_LIMIT ? t('quando.horizon', { days: HORIZON_LIMIT }) : '';
+        $('calFoot').hidden = !HORIZON_LIMIT;
 
         const grid = $('calGrid');
         grid.innerHTML = '';
@@ -1771,7 +1783,9 @@ a { color: var(--ds-pending-text); }
                 // data.message arriva dal server ed è in italiano: gli errori
                 // di validazione lato server restano fuori dallo scopo di
                 // questo widget (tradurli richiederebbe toccare server.ts).
-                showError(data.message || t('errors.generic'));
+                showError(data.error === 'out_of_range' && HORIZON_LIMIT
+                    ? t('errors.outOfRange', { days: HORIZON_LIMIT })
+                    : (data.message || t('errors.generic')));
                 btn.disabled = false;
                 btn.textContent = t('actions.submit');
                 return;

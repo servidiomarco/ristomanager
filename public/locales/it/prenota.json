@@ -129,6 +129,7 @@
     "emailInvalid": "Indirizzo email non valido.",
     "privacyRequired": "Per procedere, accetta l'informativa sulla privacy.",
     "generic": "Qualcosa è andato storto. Riprova.",
+    "outOfRange": "Online si prenota fino a {{days}} giorni da oggi. Per una data più avanti chiamaci.",
     "network": "Connessione non disponibile. Riprova fra qualche istante."
   }
 }

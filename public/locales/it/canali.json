@@ -194,6 +194,13 @@
   "doubleSeatingToggleOn": "Attiva doppio turno",
   "instantOnlyLabel": "Solo prenotazioni confermabili subito",
   "instantOnlyHint": "La pagina offre solo gli orari in cui un tavolo è libero adesso e conferma la prenotazione da sola. Dove non c'è posto propone l'altro turno o un altro giorno, oppure di chiamare o scrivere su WhatsApp: non arrivano più richieste da confermare. Le prenotazioni con caparra restano in attesa del pagamento.",
+  "horizonLabel": "Fin dove si prenota online",
+  "horizonHint": "Quanti giorni avanti l'ospite può prenotare dalla pagina web o spostare la prenotazione dal link. Libera: nessun limite.",
+  "horizon7": "7 giorni",
+  "horizon14": "14 giorni",
+  "horizonFree": "Libera",
+  "horizonSaved": "Periodo prenotabile salvato",
+  "horizonSaveError": "Periodo prenotabile non salvato",
   "instantOnlyToggleOff": "Disattiva solo prenotazioni confermabili subito",
   "instantOnlyToggleOn": "Attiva solo prenotazioni confermabili subito",
   "rev": {
