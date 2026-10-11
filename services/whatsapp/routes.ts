@@ -17,7 +17,9 @@ import {
     getAgentPolicy, normalizeAgentPolicy, saveAgentPolicy,
     getRemindersPolicy, normalizeRemindersPolicy, saveRemindersPolicy,
     getEntryPolicy, normalizeEntryPolicy, saveEntryPolicy,
+    getMediaPolicy, normalizeMediaPolicy, saveMediaPolicy,
 } from './settings.js';
+import { isTranscriptionConfigured } from './media/transcribe.js';
 import { simulateRun } from './agent/queue.js';
 import { undoAutoAction, UNDOABLE_TOOLS } from './agent/autonomy.js';
 import { whatsappDeps } from './deps.js';
@@ -88,8 +90,11 @@ export function createWhatsAppRouter(): express.Router {
     // ── L'agente che parte da solo ──────────────────────────────────────
 
     const allSettings = async (tenantId: number) => {
-        const [agent, reminders, entry] = await Promise.all([getAgentPolicy(tenantId), getRemindersPolicy(tenantId), getEntryPolicy(tenantId)]);
-        return { agent, reminders, entry };
+        const [agent, reminders, entry, media] = await Promise.all([
+            getAgentPolicy(tenantId), getRemindersPolicy(tenantId), getEntryPolicy(tenantId), getMediaPolicy(tenantId),
+        ]);
+        // transcription_ready: c'è la chiave ElevenLabs per trascrivere.
+        return { agent, reminders, entry, media, transcription_ready: isTranscriptionConfigured() };
     };
 
     router.get('/settings', ...read, async (req, res) => {
@@ -110,12 +115,14 @@ export function createWhatsAppRouter(): express.Router {
             const agent = body.agent !== undefined ? normalizeAgentPolicy(body.agent, await getAgentPolicy(tenantId)) : undefined;
             const reminders = body.reminders !== undefined ? normalizeRemindersPolicy(body.reminders, await getRemindersPolicy(tenantId)) : undefined;
             const entry = body.entry !== undefined ? normalizeEntryPolicy(body.entry, await getEntryPolicy(tenantId)) : undefined;
-            if (agent === null || reminders === null || entry === null) {
+            const media = body.media !== undefined ? normalizeMediaPolicy(body.media, await getMediaPolicy(tenantId)) : undefined;
+            if (agent === null || reminders === null || entry === null || media === null) {
                 return res.status(400).json({ error: 'invalid_policy', message: 'Valori fuori dai limiti' });
             }
             if (agent) await saveAgentPolicy(tenantId, agent);
             if (reminders) await saveRemindersPolicy(tenantId, reminders);
             if (entry) await saveEntryPolicy(tenantId, entry);
+            if (media) await saveMediaPolicy(tenantId, media);
             res.json(await allSettings(tenantId));
         } catch (err: any) {
             console.error('PUT /whatsapp/settings error:', err);

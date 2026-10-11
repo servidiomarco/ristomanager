@@ -417,6 +417,7 @@ const InboxPage: React.FC<InboxPageProps> = ({ onCreateReservationFromContact, o
         attached.off('message:outbound', onOutbound);
         attached.off('message:status', onStatus);
         attached.off('message:read', onRead);
+        attached.off('message:updated', onStatus);
       }
       attached = s;
       if (attached) {
@@ -424,6 +425,8 @@ const InboxPage: React.FC<InboxPageProps> = ({ onCreateReservationFromContact, o
         attached.on('message:outbound', onOutbound);
         attached.on('message:status', onStatus);
         attached.on('message:read', onRead);
+        // La trascrizione di un vocale arriva qualche secondo dopo il vocale.
+        attached.on('message:updated', onStatus);
       }
     };
     attach(socketClient.getSocket());
@@ -1058,6 +1061,20 @@ const InboxPage: React.FC<InboxPageProps> = ({ onCreateReservationFromContact, o
                                     <MediaAttachment key={i} messageId={m.id} index={i} media={att} />
                                   ))}
                                 </div>
+                              )}
+                              {/* Il vocale scritto (Impostazioni › WhatsApp › Vocali e foto). */}
+                              {m.transcript_status === 'done' && m.transcript && (
+                                <p className="mb-1 whitespace-pre-wrap break-words text-[14px] italic leading-snug text-[var(--ds-text-secondary)]">
+                                  <span className="sr-only">{tv('transcriptLabel')}: </span>«{m.transcript}»
+                                </p>
+                              )}
+                              {m.transcript_status === 'pending' && (
+                                <p className="mb-1 flex items-center gap-1.5 text-[13px] text-[var(--ds-text-muted)]">
+                                  <Loader2 className="h-3.5 w-3.5 animate-spin" /> {tv('transcriptPending')}
+                                </p>
+                              )}
+                              {m.transcript_status === 'failed' && (
+                                <p className="mb-1 text-[13px] italic text-[var(--ds-text-muted)]">{tv('transcriptFailed')}</p>
                               )}
                               {m.body && (
                                 <p className="whitespace-pre-wrap break-words text-[15px] leading-snug">{m.body}</p>

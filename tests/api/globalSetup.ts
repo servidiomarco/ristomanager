@@ -144,6 +144,11 @@ export default async function globalSetup(): Promise<() => Promise<void>> {
             TWILIO_SIP_DOMAIN: 'sympotia-test.sip.twilio.com',
             TWILIO_SIP_CREDENTIAL_LIST_SID: 'CLtest00000000000000000000000000',
             TWILIO_REST_URL: `http://127.0.0.1:${port + 12}`,
+            // Vocali WhatsApp (Fase 9): la speech-to-text di ElevenLabs su uno
+            // stub che il test dei vocali accende da sé (porta del server + 13),
+            // con una chiave sua: la chiave di Sofia nei test non c'è.
+            ELEVENLABS_STT_URL: `http://127.0.0.1:${port + 13}/v1/speech-to-text`,
+            ELEVENLABS_STT_KEY: 'test-stt-key',
             DEFAULT_OWNER_PASSWORD: OWNER_PASSWORD,
             // Gate degli endpoint /admin/tenants (Fase D1): senza questo i
             // test di provisioning riceverebbero solo 503.

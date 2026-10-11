@@ -219,3 +219,33 @@ export const saveRemindersPolicy = (tenantId: number, p: WhatsAppRemindersPolicy
 export const getEntryPolicy = (tenantId: number) =>
     readJson(tenantId, ENTRY_KEY, r => normalizeEntryPolicy(r), DEFAULT_ENTRY_POLICY);
 export const saveEntryPolicy = (tenantId: number, p: WhatsAppEntryPolicy) => writeJson(tenantId, ENTRY_KEY, p);
+
+// ---------------------------------------------------------------------------
+// Vocali e foto
+// ---------------------------------------------------------------------------
+
+/** Cosa si fa degli allegati dei clienti. Spenti di serie: la trascrizione
+ *  usa i crediti ElevenLabs di Sofia, le foto costano token all'agente. */
+export interface WhatsAppMediaPolicy {
+    /** I vocali si trascrivono: l'Inbox li mostra scritti, l'agente li legge. */
+    transcribe_voice: boolean;
+    /** L'agente guarda le foto nuove del cliente (al massimo tre per giro). */
+    read_photos: boolean;
+}
+export const DEFAULT_MEDIA_POLICY: WhatsAppMediaPolicy = { transcribe_voice: false, read_photos: false };
+const MEDIA_KEY = 'whatsapp_media_policy';
+
+export function normalizeMediaPolicy(raw: unknown, base: WhatsAppMediaPolicy = DEFAULT_MEDIA_POLICY): WhatsAppMediaPolicy | null {
+    if (!isPlainObject(raw)) return null;
+    const out = { ...base };
+    for (const k of ['transcribe_voice', 'read_photos'] as const) {
+        if (raw[k] === undefined) continue;
+        if (typeof raw[k] !== 'boolean') return null;
+        out[k] = raw[k] as boolean;
+    }
+    return out;
+}
+
+export const getMediaPolicy = (tenantId: number) =>
+    readJson(tenantId, MEDIA_KEY, r => normalizeMediaPolicy(r), DEFAULT_MEDIA_POLICY);
+export const saveMediaPolicy = (tenantId: number, p: WhatsAppMediaPolicy) => writeJson(tenantId, MEDIA_KEY, p);

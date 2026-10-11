@@ -51,6 +51,7 @@ import {
     sendWhatsAppText, sendTwilioSms, logOutboundMessage, logInboundMessage,
     handleTwilioWhatsAppInbound, validateTwilioSignature, pickTemplate, twilioMediaAuthHeader,
     createWhatsAppRouter, isWindowOpen, configureReservationButtons, publicWhatsAppLink, getRemindersPolicy,
+    configureWhatsAppMedia, fetchInboundMedia, MediaFetchError, agentMessageBody, photosForAgent,
     type OutboundConfirmationResult, type WhatsAppTemplateOpts,
 } from './services/whatsapp/index.js';
 import { AI_KEY_INVALID, AI_KEY_INVALID_MESSAGE, isAiKeyInvalid } from './utils/aiErrors.js';
@@ -13399,7 +13400,8 @@ app.get('/messages/conversations/:phoneDigits', authenticate, requirePermission(
             `SELECT * FROM (
                 SELECT id, provider, channel, direction, from_phone, to_phone, body,
                        status, provider_sid, reservation_id, sent_at, delivered_at,
-                       failed_at, read_at, error_code, error_message, media, kind
+                       failed_at, read_at, error_code, error_message, media, kind,
+                       transcript, transcript_status, transcript_language
                 FROM outbound_messages
                 WHERE tenant_id = $2
                   AND channel IN ('sms','whatsapp')
@@ -13455,31 +13457,23 @@ app.get('/messages/:id/media/:index', authenticate, requirePermission('reservati
             return res.end(file.bytes);
         }
 
-        // Solo host Twilio: l'url arriva dal webhook, ma un domani una riga
-        // manomessa non deve trasformare questo endpoint in un proxy aperto.
-        let host: string;
-        try { host = new URL(String(item.url)).host; } catch { return res.status(400).json({ error: 'URL non valido' }); }
-        if (!/(^|\.)twilio\.com$/.test(host)) {
-            return res.status(400).json({ error: 'Host non consentito' });
+        // Dal provider, con le credenziali del mittente del ristorante e solo
+        // dai suoi host (services/whatsapp/media/fetch.ts).
+        let file: { bytes: Buffer; contentType: string };
+        try {
+            file = await fetchInboundMedia(req.tenantId!, item);
+        } catch (err: any) {
+            if (err instanceof MediaFetchError) {
+                if (err.status === 502) console.warn(`[media] ${err.message} per il messaggio ${id}`);
+                const message = err.status === 400 ? 'Host non consentito' : err.status === 503 ? 'Twilio non configurato' : 'Allegato non recuperabile';
+                return res.status(err.status === 413 ? 502 : err.status).json({ error: message });
+            }
+            throw err;
         }
-
-        // Le credenziali sono quelle del mittente del ristorante: un
-        // allegato si scarica solo dall'account che l'ha ricevuto.
-        const sender = await getSender(req.tenantId!);
-        if (!sender) return res.status(503).json({ error: 'Twilio non configurato' });
-
-        const upstream = await fetch(String(item.url), {
-            headers: { Authorization: twilioMediaAuthHeader(sender) },
-        });
-        if (!upstream.ok || !upstream.body) {
-            console.warn(`[media] Twilio ha risposto ${upstream.status} per il messaggio ${id}`);
-            return res.status(502).json({ error: 'Allegato non recuperabile' });
-        }
-        res.setHeader('Content-Type', upstream.headers.get('content-type') || item.content_type || 'application/octet-stream');
-        const len = upstream.headers.get('content-length');
-        if (len) res.setHeader('Content-Length', len);
+        res.setHeader('Content-Type', file.contentType);
+        res.setHeader('Content-Length', String(file.bytes.length));
         res.setHeader('Cache-Control', 'private, max-age=86400');
-        const buf = Buffer.from(await upstream.arrayBuffer());
+        const buf = file.bytes;
         res.end(buf);
     } catch (err: any) {
         console.error('GET /messages/:id/media error:', err);
@@ -14337,7 +14331,7 @@ const proposalRow = (r: any) => ({
 async function buildAgentContext(tenantId: number, key: string): Promise<{ ctx: AgentContext; reservationId: number | null } | null> {
     const [msgs, kb, soglia] = await Promise.all([
         queryWithRetry(
-            `SELECT direction, body, from_phone, to_phone, profile_name
+            `SELECT id, direction, body, from_phone, to_phone, profile_name, media, transcript
                FROM outbound_messages
               WHERE tenant_id = $2
                 AND channel IN ('sms','whatsapp')
@@ -14347,8 +14341,16 @@ async function buildAgentContext(tenantId: number, key: string): Promise<{ ctx: 
         queryWithRetry(`SELECT title, content FROM ai_knowledge_entries WHERE tenant_id = $1 AND is_active ORDER BY sort_order, id`, [tenantId]),
         getVoiceLargeGroupThreshold(tenantId),
     ]);
-    const messages = msgs.rows.reverse();
-    if (messages.length === 0) return null;
+    const rows = msgs.rows.reverse();
+    if (rows.length === 0) return null;
+    // Vocali trascritti e foto (Impostazioni › WhatsApp › Vocali e foto):
+    // il testo dice cosa c'era, le foto del turno del cliente si vedono.
+    const photos = await photosForAgent(tenantId, rows);
+    const messages = rows.map((m: any) => ({
+        ...m,
+        body: agentMessageBody(m),
+        ...(photos.has(m.id) ? { images: photos.get(m.id) } : {}),
+    }));
 
     // Stesso scoping della gemella in /messages/suggest-reply: tenant
     // sulla prenotazione e sui JOIN, o l'agente ragionerebbe sulla
@@ -14475,14 +14477,15 @@ app.post('/messages/agent/extract-booking', authenticate, requirePermission('res
         if (!key) return res.status(400).json({ error: 'phone_digits mancante' });
 
         const msgs = await queryWithRetry(
-            `SELECT direction, body, from_phone, to_phone
+            `SELECT direction, body, from_phone, to_phone, media, transcript
                FROM outbound_messages
               WHERE tenant_id = $2
                 AND channel IN ('sms','whatsapp')
                 AND (to_phone_digits = ANY($1::text[]) OR from_phone_digits = ANY($1::text[]))
                 AND (kind IS NULL OR kind <> ALL($3::text[]))
               ORDER BY sent_at DESC LIMIT 15`, [phoneDigitsVariants(key), req.tenantId!, INBOX_HIDDEN_KINDS]);
-        const messages = msgs.rows.reverse();
+        // Un vocale trascritto vale come testo anche per precompilare il modulo.
+        const messages = msgs.rows.reverse().map((m: any) => ({ ...m, body: agentMessageBody(m) }));
         if (messages.length === 0) return res.status(404).json({ error: 'Conversazione vuota' });
 
         const inbound = messages.find((m: any) => m.direction === 'inbound');
@@ -45862,6 +45865,11 @@ configureReservationButtons({
         && (await getFeatureFlag(tenantId, 'ai_messages_enabled', false))
         && (await isFeatureEnabledForTenant(tenantId, 'whatsapp')),
 });
+
+// Vocali trascritti all'arrivo (services/whatsapp/media/). Registrata DOPO
+// i tasti perché entrambe si mettono in testa agli agganci: così gira per
+// prima, e tasti e coda dell'agente trovano il vocale già scritto.
+configureWhatsAppMedia();
 
 // Quello che l'ospite dice della sua prenotazione (ritardo, note, allergie,
 // conferma): services/reservationGuestUpdates.ts scrive, qui il broadcast.

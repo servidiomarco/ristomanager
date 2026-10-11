@@ -195,7 +195,7 @@ async function preflight(run: any, policy: WhatsAppAgentPolicy, simulate: boolea
     let note: string | undefined;
 
     const lastIn = (await queryWithRetry(
-        `SELECT id, body, sent_at, channel, from_phone FROM outbound_messages
+        `SELECT id, body, transcript, sent_at, channel, from_phone FROM outbound_messages
           WHERE tenant_id = $1 AND direction = 'inbound' AND from_phone_digits = ANY($2::text[])
           ORDER BY sent_at DESC, id DESC LIMIT 1`,
         [tenantId, variants]
@@ -250,7 +250,8 @@ async function preflight(run: any, policy: WhatsAppAgentPolicy, simulate: boolea
         }
     }
 
-    const body = String(lastIn.body || '').trim();
+    // Un vocale conta per quello che dice.
+    const body = String(lastIn.transcript || lastIn.body || '').trim();
     if (AUTO_REPLY_RE.test(body)) {
         await pauseConversation(tenantId, run.phone_digits, new Date(Date.now() + 7 * 24 * 3600_000), 'bot_suspected');
         return { skip: 'risponditore automatico', mode, phone };

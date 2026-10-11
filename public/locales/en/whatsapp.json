@@ -128,5 +128,14 @@
     "onMenu": "Show in the digital menu",
     "save": "Save",
     "readyTexts": "Ready-made texts"
+  },
+  "media": {
+    "transcribe": "Transcribe voice notes",
+    "transcribeHint": "In Messages the voice note also appears written, and the agent reads it as a message. Uses Sofia's ElevenLabs credits.",
+    "transcribeMissing": "The ElevenLabs key is missing on the server: transcription cannot run.",
+    "photos": "Let the agent see photos",
+    "photosHint": "The agent looks at the photos the customer sends (up to three per reply): a booking screenshot, a ticket, a menu.",
+    "loadError": "Settings unavailable",
+    "saveError": "Not saved"
   }
 }

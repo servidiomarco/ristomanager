@@ -183,17 +183,25 @@ export interface EntryPolicy {
   prefill_text: string;
 }
 
+export interface MediaPolicy {
+  transcribe_voice: boolean;
+  read_photos: boolean;
+}
+
 export interface WhatsAppSettings {
   agent: AgentPolicy;
   /** Assenti su un backend precedente alla Fase 8. */
   reminders?: RemindersPolicy;
   entry?: EntryPolicy;
+  /** Assenti su un backend precedente alla Fase 9. */
+  media?: MediaPolicy;
+  transcription_ready?: boolean;
 }
 
 export const getWhatsAppSettings = (): Promise<WhatsAppSettings> =>
   apiRequest(`${API_URL}/whatsapp/settings`, { headers: getHeaders() });
 
-export const saveWhatsAppSettings = (patch: { reminders?: Partial<RemindersPolicy>; entry?: Partial<EntryPolicy> }): Promise<WhatsAppSettings> =>
+export const saveWhatsAppSettings = (patch: { reminders?: Partial<RemindersPolicy>; entry?: Partial<EntryPolicy>; media?: Partial<MediaPolicy> }): Promise<WhatsAppSettings> =>
   apiRequest(`${API_URL}/whatsapp/settings`, { method: 'PUT', headers: getHeaders(), body: JSON.stringify(patch) });
 
 /** Il testo che il cliente trova già scritto, se il locale non ne sceglie uno. */

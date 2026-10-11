@@ -128,5 +128,14 @@
     "onMenu": "Mostra nel menu digitale",
     "save": "Salva",
     "readyTexts": "Testi pronti"
+  },
+  "media": {
+    "transcribe": "Trascrivi i vocali",
+    "transcribeHint": "In Messaggi il vocale compare anche scritto, e l'agente lo legge come un messaggio. Usa i crediti ElevenLabs di Sofia.",
+    "transcribeMissing": "Manca la chiave ElevenLabs sul server: la trascrizione non può partire.",
+    "photos": "Fai leggere le foto all'agente",
+    "photosHint": "L'agente guarda le foto che il cliente manda (al massimo tre per risposta): uno screenshot di una prenotazione, un biglietto, un menu.",
+    "loadError": "Impostazioni non disponibili",
+    "saveError": "Non salvato"
   }
 }

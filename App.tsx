@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
-import { LayoutDashboard, Grid, Settings, ChevronRight, ChevronDown, ChevronUp, ChefHat, PanelLeft, Calendar, CalendarDays, Bell, X, AlertTriangle, LogOut, Users, UserCheck, FileText, UsersRound, Sun, Moon, Sunset, MoreHorizontal, Search, UtensilsCrossed, Plus, BookUser, Boxes, Clock, ShoppingCart, ListChecks, ShieldCheck, Phone, ConciergeBell, Zap, PartyPopper, DoorClosed, StickyNote, CreditCard, MessageCircle, Mail, Kanban, ClipboardList, CookingPot, BellRing, MessagesSquare, Gauge, Building2, Milestone, Ban, Sparkles, Landmark, Percent, Calculator, BarChart3, Star, ShoppingBag, LifeBuoy, PlugZap, Radio, Thermometer, SlidersHorizontal, Tag, Scale, CalendarCheck, CalendarClock, Wand2, QrCode } from 'lucide-react';
+import { LayoutDashboard, Grid, Settings, ChevronRight, ChevronDown, ChevronUp, ChefHat, PanelLeft, Calendar, CalendarDays, Bell, X, AlertTriangle, LogOut, Users, UserCheck, FileText, UsersRound, Sun, Moon, Sunset, MoreHorizontal, Search, UtensilsCrossed, Plus, BookUser, Boxes, Clock, ShoppingCart, ListChecks, ShieldCheck, Phone, ConciergeBell, Zap, PartyPopper, DoorClosed, StickyNote, CreditCard, MessageCircle, Mail, Kanban, ClipboardList, CookingPot, BellRing, MessagesSquare, Gauge, Building2, Milestone, Ban, Sparkles, Landmark, Percent, Calculator, BarChart3, Star, ShoppingBag, LifeBuoy, PlugZap, Radio, Thermometer, SlidersHorizontal, Tag, Scale, CalendarCheck, CalendarClock, Wand2, QrCode, AudioLines } from 'lucide-react';
 import { ViewState, Room, Table, Dish, RestaurantMenu, Reservation, TableStatus, TableShape, BanquetMenu, PaymentStatus, Shift, UserRole, ReservationStatus } from './types';
 import { Dashboard } from './components/Dashboard';
 import { FloorPlan } from './components/FloorPlan';
@@ -75,6 +75,7 @@ import { WhatsAppUsageCard } from './components/whatsapp/WhatsAppUsageCard';
 import { WhatsAppAgentCard } from './components/whatsapp/WhatsAppAgentCard';
 import { WhatsAppRemindersCard } from './components/whatsapp/WhatsAppRemindersCard';
 import { WhatsAppEntryCard } from './components/whatsapp/WhatsAppEntryCard';
+import { WhatsAppMediaCard } from './components/whatsapp/WhatsAppMediaCard';
 import { ReviewSettingsCard } from './components/ReviewSettingsCard';
 import { RecensioniPage } from './components/RecensioniPage';
 import { MediaLibraryManager } from './components/MediaLibraryManager';
@@ -4000,6 +4001,15 @@ const App: React.FC = () => {
                   >
                     <CardErrorBoundary label={t('settings.waReminders', 'Promemoria con tasti')}>
                       <WhatsAppRemindersCard showToast={addToast} />
+                    </CardErrorBoundary>
+                  </SettingsDisclosure>
+                  <SettingsDisclosure
+                    icon={AudioLines}
+                    title={t('settings.waMedia', 'Vocali e foto')}
+                    description={t('settings.waMediaHint', 'Trascrivi i vocali, fai guardare le foto all\'agente')}
+                  >
+                    <CardErrorBoundary label={t('settings.waMedia', 'Vocali e foto')}>
+                      <WhatsAppMediaCard showToast={addToast} />
                     </CardErrorBoundary>
                   </SettingsDisclosure>
                   <SettingsDisclosure

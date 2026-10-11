@@ -570,6 +570,10 @@ Per i ristoranti con cassa **Passepartout Menù** (modulo dedicato). Tutto si re
 - Il promemoria WhatsApp arriva con tre tasti: **«Ci saremo»** segna la conferma dell'ospite e lo ringrazia; **«Devo modificare»** passa la conversazione all'agente se lavora da solo, altrimenti manda il link «La tua prenotazione» (o dice che risponde una persona); **«Annulla»** chiede «Confermi?» e al «sì» annulla con le stesse regole della pagina dell'ospite (sotto la soglia d'anticipo dice di chiamare). Funziona anche con l'AI spenta.
 - Serve il template a tasti approvato da Meta: finché non è attivo parte il promemoria di sempre. Quando parte il promemoria resta deciso in Prenotazioni › Promemoria.
 
+**Vocali e foto** (Impostazioni › WhatsApp › Vocali e foto, spenti di serie)
+- **Trascrivi i vocali**: un vocale del cliente compare anche scritto sotto il lettore audio in Messaggi, e l'agente lo legge come un messaggio. La lingua si riconosce da sola; usa i crediti ElevenLabs di Sofia.
+- **Fai leggere le foto all'agente**: l'agente guarda le foto che il cliente manda nel suo ultimo messaggio (al massimo tre), per esempio lo screenshot di una prenotazione.
+
 **Farsi trovare** (Impostazioni › WhatsApp › Farsi trovare)
 - Il link wa.me del locale con un testo già scritto (di serie «Ciao! Vorrei prenotare un tavolo.»), il suo QR da scaricare e stampare, e i testi pronti per Google Business e la bio di Instagram.
 - Due interruttori: la pillola «WhatsApp» sulla pagina /prenota e «Scrivici su WhatsApp» in fondo al menu digitale.
@@ -919,6 +923,7 @@ Pagina unica a blocchi, con chip-àncora per saltare alla sezione e una **ricerc
 
 | Data | Sezione | Modifica |
 |---|---|---|
+| 2026-10-11 | Messaggi: WhatsApp e SMS, Impostazioni | **Vocali trascritti e foto lette dall'agente.** In Impostazioni › WhatsApp › Vocali e foto: i vocali dei clienti compaiono anche scritti in Messaggi e l'agente li legge; l'agente può anche guardare le foto che il cliente manda. |
 | 2026-10-11 | Messaggi: WhatsApp e SMS, Impostazioni | **Promemoria WhatsApp con i tasti e «Farsi trovare».** Il promemoria può arrivare con «Ci saremo», «Devo modificare» e «Annulla»: il cliente risponde con un tocco, anche con l'AI spenta («Annulla» chiede conferma). In Impostazioni › WhatsApp › Farsi trovare trovi il link e il QR del tuo WhatsApp, i testi per Google e Instagram, e puoi mostrarlo su /prenota e nel menu digitale. |
 | 2026-10-11 | Messaggi: WhatsApp e SMS, Impostazioni | **L'agente WhatsApp può anche prenotare, spostare e annullare da solo.** Nuova modalità «Azioni» in Impostazioni › WhatsApp › Agente automatico: dove le regole lo permettono fa da sé, altrimenti propone allo staff (caparre, banchetti, gruppi numerosi, cambi di sala, prenotazioni troppo vicine). Prima di annullare chiede conferma al cliente. Ogni azione arriva come notifica e in chat ha il tasto «Annulla». |
 | 2026-10-11 | Messaggi: WhatsApp e SMS, Impostazioni | **L'agente WhatsApp lavora da solo, se vuoi.** In Impostazioni › WhatsApp › Agente automatico si sceglie «Bozze» (prepara la risposta a ogni messaggio) o «Risposte» (risponde da solo; le modifiche alle prenotazioni restano da confermare). Aspetta che il cliente finisca di scrivere, tace se scrive lo staff, ai «grazie» e ai risponditori automatici; in ogni conversazione si mette in pausa. «Prova l'agente» simula un cliente senza mandare niente. |

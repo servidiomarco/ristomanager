@@ -78,5 +78,8 @@
   "agentUndoChanged": "La prenotazione è cambiata nel frattempo: sistemala dalla scheda.",
   "agentUndoNoTable": "Il tavolo di prima non è più libero e non ce n'è un altro: rimettila a mano.",
   "agentUndoPast": "L'orario è già passato.",
-  "agentUndoFailed": "Non annullata"
+  "agentUndoFailed": "Non annullata",
+  "transcriptPending": "Trascrizione in corso…",
+  "transcriptFailed": "Trascrizione non riuscita",
+  "transcriptLabel": "Trascrizione"
 }
