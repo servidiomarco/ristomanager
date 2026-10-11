@@ -162,7 +162,17 @@
     "waUsage": "Consumi del mese",
     "waUsageHint": "Messaggi ricevuti e inviati, spesa dell'AI",
     "waAgent": "Agente automatico",
-    "waAgentHint": "Bozze o risposte da solo ai messaggi in arrivo"
+    "waAgentHint": "Bozze, risposte o azioni da solo sui messaggi in arrivo",
+    "waReminders": "Promemoria con tasti",
+    "waRemindersHint": "«Ci saremo», «Devo modificare», «Annulla» nel promemoria",
+    "waEntry": "Farsi trovare",
+    "waEntryHint": "Link e QR del tuo WhatsApp, su /prenota e nel menu",
+    "waMedia": "Vocali e foto",
+    "waMediaHint": "Trascrivi i vocali, fai guardare le foto all'agente",
+    "waTakeaway": "Asporto in chat",
+    "waTakeawayHint": "Ordini d'asporto su WhatsApp e avviso «pronto»",
+    "waCampaigns": "Campagne",
+    "waCampaignsHint": "Promozioni ai clienti col consenso: orari, pause, tetto di spesa"
   },
   "aria": {
     "openMenu": "Apri menu",

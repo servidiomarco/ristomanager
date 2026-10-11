@@ -4,13 +4,16 @@
 // decide chiamata per chiamata:
 //
 //   letture (check_availability)        → eseguite subito
-//   scritture (crea/sposta/annulla)     → PROPOSTA che lo staff conferma
+//   scritture (crea/sposta/annulla)     → PROPOSTA che lo staff conferma,
+//                                         o eseguite da sole in modalità
+//                                         «Azioni» se l'idoneità passa
 //   skip_reply                          → il giro finisce senza risposta
 //
-// Le scritture restano proposte finché le fasi dell'autonomia non le
-// lasciano eseguire dove i controlli d'idoneità lo permettono: un errore su
-// una lettura si legge e si scarta, un errore su una scrittura è un tavolo
-// fantasma o una prenotazione cancellata a un cliente che si presenta.
+// Le scritture si eseguono da sole solo dove i controlli d'idoneità lo
+// permettono (autonomy.ts): un errore su una lettura si legge e si scarta,
+// un errore su una scrittura è un tavolo fantasma o una prenotazione
+// cancellata a un cliente che si presenta. Ogni scrittura eseguita da sola
+// esce di qui con la prenotazione prima e dopo, per il tasto «Annulla».
 //
 // Il modello riceve l'esito vero di ogni chiamata (tool_result) e scrive
 // lui la frase finale: dice «fatto» solo davanti a executed: true, «confermo
@@ -24,8 +27,9 @@
 
 import Anthropic from '@anthropic-ai/sdk';
 import { buildSystem } from './prompt.js';
-import { AGENT_TOOLS, defaultDecision, findTool, toolDefinitions, type ToolDecision } from './tools/index.js';
-import { AgentError, type AgentContext, type AgentProposal, type AgentResult, type AgentUsage } from './types.js';
+import { AGENT_TOOLS, defaultDecision, findTool, isToolAvailable, toolDefinitions, type ToolDecision } from './tools/index.js';
+import { clearPendingConfirmation, modifyArgsForAuto, snapshotReservation } from './autonomy.js';
+import { AgentError, type AgentAction, type AgentContext, type AgentProposal, type AgentResult, type AgentUsage } from './types.js';
 
 export const MODEL = 'claude-opus-5';
 // Più strumenti per risposta e un giro per ogni esito: verifica, proposta,
@@ -76,12 +80,23 @@ export function echoable(content: Anthropic.Beta.BetaContentBlock[]): Anthropic.
  *  detto cosa, non un blocco di testo indistinto. */
 export function historyOf(messages: AgentContext['messages']): Anthropic.Beta.BetaMessageParam[] {
     const out: Anthropic.Beta.BetaMessageParam[] = messages
-        .filter(m => (m.body || '').trim())
+        .filter(m => (m.body || '').trim() || (m.images?.length ?? 0) > 0)
         .slice(-15)
-        .map(m => ({
-            role: (m.direction === 'inbound' ? 'user' : 'assistant') as 'user' | 'assistant',
-            content: m.body.trim(),
-        }));
+        .map(m => {
+            const role = (m.direction === 'inbound' ? 'user' : 'assistant') as 'user' | 'assistant';
+            const text = (m.body || '').trim();
+            // Le foto del cliente prima del testo, come le ha mandate.
+            if (role === 'user' && m.images?.length) {
+                return {
+                    role,
+                    content: [
+                        ...m.images.map(img => ({ type: 'image' as const, source: { type: 'base64' as const, media_type: img.media_type, data: img.data } })),
+                        { type: 'text' as const, text: text || '[Foto del cliente]' },
+                    ],
+                };
+            }
+            return { role, content: text };
+        });
     // La storia deve iniziare E finire con un messaggio del cliente: il modello
     // rifiuta un prefill dell'assistant come ultimo turno ("The conversation
     // must end with a user message", 400). Quando lo staff ha già risposto per
@@ -106,6 +121,7 @@ export async function runAgent(ctx: AgentContext): Promise<AgentResult> {
     const system = buildSystem(ctx);
     const checks: AgentResult['checks'] = [];
     const proposals: AgentProposal[] = [];
+    const actions: AgentAction[] = [];
     const usage: AgentUsage = { model: MODEL, promptTokens: 0, outputTokens: 0, totalTokens: 0, calls: 0 };
     const conta = (m: Anthropic.Beta.BetaMessage) => {
         usage.promptTokens += m.usage.input_tokens ?? 0;
@@ -113,7 +129,7 @@ export async function runAgent(ctx: AgentContext): Promise<AgentResult> {
         usage.totalTokens = usage.promptTokens + usage.outputTokens;
         usage.calls += 1;
     };
-    const fine = (extra: Partial<AgentResult>): AgentResult => ({ reply: null, proposals, checks, usage, ...extra });
+    const fine = (extra: Partial<AgentResult>): AgentResult => ({ reply: null, proposals, actions, checks, usage, ...extra });
 
     const messages = historyOf(ctx.messages);
     if (messages.length === 0) return fine({ reason: 'Nessun messaggio del cliente da interpretare' });
@@ -158,7 +174,8 @@ export async function runAgent(ctx: AgentContext): Promise<AgentResult> {
         let skipped: string | undefined;
 
         for (const use of uses) {
-            const tool = findTool(use.name);
+            const found = findTool(use.name);
+            const tool = found && isToolAvailable(found, ctx) ? found : undefined;
             const raw = (use.input && typeof use.input === 'object' ? use.input : {}) as Record<string, any>;
             if (!tool) {
                 results.push({ type: 'tool_result', tool_use_id: use.id, is_error: true, content: result({ error: `Strumento sconosciuto: ${use.name}` }) });
@@ -170,13 +187,61 @@ export async function runAgent(ctx: AgentContext): Promise<AgentResult> {
                 continue;
             }
 
-            const args = tool.prepareArgs ? tool.prepareArgs(raw, ctx) : raw;
-            let decision: ToolDecision = tool.decide ? tool.decide(args, ctx, { proposals: proposals.length }) : defaultDecision(tool);
-            if (decision.kind === 'propose' && proposals.length >= 1) {
-                decision = { kind: 'refuse', reason: 'Una sola modifica alle prenotazioni per risposta: questa va chiesta dopo che la prima è confermata.' };
+            let args = tool.prepareArgs ? tool.prepareArgs(raw, ctx) : raw;
+            let decision: ToolDecision;
+            try {
+                decision = tool.decide ? await tool.decide(args, ctx, { proposals: proposals.length, actions: actions.length }) : defaultDecision(tool);
+            } catch (err: any) {
+                // Un controllo d'idoneità che non riesce a leggere il dato
+                // non autorizza niente: si torna alla proposta.
+                console.warn(`[agent] decisione su ${tool.name} non riuscita:`, err?.message || err);
+                decision = tool.kind === 'write' ? { kind: 'propose' } : { kind: 'refuse', reason: 'Errore tecnico' };
+            }
+            const scrive = decision.kind === 'propose' || (decision.kind === 'execute' && decision.auto);
+            if (scrive && proposals.length + actions.length >= 1) {
+                decision = { kind: 'refuse', reason: 'Una sola modifica alle prenotazioni per risposta: questa va chiesta dopo che la prima è fatta o confermata.' };
             }
 
-            if (decision.kind === 'execute' && tool.execute) {
+            if (decision.kind === 'execute' && decision.auto && tool.execute) {
+                // Eseguita da sola: la prenotazione esatta, la fotografia
+                // prima e dopo, e niente scrittura nel simulatore.
+                const reservationId = decision.auto.reservationId;
+                if (reservationId != null) {
+                    args = tool.name === 'modify_reservation'
+                        ? await modifyArgsForAuto(args, ctx, reservationId)
+                        : { ...args, reservation_id: reservationId };
+                }
+                const summary = tool.summarize ? tool.summarize(args, ctx) : tool.name;
+                if (ctx.dryRun) {
+                    actions.push({ tool: tool.name, args, summary, result: {}, reservationId, before: null, after: null, simulated: true });
+                    results.push({
+                        type: 'tool_result', tool_use_id: use.id,
+                        content: result({ success: true, executed: true, simulated: true, message: 'Fatto (simulazione: nel locale vero sarebbe eseguito ora).' }),
+                    });
+                    continue;
+                }
+                try {
+                    const before = await snapshotReservation(ctx.tenantId, reservationId);
+                    const body = await tool.execute(args, { tenantId: ctx.tenantId, phone: ctx.phone, phoneDigits: ctx.phoneDigits, auto: true });
+                    const ok = body?.success === true;
+                    if (ok) {
+                        const after = await snapshotReservation(ctx.tenantId, Number(body.reservation_id) || reservationId);
+                        actions.push({ tool: tool.name, args, summary, result: body, reservationId: after?.id ?? reservationId, before, after });
+                        if (tool.name === 'cancel_reservation') await clearPendingConfirmation(ctx);
+                    }
+                    checks.push({ tool: tool.name, args, result: body });
+                    results.push({ type: 'tool_result', tool_use_id: use.id, content: result({ ...body, executed: ok }) });
+                } catch (err: any) {
+                    results.push({ type: 'tool_result', tool_use_id: use.id, is_error: true, content: result({ error: err?.message || 'Errore dello strumento', executed: false }) });
+                }
+            } else if (decision.kind === 'execute' && tool.execute && ctx.dryRun && tool.kind === 'write') {
+                // Simulatore: un ritardo, una conferma, una richiamata non
+                // si scrivono per il cliente finto.
+                results.push({
+                    type: 'tool_result', tool_use_id: use.id,
+                    content: result({ success: true, executed: true, simulated: true, message: 'Fatto (simulazione).' }),
+                });
+            } else if (decision.kind === 'execute' && tool.execute) {
                 try {
                     const body = await tool.execute(args, ctx);
                     checks.push({ tool: tool.name, args, result: body });
@@ -189,6 +254,11 @@ export async function runAgent(ctx: AgentContext): Promise<AgentResult> {
                 results.push({
                     type: 'tool_result', tool_use_id: use.id,
                     content: result({ status: 'pending_staff', executed: false, message: 'Registrato per il ristorante, che conferma a breve. Non dire al cliente che è fatto.' }),
+                });
+            } else if (decision.kind === 'ask') {
+                results.push({
+                    type: 'tool_result', tool_use_id: use.id,
+                    content: result({ status: 'confirm_with_customer', executed: false, message: decision.message }),
                 });
             } else {
                 results.push({

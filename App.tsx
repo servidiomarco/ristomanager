@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
-import { LayoutDashboard, Grid, Settings, ChevronRight, ChevronDown, ChevronUp, ChefHat, PanelLeft, Calendar, CalendarDays, Bell, X, AlertTriangle, LogOut, Users, UserCheck, FileText, UsersRound, Sun, Moon, Sunset, MoreHorizontal, Search, UtensilsCrossed, Plus, BookUser, Boxes, Clock, ShoppingCart, ListChecks, ShieldCheck, Phone, ConciergeBell, Zap, PartyPopper, DoorClosed, StickyNote, CreditCard, MessageCircle, Mail, Kanban, ClipboardList, CookingPot, BellRing, MessagesSquare, Gauge, Building2, Milestone, Ban, Sparkles, Landmark, Percent, Calculator, BarChart3, Star, ShoppingBag, LifeBuoy, PlugZap, Radio, Thermometer, SlidersHorizontal, Tag, Scale, CalendarCheck, CalendarClock, Wand2 } from 'lucide-react';
+import { LayoutDashboard, Grid, Settings, ChevronRight, ChevronDown, ChevronUp, ChefHat, PanelLeft, Calendar, CalendarDays, Bell, X, AlertTriangle, LogOut, Users, UserCheck, FileText, UsersRound, Sun, Moon, Sunset, MoreHorizontal, Search, UtensilsCrossed, Plus, BookUser, Boxes, Clock, ShoppingCart, ListChecks, ShieldCheck, Phone, ConciergeBell, Zap, PartyPopper, DoorClosed, StickyNote, CreditCard, MessageCircle, Mail, Kanban, ClipboardList, CookingPot, BellRing, MessagesSquare, Gauge, Building2, Milestone, Ban, Sparkles, Landmark, Percent, Calculator, BarChart3, Star, ShoppingBag, LifeBuoy, PlugZap, Radio, Thermometer, SlidersHorizontal, Tag, Scale, CalendarCheck, CalendarClock, Wand2, QrCode, AudioLines, Megaphone } from 'lucide-react';
 import { ViewState, Room, Table, Dish, RestaurantMenu, Reservation, TableStatus, TableShape, BanquetMenu, PaymentStatus, Shift, UserRole, ReservationStatus } from './types';
 import { Dashboard } from './components/Dashboard';
 import { FloorPlan } from './components/FloorPlan';
@@ -73,6 +73,11 @@ import { WhatsAppStatusCard } from './components/whatsapp/WhatsAppStatusCard';
 import { WhatsAppTemplatesCard } from './components/whatsapp/WhatsAppTemplatesCard';
 import { WhatsAppUsageCard } from './components/whatsapp/WhatsAppUsageCard';
 import { WhatsAppAgentCard } from './components/whatsapp/WhatsAppAgentCard';
+import { WhatsAppRemindersCard } from './components/whatsapp/WhatsAppRemindersCard';
+import { WhatsAppEntryCard } from './components/whatsapp/WhatsAppEntryCard';
+import { WhatsAppMediaCard } from './components/whatsapp/WhatsAppMediaCard';
+import { WhatsAppTakeawayCard } from './components/whatsapp/WhatsAppTakeawayCard';
+import { WhatsAppCampaignsCard } from './components/whatsapp/WhatsAppCampaignsCard';
 import { ReviewSettingsCard } from './components/ReviewSettingsCard';
 import { RecensioniPage } from './components/RecensioniPage';
 import { MediaLibraryManager } from './components/MediaLibraryManager';
@@ -3281,6 +3286,7 @@ const App: React.FC = () => {
             reservations={reservations}
             openPhoneDigits={pendingInboxPhone}
             onOpenedPhone={() => setPendingInboxPhone(null)}
+            showToast={addToast}
             onCreateReservationFromContact={({ phone_digits, ...prefill }) => {
               // Remember which conversation to link the new booking back to,
               // so it becomes reopenable from the chat after creation.
@@ -3985,10 +3991,55 @@ const App: React.FC = () => {
                   <SettingsDisclosure
                     icon={Wand2}
                     title={t('settings.waAgent', 'Agente automatico')}
-                    description={t('settings.waAgentHint', 'Bozze o risposte da solo ai messaggi in arrivo')}
+                    description={t('settings.waAgentHint', 'Bozze, risposte o azioni da solo sui messaggi in arrivo')}
                   >
                     <CardErrorBoundary label={t('settings.waAgent', 'Agente automatico')}>
                       <WhatsAppAgentCard showToast={addToast} />
+                    </CardErrorBoundary>
+                  </SettingsDisclosure>
+                  <SettingsDisclosure
+                    icon={BellRing}
+                    title={t('settings.waReminders', 'Promemoria con tasti')}
+                    description={t('settings.waRemindersHint', '«Ci saremo», «Devo modificare», «Annulla» nel promemoria')}
+                  >
+                    <CardErrorBoundary label={t('settings.waReminders', 'Promemoria con tasti')}>
+                      <WhatsAppRemindersCard showToast={addToast} />
+                    </CardErrorBoundary>
+                  </SettingsDisclosure>
+                  <SettingsDisclosure
+                    icon={AudioLines}
+                    title={t('settings.waMedia', 'Vocali e foto')}
+                    description={t('settings.waMediaHint', 'Trascrivi i vocali, fai guardare le foto all\'agente')}
+                  >
+                    <CardErrorBoundary label={t('settings.waMedia', 'Vocali e foto')}>
+                      <WhatsAppMediaCard showToast={addToast} />
+                    </CardErrorBoundary>
+                  </SettingsDisclosure>
+                  <SettingsDisclosure
+                    icon={ShoppingBag}
+                    title={t('settings.waTakeaway', 'Asporto in chat')}
+                    description={t('settings.waTakeawayHint', "Ordini d'asporto su WhatsApp e avviso «pronto»")}
+                  >
+                    <CardErrorBoundary label={t('settings.waTakeaway', 'Asporto in chat')}>
+                      <WhatsAppTakeawayCard showToast={addToast} />
+                    </CardErrorBoundary>
+                  </SettingsDisclosure>
+                  <SettingsDisclosure
+                    icon={Megaphone}
+                    title={t('settings.waCampaigns', 'Campagne')}
+                    description={t('settings.waCampaignsHint', 'Promozioni ai clienti col consenso: orari, pause, tetto di spesa')}
+                  >
+                    <CardErrorBoundary label={t('settings.waCampaigns', 'Campagne')}>
+                      <WhatsAppCampaignsCard showToast={addToast} />
+                    </CardErrorBoundary>
+                  </SettingsDisclosure>
+                  <SettingsDisclosure
+                    icon={QrCode}
+                    title={t('settings.waEntry', 'Farsi trovare')}
+                    description={t('settings.waEntryHint', 'Link e QR del tuo WhatsApp, su /prenota e nel menu')}
+                  >
+                    <CardErrorBoundary label={t('settings.waEntry', 'Farsi trovare')}>
+                      <WhatsAppEntryCard showToast={addToast} />
                     </CardErrorBoundary>
                   </SettingsDisclosure>
                   <SettingsDisclosure

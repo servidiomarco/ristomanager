@@ -46,6 +46,10 @@ export interface InboxMessage {
   /** Che cosa è: NULL = scritto a mano dallo staff; 'agent' / 'agent_followup'
    *  = scritto dall'agente WhatsApp. Assente su un backend più vecchio. */
   kind?: string | null;
+  /** Il vocale trascritto (Impostazioni › WhatsApp › Vocali e foto). */
+  transcript?: string | null;
+  transcript_status?: 'pending' | 'done' | 'failed' | null;
+  transcript_language?: string | null;
 }
 
 export interface MessageMedia {

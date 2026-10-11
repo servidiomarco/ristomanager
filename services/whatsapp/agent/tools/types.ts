@@ -11,8 +11,13 @@ import type { AgentContext } from '../types.js';
 export type ToolKind = 'read' | 'write' | 'control';
 
 export type ToolDecision =
-    | { kind: 'execute' }
+    /** `auto`: una scrittura che l'agente esegue da solo (modalità «Azioni»)
+     *  sulla prenotazione indicata; va nel registro con il prima e il dopo. */
+    | { kind: 'execute'; auto?: { reservationId: number | null } }
     | { kind: 'propose' }
+    /** Prima di eseguire serve una risposta del cliente (l'annullo da
+     *  confermare): il modello la chiede, il giro dopo esegue. */
+    | { kind: 'ask'; message: string }
     | { kind: 'refuse'; reason: string };
 
 /** Quello che serve a eseguire uno strumento: il ristorante e il cliente
@@ -26,20 +31,28 @@ export interface ToolRun {
      *  chiederebbero al cliente (nome diverso dalla rubrica, prenotazione già
      *  in agenda) li ha già fatti lei. */
     approvedByStaff?: boolean;
+    /** Eseguita dall'agente da solo: le push lo dicono. */
+    auto?: boolean;
 }
 
 /** Lo stato del giro che una decisione può guardare. */
 export interface TurnState {
     /** Proposte già raccolte in questo giro. */
     proposals: number;
+    /** Scritture già eseguite da sole in questo giro. */
+    actions: number;
 }
 
 export interface AgentTool {
     name: string;
     kind: ToolKind;
+    /** Se c'è solo per certi locali (l'asporto): il modello non lo vede, e
+     *  una chiamata comunque arrivata non si esegue. */
+    available?: (ctx: AgentContext) => boolean;
     definition: (ctx: AgentContext) => Anthropic.Beta.BetaTool;
-    /** Di serie: le letture si eseguono, le scritture si propongono. */
-    decide?: (args: Record<string, any>, ctx: AgentContext, turn: TurnState) => ToolDecision;
+    /** Di serie: le letture si eseguono, le scritture si propongono. Può
+     *  leggere il database (l'idoneità di un'azione automatica). */
+    decide?: (args: Record<string, any>, ctx: AgentContext, turn: TurnState) => ToolDecision | Promise<ToolDecision>;
     /** Gli argomenti come li vuole lo strumento: il telefono è sempre quello
      *  della conversazione, mai quello che il modello crede di aver letto. */
     prepareArgs?: (args: Record<string, any>, ctx: AgentContext) => Record<string, any>;

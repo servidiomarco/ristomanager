@@ -38,8 +38,8 @@ export async function whatsappUsage(tenantId: number): Promise<WhatsAppUsage> {
         queryWithRetry(
             `SELECT
                 count(*) FILTER (WHERE channel = 'whatsapp' AND direction = 'inbound')::int AS wa_in,
-                count(*) FILTER (WHERE channel = 'whatsapp' AND direction = 'outbound' AND kind IS NULL)::int AS wa_staff,
-                count(*) FILTER (WHERE channel = 'whatsapp' AND direction = 'outbound' AND kind IS NOT NULL)::int AS wa_auto,
+                count(*) FILTER (WHERE channel = 'whatsapp' AND direction = 'outbound' AND (kind IS NULL OR kind = 'staff'))::int AS wa_staff,
+                count(*) FILTER (WHERE channel = 'whatsapp' AND direction = 'outbound' AND kind IS NOT NULL AND kind <> 'staff')::int AS wa_auto,
                 count(*) FILTER (WHERE channel = 'whatsapp' AND direction = 'outbound' AND status IN ('failed', 'undelivered'))::int AS wa_failed,
                 count(*) FILTER (WHERE channel = 'sms' AND direction = 'outbound')::int AS sms_out,
                 count(*) FILTER (WHERE channel = 'sms' AND direction = 'outbound' AND status IN ('failed', 'undelivered'))::int AS sms_failed

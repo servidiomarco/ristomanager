@@ -2,8 +2,9 @@
 // servizi (services/bookingTools.ts) col canale WhatsApp.
 
 import * as bookingTools from '../../../bookingTools.js';
-import { WHATSAPP_CHANNEL } from '../../../bookingTools.js';
+import { WHATSAPP_AUTO_CHANNEL, WHATSAPP_CHANNEL } from '../../../bookingTools.js';
 import { isoDatesToEuropean } from '../../../../utils/text.js';
+import { decideCancel, decideCreate, decideModify } from '../autonomy.js';
 import type { AgentContext } from '../types.js';
 import type { AgentTool, ToolRun } from './types.js';
 
@@ -17,6 +18,9 @@ const senzaNome = (args: Record<string, any>, ctx: AgentContext) => {
 };
 
 const zona = (v: unknown) => (v === 'OUTDOOR' ? 'esterno' : 'interno');
+
+// Eseguita dall'agente da solo: le push allo staff lo dicono.
+const canale = (run: ToolRun) => (run.auto ? WHATSAPP_AUTO_CHANNEL : WHATSAPP_CHANNEL);
 
 export const checkAvailabilityTool: AgentTool = {
     name: 'check_availability',
@@ -63,6 +67,9 @@ export const createReservationTool: AgentTool = {
         },
     }),
     prepareArgs: conTelefono,
+    // In modalità «Azioni» prenota da solo, come Sofia, dove c'è posto e
+    // non serve una caparra; altrimenti propone.
+    decide: (args, ctx) => (ctx.autonomy ? decideCreate(args, ctx) : { kind: 'propose' }),
     execute: async (args, run: ToolRun) => (await bookingTools.createReservation(
         run.tenantId,
         // Confermata da una persona che ha letto la chat e l'agenda: i due
@@ -70,7 +77,7 @@ export const createReservationTool: AgentTool = {
         // Se il nome differisce dal titolare del numero resta la nota
         // «Numero in rubrica: …».
         run.approvedByStaff ? { ...args, phone: run.phone, name_confirmed: true, existing_booking_confirmed: true } : { ...args, phone: run.phone },
-        WHATSAPP_CHANNEL
+        canale(run)
     )).body,
     summarize: args => isoDatesToEuropean(
         `Crea prenotazione: ${args.customer_name} · ${args.guests} persone · ${args.date} alle ${args.time}` +
@@ -99,8 +106,9 @@ export const modifyReservationTool: AgentTool = {
         },
     }),
     prepareArgs: senzaNome,
+    decide: (args, ctx) => (ctx.autonomy ? decideModify(args, ctx) : { kind: 'propose' }),
     execute: async (args, run: ToolRun) =>
-        (await bookingTools.modifyReservation(run.tenantId, { ...args, phone: run.phone }, WHATSAPP_CHANNEL)).body,
+        (await bookingTools.modifyReservation(run.tenantId, { ...args, phone: run.phone }, canale(run))).body,
     summarize: (args, ctx) => {
         const cambi: string[] = [];
         if (args.new_date) cambi.push(`data → ${args.new_date}`);
@@ -129,8 +137,9 @@ export const cancelReservationTool: AgentTool = {
         },
     }),
     prepareArgs: senzaNome,
+    decide: (args, ctx) => (ctx.autonomy ? decideCancel(args, ctx) : { kind: 'propose' }),
     execute: async (args, run: ToolRun) =>
-        (await bookingTools.cancelReservation(run.tenantId, { ...args, phone: run.phone }, WHATSAPP_CHANNEL)).body,
+        (await bookingTools.cancelReservation(run.tenantId, { ...args, phone: run.phone }, canale(run))).body,
     summarize: args => isoDatesToEuropean(
         `Annulla la prenotazione del ${args.date}${args.time ? ` alle ${args.time}` : ''}`
     ),

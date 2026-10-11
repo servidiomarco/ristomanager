@@ -1320,12 +1320,15 @@ export async function cancelVoiceReservation(
     // restava solo il broadcast, che il nodo di sala non vede: lì la
     // prenotazione annullata da Sofia restava viva sul suo tavolo.
     const updated = await withOutboxTx(async (client) => {
+        // Su WhatsApp a chiedere l'annullo è l'ospite stesso, come dal link
+        // «La tua prenotazione»: la scheda lo dice («annullata dall'ospite»).
         const upd = await client.query(`
             UPDATE reservations
-            SET reservation_status = 'CANCELLED', table_id = NULL
+            SET reservation_status = 'CANCELLED', table_id = NULL,
+                guest_cancelled_at = CASE WHEN $3::boolean THEN NOW() ELSE guest_cancelled_at END
             WHERE id = $1 AND tenant_id = $2
             RETURNING id, tenant_id, customer_name, reservation_time, shift, guests
-        `, [target.id, tenantId]);
+        `, [target.id, tenantId, (input.channelTag ?? VOICE_CHANNEL_TAG).actor === 'whatsapp']);
         if (upd.rows[0]) {
             await outboxEnqueueInTx(client, tenantId, 'reservation:updated', `reservation:${target.id}`,
                 { reservation_id: target.id }, { actor: { channel: (input.channelTag ?? VOICE_CHANNEL_TAG).actor } });

@@ -63,5 +63,25 @@
   "agentDraftUse": "Usa",
   "agentDraftDiscard": "Scarta",
   "agentLabel": "Agente",
-  "agentWrote": "Scritto dall'agente"
+  "agentWrote": "Scritto dall'agente",
+  "agentChipActions": "Agente: azioni",
+  "agentDid": {
+    "create_reservation": "L'agente ha prenotato",
+    "modify_reservation": "L'agente ha modificato",
+    "cancel_reservation": "L'agente ha annullato",
+    "add_reservation_note": "L'agente ha annotato",
+    "record_allergy": "L'agente ha segnato un'allergia",
+    "create_takeaway_order": "L'agente ha preso un ordine d'asporto"
+  },
+  "agentDidOther": "L'agente ha agito",
+  "agentUndo": "Annulla",
+  "agentUndone": "Disfatta",
+  "agentUndoChanged": "La prenotazione è cambiata nel frattempo: sistemala dalla scheda.",
+  "agentUndoNoTable": "Il tavolo di prima non è più libero e non ce n'è un altro: rimettila a mano.",
+  "agentUndoPast": "L'orario è già passato.",
+  "agentUndoFailed": "Non annullata",
+  "transcriptPending": "Trascrizione in corso…",
+  "transcriptFailed": "Trascrizione non riuscita",
+  "transcriptLabel": "Trascrizione",
+  "campaigns": "Campagne"
 }

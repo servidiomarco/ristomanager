@@ -21,7 +21,25 @@ export interface TwilioSender {
     restBase: string;
 }
 
-export type WhatsAppSender = TwilioSender;
+/** Il numero del ristorante sull'API Cloud di Meta (Fase 12): collegato dal
+ *  locale, salvato in whatsapp_senders col token cifrato. */
+export interface MetaSender {
+    provider: 'meta';
+    source: 'db';
+    phoneNumberId: string;
+    wabaId: string;
+    accessToken: string;
+    /** Come per Twilio, `whatsapp:+E164`: chi mostra il numero non deve
+     *  sapere da quale provider arriva. */
+    from: string;
+    displayName: string | null;
+    qualityRating: string | null;
+    messagingLimit: string | null;
+    /** Base della Graph API: https://graph.facebook.com/v25.0, o uno stub nei test. */
+    graphBase: string;
+}
+
+export type WhatsAppSender = TwilioSender | MetaSender;
 
 /** Esito di un invio: `sid` manca per i provider che non lo restituiscono
  *  (Vonage), e allora non si può seguire la consegna. */
