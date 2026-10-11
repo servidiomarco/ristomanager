@@ -7,12 +7,40 @@
     "provider": "Provider: {{p}}",
     "connected": "Connected",
     "notConnectedTitle": "No number connected",
-    "notConnected": "Messages to guests go out by email, if configured. Connecting the restaurant's own number comes with an upcoming update.",
     "sms": "SMS fallback",
     "on": "On",
     "off": "Off",
     "webhookInbound": "Incoming messages",
-    "webhookStatus": "Message status"
+    "webhookStatus": "Message status",
+    "notConnectedNow": "Messages to guests go out by email, if set up.",
+    "meta": {
+      "provider": "Meta · Cloud API",
+      "quality": "Number quality",
+      "limit": "Sending limit",
+      "limitPerDay": "{{n}} customers a day",
+      "limitUnlimited": "unlimited",
+      "q": {
+        "green": "high",
+        "yellow": "medium",
+        "red": "low",
+        "unknown": "not rated yet"
+      },
+      "notSubscribed": "The number sends, but Meta did not subscribe the app to the account: guest messages won't arrive. Connect again with the right token.",
+      "open": "Connect a Meta number",
+      "formHint": "All three values are in the Meta console, under WhatsApp › API Setup.",
+      "phoneNumberId": "Phone number ID",
+      "wabaId": "WhatsApp Business account ID",
+      "token": "Access token",
+      "tokenHint": "Prefer a system user token: it doesn't expire. Stored encrypted.",
+      "connect": "Connect",
+      "cancel": "Cancel",
+      "connectError": "Number not connected",
+      "disconnectOpen": "Disconnect the number",
+      "disconnectConfirm": "From now on messages to guests go out by email. The number stays on Meta.",
+      "disconnect": "Disconnect",
+      "disconnectError": "Number not disconnected",
+      "webhook": "Meta app webhook"
+    }
   },
   "templates": {
     "loadError": "Templates unavailable",

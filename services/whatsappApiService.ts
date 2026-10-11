@@ -15,7 +15,28 @@ export interface WhatsAppStatus {
    *  demo ammesso esplicitamente). */
   shared_env_sender: boolean;
   sms_ready: boolean;
+  /** Il numero sull'API Cloud di Meta. Assente su un backend precedente
+   *  alla Fase 12a. */
+  meta?: {
+    display_name: string | null;
+    quality_rating: string | null;
+    messaging_limit: string | null;
+    phone_number_id: string;
+    waba_id: string;
+  } | null;
+  /** Si può collegare un numero Meta da qui. */
+  meta_connect_available?: boolean;
   webhooks: { inbound: string; status: string } | null;
+}
+
+export interface MetaConnectResult {
+  ok: true;
+  phone: string;
+  display_name: string | null;
+  quality_rating: string | null;
+  messaging_limit: string | null;
+  /** L'app di Sympotia riceve i webhook dell'account. */
+  subscribed: boolean;
 }
 
 export type TemplateApproval = 'approved' | 'pending' | 'rejected' | 'unsubmitted' | 'unknown';
@@ -77,6 +98,12 @@ const apiRequest = async <T>(url: string, options: RequestInit = {}): Promise<T>
 
 export const getWhatsAppStatus = (): Promise<WhatsAppStatus> =>
   apiRequest(`${API_URL}/whatsapp/status`, { headers: getHeaders() });
+
+export const connectMetaWhatsApp = (body: { phone_number_id: string; waba_id: string; access_token: string }): Promise<MetaConnectResult> =>
+  apiRequest(`${API_URL}/whatsapp/meta/connect`, { method: 'POST', headers: getHeaders(), body: JSON.stringify(body) });
+
+export const disconnectMetaWhatsApp = (): Promise<{ ok: true; removed: boolean }> =>
+  apiRequest(`${API_URL}/whatsapp/meta/connect`, { method: 'DELETE', headers: getHeaders() });
 
 export const getWhatsAppTemplates = (): Promise<{ templates: WhatsAppTemplateRow[] }> =>
   apiRequest(`${API_URL}/whatsapp/templates`, { headers: getHeaders() });
