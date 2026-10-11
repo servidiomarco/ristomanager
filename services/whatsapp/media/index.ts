@@ -7,7 +7,6 @@
 //   l'agente le guarda come immagini ridotte a 1568 px, la misura oltre la
 //   quale il modello le rimpicciolisce comunque.
 
-import sharp from 'sharp';
 import { queryWithRetry } from '../../../db.js';
 import { whatsappDeps } from '../deps.js';
 import { onInbound } from '../inbound.js';
@@ -17,6 +16,17 @@ import { fetchInboundMedia } from './fetch.js';
 import { isTranscriptionConfigured, transcribeAudio } from './transcribe.js';
 
 export { fetchInboundMedia, MediaFetchError, MEDIA_MAX_BYTES } from './fetch.js';
+
+// sharp ha binari nativi: si carica solo quando una foto va ridotta. Se manca
+// (pacchetto non installato, piattaforma senza binario) la foto non arriva
+// all'agente, ma il server parte lo stesso. L'11/10 un import diretto, con
+// sharp rimasto fra le dipendenze di sviluppo, ha fatto fallire il deploy al
+// boot: l'immagine di produzione installa solo le dipendenze vere.
+let sharpLoading: Promise<typeof import('sharp')> | null = null;
+async function loadSharp(): Promise<typeof import('sharp')> {
+    sharpLoading ??= import('sharp').then(m => ((m as any).default ?? m) as typeof import('sharp'));
+    return sharpLoading;
+}
 export { isTranscriptionConfigured, transcribeAudio } from './transcribe.js';
 
 export function configureWhatsAppMedia(): void {
@@ -100,6 +110,7 @@ export async function photosForAgent(
             if (taken >= MAX_PHOTOS) return out;
             try {
                 const file = await fetchInboundMedia(tenantId, item);
+                const sharp = await loadSharp();
                 const jpeg = await sharp(file.bytes)
                     .rotate()
                     .resize({ width: MAX_SIDE, height: MAX_SIDE, fit: 'inside', withoutEnlargement: true })
