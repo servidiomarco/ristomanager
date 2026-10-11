@@ -1,6 +1,6 @@
 import React, { useEffect, useState, useCallback } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Phone, Globe, Loader2 } from 'lucide-react';
+import { Phone, Globe, Loader2, MessageCircle } from 'lucide-react';
 import {
     getFeatureFlags,
     FeatureFlags,
@@ -10,6 +10,7 @@ import {
     ScheduledSuspension,
     PublicBookingBlock,
 } from '../services/apiService';
+import { getWhatsAppStatus, getAgentPolicy } from '../services/whatsappApiService';
 import { useAuth } from '../contexts/AuthContext';
 
 // Full-shift time windows in Europe/Rome. Mirror the LUNCH_SLOTS/DINNER_SLOTS
@@ -30,19 +31,27 @@ interface Props {
 }
 
 // Compact status widget: two icons in the header showing whether Voice and
-// Web bookings are open right now for the selected (date, shift). Click
+// Web bookings are open right now for the selected (date, shift), plus
+// WhatsApp when the venue has it connected (status only, with «a»/«m»). Click
 // toggles by adding/removing the corresponding scheduled entry — so a change
 // made from here shows up verbatim in Settings → Prenotazioni web (or
 // Agente vocale), and vice versa. Requires `settings:full` to be editable;
 // read-only for other roles.
 export const BookingChannelsBar: React.FC<Props> = ({ date, shift, showToast }) => {
   const { t } = useTranslation('canali', { useSuspense: false });
-    const { hasPermission } = useAuth();
+    const { hasPermission, hasFeature } = useAuth();
     const canEdit = hasPermission('settings:full');
+    // WhatsApp: solo se il locale ha il modulo e chi guarda può leggerne le
+    // impostazioni (le due rotte chiedono settings:view).
+    const canSeeWhatsApp = hasFeature('whatsapp') && hasPermission('settings:view');
 
     const [flags, setFlags] = useState<FeatureFlags | null>(null);
     const [channels, setChannels] = useState<ChannelSettings | null>(null);
     const [savingKey, setSavingKey] = useState<'voice' | 'web' | null>(null);
+    // null = non si mostra (modulo assente, numero non collegato, errore).
+    // auto: l'agente prenota da solo («Azioni» con la creazione accesa);
+    // altrimenti le prenotazioni in chat le fa lo staff.
+    const [whatsapp, setWhatsapp] = useState<{ auto: boolean } | null>(null);
 
     const refresh = useCallback(async () => {
         try {
@@ -57,6 +66,21 @@ export const BookingChannelsBar: React.FC<Props> = ({ date, shift, showToast }) 
     // Re-fetch whenever the selected day/shift changes so the color reflects
     // the effective state for what the user is looking at right now.
     useEffect(() => { refresh(); }, [refresh, date, shift]);
+
+    // WhatsApp non ha sospensioni per turno: si legge una volta.
+    useEffect(() => {
+        if (!canSeeWhatsApp) { setWhatsapp(null); return; }
+        let alive = true;
+        Promise.all([getWhatsAppStatus(), getAgentPolicy()])
+            .then(([status, settings]) => {
+                if (!alive) return;
+                if (!status.connected) { setWhatsapp(null); return; }
+                const agent = settings.agent;
+                setWhatsapp({ auto: agent?.mode === 'actions' && agent.auto_actions?.create !== false });
+            })
+            .catch(() => { if (alive) setWhatsapp(null); });
+        return () => { alive = false; };
+    }, [canSeeWhatsApp]);
 
     if (!flags || !channels) return null;
 
@@ -177,6 +201,34 @@ export const BookingChannelsBar: React.FC<Props> = ({ date, shift, showToast }) 
             >
                 {savingKey === 'web' ? <Loader2 className="h-4 w-4 animate-spin" /> : <Globe className="h-4 w-4" />}
             </button>
+            {whatsapp && (
+                // Solo stato, non un interruttore: la modalità dell'agente vale
+                // per tutti i turni e si cambia in Impostazioni › WhatsApp.
+                // «a» automatica (l'agente prenota da solo), «m» manuale (lo
+                // staff). Minuscole come chiesto, e come vuole il §5.2.
+                <span
+                    role="img"
+                    className="relative inline-flex h-9 w-9 items-center justify-center rounded-[var(--ds-radius-control)] bg-[var(--ds-seated-tint)] text-[var(--ds-seated-text)]"
+                    title={whatsapp.auto
+                        ? t('bar.waAutoTitle', 'WhatsApp · l\'agente prenota da solo (a) — si cambia in Impostazioni › WhatsApp')
+                        : t('bar.waManualTitle', 'WhatsApp · le prenotazioni le fa lo staff (m) — si cambia in Impostazioni › WhatsApp')}
+                    aria-label={whatsapp.auto
+                        ? t('bar.waAutoAria', 'WhatsApp attivo, prenotazioni automatiche')
+                        : t('bar.waManualAria', 'WhatsApp attivo, prenotazioni manuali')}
+                >
+                    <MessageCircle className="h-4 w-4" aria-hidden />
+                    <span
+                        aria-hidden
+                        className={`absolute -right-1 -top-1 inline-flex h-4 min-w-[16px] items-center justify-center rounded-[var(--ds-radius-control)] px-1 text-[10px] font-semibold leading-none ring-2 ring-[var(--ds-surface)] ${
+                            whatsapp.auto
+                                ? 'bg-[var(--ds-arriving-solid)] text-[var(--ds-arriving-fg)]'
+                                : 'bg-[var(--ds-surface-row)] text-[var(--ds-text-secondary)]'
+                        }`}
+                    >
+                        {whatsapp.auto ? 'a' : 'm'}
+                    </span>
+                </span>
+            )}
         </div>
     );
 };

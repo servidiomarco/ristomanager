@@ -491,7 +491,11 @@
     "voiceAria": "Voice agent status for this shift",
     "webOnTitle": "Web bookings on for this shift · click to block",
     "webOffTitle": "Web bookings blocked for this shift · click to unblock",
-    "webAria": "Web bookings status for this shift"
+    "webAria": "Web bookings status for this shift",
+    "waAutoTitle": "WhatsApp · the agent books on its own (a) — change it in Settings › WhatsApp",
+    "waManualTitle": "WhatsApp · bookings are made by the staff (m) — change it in Settings › WhatsApp",
+    "waAutoAria": "WhatsApp on, automatic bookings",
+    "waManualAria": "WhatsApp on, manual bookings"
   },
   "pr": {
     "title": "Who answers the phone",
