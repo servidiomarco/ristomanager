@@ -58,6 +58,9 @@ export interface AgentContext {
      *  no (né le prenotazioni né le richiamate), ma il modello le vede
      *  riuscite come le vedrebbe sul numero vero. */
     dryRun?: boolean;
+    /** L'asporto in chat è acceso (add-on e Impostazioni › WhatsApp):
+     *  gli strumenti dell'asporto ci sono solo allora. */
+    takeaway?: { orderPageUrl: string | null } | null;
 }
 
 export interface AgentAutonomy {
@@ -65,6 +68,7 @@ export interface AgentAutonomy {
     modify: boolean;
     cancel: boolean;
     notes: boolean;
+    takeaway: boolean;
     /** Prima di annullare chiede conferma al cliente. */
     confirmCancel: boolean;
 }

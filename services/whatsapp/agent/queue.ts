@@ -340,7 +340,7 @@ export async function processRun(run: any, opts: { simulate?: boolean } = {}): P
     // ancora «Azioni».
     if (pre.mode === 'actions') {
         const a = policy.auto_actions;
-        ctx.autonomy = { create: a.create, modify: a.modify, cancel: a.cancel, notes: a.notes, confirmCancel: policy.confirm_cancel };
+        ctx.autonomy = { create: a.create, modify: a.modify, cancel: a.cancel, notes: a.notes, takeaway: a.takeaway, confirmCancel: policy.confirm_cancel };
     }
     if (simulate) ctx.dryRun = true;
 

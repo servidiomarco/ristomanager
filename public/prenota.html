@@ -888,6 +888,12 @@ a { color: var(--ds-pending-text); }
                         <input type="checkbox" id="privacyConsent" />
                         <span id="consentText" data-i18n-html="consent.html">Ho letto <a href="/privacy" target="_blank" rel="noopener">l'informativa sulla privacy</a> e acconsento al trattamento dei dati per gestire la prenotazione, comprese le allergie che scelgo di indicare (art. 9 GDPR).</span>
                     </label>
+                    <!-- Il consenso alle promozioni: facoltativo e mai spuntato
+                         di serie (Impostazioni › WhatsApp › Campagne). -->
+                    <label class="consent" style="margin-top:10px;">
+                        <input type="checkbox" id="marketingConsent" />
+                        <span data-i18n="consent.marketing">Voglio ricevere su WhatsApp offerte e novità del ristorante. Posso smettere quando voglio scrivendo STOP.</span>
+                    </label>
                 </div>
             </div>
 
@@ -1757,6 +1763,7 @@ a { color: var(--ds-pending-text); }
                     room_id: state.roomId,
                     notes, website,
                     language: state.language,
+                    consent_marketing: $('marketingConsent').checked,
                 }),
             });
             const data = await r.json().catch(() => ({}));

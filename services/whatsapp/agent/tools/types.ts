@@ -46,6 +46,9 @@ export interface TurnState {
 export interface AgentTool {
     name: string;
     kind: ToolKind;
+    /** Se c'è solo per certi locali (l'asporto): il modello non lo vede, e
+     *  una chiamata comunque arrivata non si esegue. */
+    available?: (ctx: AgentContext) => boolean;
     definition: (ctx: AgentContext) => Anthropic.Beta.BetaTool;
     /** Di serie: le letture si eseguono, le scritture si propongono. Può
      *  leggere il database (l'idoneità di un'azione automatica). */

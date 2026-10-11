@@ -27,7 +27,7 @@
 
 import Anthropic from '@anthropic-ai/sdk';
 import { buildSystem } from './prompt.js';
-import { AGENT_TOOLS, defaultDecision, findTool, toolDefinitions, type ToolDecision } from './tools/index.js';
+import { AGENT_TOOLS, defaultDecision, findTool, isToolAvailable, toolDefinitions, type ToolDecision } from './tools/index.js';
 import { clearPendingConfirmation, modifyArgsForAuto, snapshotReservation } from './autonomy.js';
 import { AgentError, type AgentAction, type AgentContext, type AgentProposal, type AgentResult, type AgentUsage } from './types.js';
 
@@ -174,7 +174,8 @@ export async function runAgent(ctx: AgentContext): Promise<AgentResult> {
         let skipped: string | undefined;
 
         for (const use of uses) {
-            const tool = findTool(use.name);
+            const found = findTool(use.name);
+            const tool = found && isToolAvailable(found, ctx) ? found : undefined;
             const raw = (use.input && typeof use.input === 'object' ? use.input : {}) as Record<string, any>;
             if (!tool) {
                 results.push({ type: 'tool_result', tool_use_id: use.id, is_error: true, content: result({ error: `Strumento sconosciuto: ${use.name}` }) });
