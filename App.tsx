@@ -3651,16 +3651,12 @@ const App: React.FC = () => {
                 mandano solo una notifica. */}
             <SettingsSection id="imp-attivita" label={t('settings.tabScheduled', 'Attività programmate')} description={t('settings.sectionScheduledHint', 'Compiti e promemoria che il locale si ricorda da solo.')}>
               <div className={settingsGridClass} data-imp-lista="">
-                {/* Due liste già aperte: a metà larghezza ogni titolo andava
-                    a capo. Stanno una sotto l'altra, su tutta la riga. */}
-                <div className={settingsWideClass}>
-                  <CardErrorBoundary label={t('settings.tabScheduled', 'Attività programmate')}>
-                    <ScheduledTasksManager showToast={addToast} />
-                  </CardErrorBoundary>
-                </div>
-                <div className={settingsWideClass}>
-                  <RemindersManager showToast={addToast} />
-                </div>
+                {/* Due card chiuse come le altre: aperte, la lista prende
+                    tutta la riga. */}
+                <CardErrorBoundary label={t('settings.tabScheduled', 'Attività programmate')}>
+                  <ScheduledTasksManager showToast={addToast} />
+                </CardErrorBoundary>
+                <RemindersManager showToast={addToast} />
               </div>
             </SettingsSection>
 

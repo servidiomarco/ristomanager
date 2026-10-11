@@ -11,6 +11,7 @@ import {
   ReminderRole,
 } from '../services/remindersApiService';
 import { displayLocale } from '../utils/formatLocale';
+import { SettingsSummary, settingsCardClass } from './SettingsCard';
 
 /* `t` a parametro per le funzioni di modulo: qui non ci sono hook. Senza
    `t` si resta in italiano. Lo stesso contratto di utils/courses.ts. */
@@ -245,32 +246,35 @@ export const RemindersManager: React.FC<Props> = ({ showToast }) => {
       && !saving
     : false;
 
+  const activeCount = items.filter(r => r.active).length;
+
+  // Una card chiusa come le altre di Impostazioni: da chiusa dice quanti
+  // promemoria sono accesi, la lista e «Nuovo» stanno dentro. Il corpo resta
+  // nel DOM anche chiuso, così la ricerca trova i promemoria per nome.
   return (
-    <div className="bg-[var(--ds-surface)] rounded-[var(--ds-radius)] shadow-[var(--ds-shadow-card)]">
-      <div className="flex items-start justify-between gap-3 p-3 sm:p-4 border-b border-[var(--ds-border)]">
-        {/* Stessa piastrella da 40px delle altre righe di Impostazioni: la
-            campanella era l'unica icona nuda della pagina, e in indaco quando
-            tutte le altre sono neutre. */}
-        <div className="flex items-center gap-3 min-w-0">
-          <span className="inline-flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-[var(--ds-radius)] bg-[var(--ds-surface-row)] text-[var(--ds-text-primary)]">
-            <Bell className="h-5 w-5" />
+    <details className={settingsCardClass}>
+      <SettingsSummary
+        icon={Bell}
+        tone={activeCount > 0 ? 'positive' : 'neutral'}
+        title={t('prom.title', 'Promemoria')}
+        description={t('prom.subtitle', 'Notifiche automatiche programmate — una volta o ricorrenti (giornaliere, settimanali, mensili).')}
+        trailing={!loading && activeCount > 0 ? (
+          <span className="text-[12px] font-medium text-[var(--ds-seated-text)]">
+            {t('prom.activeCount', '{{count}} accesi', { count: activeCount })}
           </span>
-          <div className="min-w-0">
-            <h2 className="text-[15px] font-semibold text-[var(--ds-text-primary)]">{t('prom.title', 'Promemoria')}</h2>
-            <p className="text-[13px] leading-snug text-[var(--ds-text-muted)]">
-              {t('prom.subtitle', 'Notifiche automatiche programmate — una volta o ricorrenti (giornaliere, settimanali, mensili).')}
-            </p>
-          </div>
+        ) : undefined}
+      />
+      <div className="border-t border-[var(--ds-border)]">
+        <div className="flex justify-end px-3 pt-3 sm:px-4">
+          <button
+            type="button"
+            onClick={openNew}
+            className="inline-flex h-9 flex-shrink-0 items-center gap-1.5 rounded-[var(--ds-radius-control)] bg-[var(--ds-action-bg)] px-3 text-[13px] font-semibold text-[var(--ds-action-fg)] hover:bg-[var(--ds-action-bg-hover)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+          >
+            <Plus className="h-4 w-4" />
+            {t('prom.new', 'Nuovo')}
+          </button>
         </div>
-        <button
-          type="button"
-          onClick={openNew}
-          className="inline-flex items-center gap-1.5 h-8 px-3 rounded-[var(--ds-radius-control)] bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] text-[12px] font-semibold hover:bg-[var(--ds-action-bg-hover)] shrink-0"
-        >
-          <Plus className="h-3.5 w-3.5" />
-          {t('prom.new', 'Nuovo')}
-        </button>
-      </div>
 
       {error && (
         <div className="p-3 mx-4 mt-3 rounded-[var(--ds-radius)] bg-[var(--ds-critical-tint)] text-[var(--ds-critical-text)] text-[12px] flex items-start gap-1.5">
@@ -360,6 +364,8 @@ export const RemindersManager: React.FC<Props> = ({ showToast }) => {
           })}
         </ul>
       )}
+
+      </div>
 
       {/* Editor modal */}
       {editor && createPortal(
@@ -610,7 +616,7 @@ export const RemindersManager: React.FC<Props> = ({ showToast }) => {
         </div>,
         document.body
       )}
-    </div>
+    </details>
   );
 };
 
