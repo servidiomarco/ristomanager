@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Globe, Phone, Loader2, Users, PauseCircle, Clock, CalendarClock, Plus, Trash2, Percent, MessageSquare, Repeat, BadgeCheck } from 'lucide-react';
+import { Globe, Phone, Loader2, Users, PauseCircle, Clock, CalendarClock, CalendarRange, Plus, Trash2, Percent, MessageSquare, Repeat, BadgeCheck } from 'lucide-react';
 import { Loader } from './Loader';
 import {
     getFeatureFlags,
@@ -20,6 +20,7 @@ import {
 import { useAuth } from '../contexts/AuthContext';
 import { SHIFT_WINDOWS } from './BookingChannelsBar';
 import { SettingsSummary, settingsCardClass } from './SettingsCard';
+import { SegmentedControl } from './ds';
 
 const HHMM_RE = /^([01]\d|2[0-3]):[0-5]\d$/;
 const ISO_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
@@ -65,6 +66,10 @@ interface ChannelMeta {
      *  un interruttore per un modulo non compreso nel piano è solo confusione. */
     feature: 'voice' | 'whatsapp' | 'web_booking';
 }
+
+type HorizonChoice = '7' | '14' | 'libera';
+const horizonChoiceOf = (days: number | null | undefined): HorizonChoice =>
+    days === 7 ? '7' : days === 14 ? '14' : 'libera';
 
 const CHANNELS: ChannelMeta[] = [
     {
@@ -357,6 +362,22 @@ export const FeatureTogglesManager: React.FC<Props> = ({ showToast, only }) => {
     const updateBlockRow = (idx: number, patch: Partial<PublicBookingBlock>) => {
         setBlocksDraft(prev => prev.map((row, i) => (i === idx ? { ...row, ...patch } : row)));
     };
+    // Fin dove si prenota da soli: si salva alla scelta, come un interruttore.
+    const [savingHorizon, setSavingHorizon] = useState(false);
+    const saveHorizon = async (next: HorizonChoice) => {
+        if (!channels || !canEdit || savingHorizon) return;
+        setSavingHorizon(true);
+        try {
+            const updated = await updateChannelSettings({ public_booking_horizon_days: next === 'libera' ? null : Number(next) });
+            setChannels(updated);
+            showToast(t('horizonSaved'), 'success');
+        } catch (err: any) {
+            showToast(err?.message || t('horizonSaveError'), 'error');
+        } finally {
+            setSavingHorizon(false);
+        }
+    };
+
     const saveBlocks = async () => {
         if (!channels || !canEdit || savingBlocks) return;
         for (const [i, row] of blocksDraft.entries()) {
@@ -908,6 +929,32 @@ export const FeatureTogglesManager: React.FC<Props> = ({ showToast, only }) => {
                                         </div>
                                     </div>
                                 </>
+                            )}
+
+                            {isWeb && (
+                                <div className="rounded-[var(--ds-radius)] bg-[var(--ds-surface-row)] border border-[var(--ds-border)] p-3">
+                                    <div className="flex items-center gap-2 text-[13px] text-[var(--ds-text-primary)] font-medium">
+                                        <CalendarRange className="h-4 w-4 text-[var(--ds-text-muted)] flex-shrink-0" />
+                                        <span>{t('horizonLabel')}</span>
+                                        {savingHorizon && <Loader2 className="h-3.5 w-3.5 animate-spin text-[var(--ds-text-muted)]" />}
+                                    </div>
+                                    <p className="text-[12px] text-[var(--ds-text-muted)] mt-1 leading-relaxed">
+                                        {t('horizonHint')}
+                                    </p>
+                                    <div className={`mt-3 ${!canEdit || savingHorizon ? 'pointer-events-none opacity-50' : ''}`}>
+                                        <SegmentedControl<HorizonChoice>
+                                            value={horizonChoiceOf(channels.public_booking_horizon_days)}
+                                            onChange={saveHorizon}
+                                            ariaLabel={t('horizonLabel')}
+                                            size="sm"
+                                            options={[
+                                                { value: '7', label: t('horizon7') },
+                                                { value: '14', label: t('horizon14') },
+                                                { value: 'libera', label: t('horizonFree') },
+                                            ]}
+                                        />
+                                    </div>
+                                </div>
                             )}
 
                             {isWeb && (
