@@ -217,10 +217,14 @@ export function guestModifyRefusal(p: {
     current: { date: string; time: string; guests: number };
     depositPaid: boolean;
     policy: GuestManagePolicy;
+    /** L'ultimo giorno prenotabile scelto dal locale (7, 14 giorni o libera);
+     *  senza, i 60 giorni di sempre. */
+    lastDate?: string;
 }): GuestModifyRefusal | null {
     const { request: r, current: c } = p;
     if (r.guests < 1 || r.guests > GUEST_MODIFY_MAX_GUESTS) return 'invalid_request';
-    if (r.date < p.today || r.date > addDaysIsoDate(p.today, GUEST_MODIFY_HORIZON_DAYS)) return 'out_of_range';
+    const lastDate = p.lastDate ?? addDaysIsoDate(p.today, GUEST_MODIFY_HORIZON_DAYS);
+    if (r.date < p.today || r.date > lastDate) return 'out_of_range';
     if (r.date === c.date && r.time === c.time && r.guests === c.guests) return 'no_change';
     if (p.depositPaid && r.guests !== c.guests) return 'guests_locked';
     const hoursToGo = (p.newTime.getTime() - p.now.getTime()) / 3600_000;

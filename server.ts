@@ -30857,6 +30857,36 @@ async function getPublicBookingBlocks(tenantId: number): Promise<PublicBookingBl
     }
 }
 
+// Fin dove l'ospite prenota da solo (pagina /prenota e modifica dal link):
+// 7 o 14 giorni da oggi, oppure «libera» (lo 0 salvato o la riga assente).
+// Con un limite il server rifiuta le date oltre; libera non ha limiti sul
+// server, come prima, e la pagina mostra un anno di calendario perché una
+// fine le serve. Prima c'erano solo 60 giorni scritti nella pagina.
+const PUBLIC_BOOKING_HORIZON_KEY = 'public_booking_horizon_days';
+const PUBLIC_BOOKING_HORIZON_CHOICES = new Set([7, 14]);
+const PUBLIC_BOOKING_HORIZON_FREE_DAYS = 365;
+
+/** 7, 14 o null (libera). */
+async function getPublicBookingHorizon(tenantId: number): Promise<number | null> {
+    try {
+        const result = await queryWithRetry(
+            'SELECT int_value FROM app_settings WHERE tenant_id = $1 AND key = $2',
+            [tenantId, PUBLIC_BOOKING_HORIZON_KEY]
+        );
+        const n = Number(result.rows[0]?.int_value);
+        return PUBLIC_BOOKING_HORIZON_CHOICES.has(n) ? n : null;
+    } catch (err) {
+        console.error(`[channel-settings] failed to read ${PUBLIC_BOOKING_HORIZON_KEY}:`, err);
+        return null;
+    }
+}
+
+/** L'ultimo giorno prenotabile da solo, nel calendario del locale; null con la libera. */
+async function lastSelfServiceDate(tenantId: number, oggiLocale: string): Promise<string | null> {
+    const horizon = await getPublicBookingHorizon(tenantId);
+    return horizon ? addDaysIso(oggiLocale, horizon) : null;
+}
+
 // Purge blocks whose date is already in the past so the settings screen
 // doesn't accumulate stale rows over time. Runs opportunistically at read
 // time — cheap since the array is small.
@@ -31008,7 +31038,7 @@ async function computeVoiceSuspensionState(tenantId: number): Promise<{ suspende
 app.get('/settings/channels', authenticate, async (req, res) => {
     try {
         const fusoTenant = (await getTenantLocale(req.tenantId!)).timezone;
-        const [voiceThreshold, suspensionCallback, suspensionSchedule, publicBlocksRaw, voiceDateBlocksRaw, roomCaps, voiceFirstMessage] = await Promise.all([
+        const [voiceThreshold, suspensionCallback, suspensionSchedule, publicBlocksRaw, voiceDateBlocksRaw, roomCaps, voiceFirstMessage, bookingHorizon] = await Promise.all([
             getVoiceLargeGroupThreshold(req.tenantId!),
             getVoiceSuspensionCallbackTime(req.tenantId!),
             getVoiceSuspensionSchedule(req.tenantId!),
@@ -31016,6 +31046,7 @@ app.get('/settings/channels', authenticate, async (req, res) => {
             getVoiceDateBlocks(req.tenantId!),
             getRoomOccupancyCaps(req.tenantId!),
             getVoiceFirstMessage(req.tenantId!),
+            getPublicBookingHorizon(req.tenantId!),
         ]);
         // Filter past blocks at read time; UI never has to worry about them.
         const publicBlocks = pruneExpiredBlocks(publicBlocksRaw, fusoTenant);
@@ -31028,6 +31059,7 @@ app.get('/settings/channels', authenticate, async (req, res) => {
             voice_bookings_date_blocks: voiceDateBlocks,
             room_occupancy_caps: roomCaps,
             voice_first_message: voiceFirstMessage,
+            public_booking_horizon_days: bookingHorizon,
         });
     } catch (err) {
         console.error('Error fetching channel settings:', err);
@@ -31060,6 +31092,19 @@ app.put('/settings/channels', authenticate, requirePermission('settings:full'), 
             });
         }
         updates.push({ key: VOICE_SUSPENSION_CALLBACK_KEY, column: 'text_value', value: raw });
+    }
+
+    if (body.public_booking_horizon_days !== undefined) {
+        // null o 0 = libera; si salva 0, così la riga dice che è una scelta.
+        const raw = body.public_booking_horizon_days;
+        const n = raw === null ? 0 : Number(raw);
+        if (n !== 0 && !PUBLIC_BOOKING_HORIZON_CHOICES.has(n)) {
+            return res.status(400).json({
+                error: 'invalid_value',
+                message: 'public_booking_horizon_days must be 7, 14 or null (libera)',
+            });
+        }
+        updates.push({ key: PUBLIC_BOOKING_HORIZON_KEY, column: 'int_value', value: n });
     }
 
     if (body.voice_first_message !== undefined) {
@@ -31257,7 +31302,7 @@ app.put('/settings/channels', authenticate, requirePermission('settings:full'), 
                            SET ${u.column} = EXCLUDED.${u.column}, updated_at = CURRENT_TIMESTAMP`;
             await queryWithRetry(sql, [req.tenantId!, u.key, u.value]);
         }
-        const [voiceThreshold, suspensionCallback, suspensionSchedule, publicBlocksRaw, voiceDateBlocksRaw, roomCaps, voiceFirstMessage] = await Promise.all([
+        const [voiceThreshold, suspensionCallback, suspensionSchedule, publicBlocksRaw, voiceDateBlocksRaw, roomCaps, voiceFirstMessage, bookingHorizon] = await Promise.all([
             getVoiceLargeGroupThreshold(req.tenantId!),
             getVoiceSuspensionCallbackTime(req.tenantId!),
             getVoiceSuspensionSchedule(req.tenantId!),
@@ -31265,6 +31310,7 @@ app.put('/settings/channels', authenticate, requirePermission('settings:full'), 
             getVoiceDateBlocks(req.tenantId!),
             getRoomOccupancyCaps(req.tenantId!),
             getVoiceFirstMessage(req.tenantId!),
+            getPublicBookingHorizon(req.tenantId!),
         ]);
         const publicBlocks = pruneExpiredBlocks(publicBlocksRaw, fusoTenant);
         const voiceDateBlocks = pruneExpiredBlocks(voiceDateBlocksRaw, fusoTenant);
@@ -31276,6 +31322,7 @@ app.put('/settings/channels', authenticate, requirePermission('settings:full'), 
             voice_bookings_date_blocks: voiceDateBlocks,
             room_occupancy_caps: roomCaps,
             voice_first_message: voiceFirstMessage,
+            public_booking_horizon_days: bookingHorizon,
         });
     } catch (err) {
         console.error('Error updating channel settings:', err);
@@ -33614,7 +33661,11 @@ async function guestReservationView(row: any) {
         modify: actions.can_modify
             ? {
                 first_date: today,
-                last_date: addDaysIsoDate(today, GUEST_MODIFY_HORIZON_DAYS),
+                // Con 7 o 14 giorni lo stesso limite della pagina /prenota:
+                // spostare dal link non scavalca la scelta del locale. Con la
+                // libera restano i 60 giorni decisi per la modifica.
+                last_date: (await lastSelfServiceDate(tenantId, today))
+                    ?? addDaysIsoDate(today, GUEST_MODIFY_HORIZON_DAYS),
                 max_guests: GUEST_MODIFY_MAX_GUESTS,
                 guests_locked: depositCents > 0,
             }
@@ -33907,6 +33958,7 @@ app.post('/r/:token/modify', guestPageLimiter, guestActionLimiter, async (req, r
                 current: { date: view.reservation.date, time: view.reservation.time, guests: view.reservation.guests },
                 depositPaid: view.modify.guests_locked,
                 policy,
+                lastDate: view.modify.last_date,
             });
             // Già così (doppio tocco, o un'altra scheda): la pagina com'è.
             if (refusal === 'no_change') return { status: 200 };
@@ -37274,7 +37326,7 @@ async function instantAlternatives(
     date: string,
     guests: number,
     wanted: Shift[],
-    ctx: { time: string | null; oggiLocale: string; blocks: PublicBookingBlock[] }
+    ctx: { time: string | null; oggiLocale: string; blocks: PublicBookingBlock[]; lastDay: string | null }
 ): Promise<InstantAlternative[]> {
     const pick = (slots: string[]) => (ctx.time ? bookingTools.nearestSlots(ctx.time, slots) : slots);
     const out: InstantAlternative[] = [];
@@ -37286,7 +37338,11 @@ async function instantAlternatives(
         if (!opt.full && slots.length > 0) out.push({ date, shift: shift as 'LUNCH' | 'DINNER', slots: pick(slots) });
     }
     const from = addDaysIso(date, 1);
-    const calendar = await buildPublicCalendar(tenantId, from, addDaysIso(date, INSTANT_ALT_LOOKAHEAD_DAYS), ctx.oggiLocale);
+    // Le alternative restano dentro il periodo prenotabile del locale: con
+    // 7 giorni, chi chiede l'ultimo giorno non si vede proporre l'ottavo.
+    const lookahead = addDaysIso(date, INSTANT_ALT_LOOKAHEAD_DAYS);
+    const to = ctx.lastDay && lookahead > ctx.lastDay ? ctx.lastDay : lookahead;
+    const calendar = to < from ? [] : await buildPublicCalendar(tenantId, from, to, ctx.oggiLocale);
     const order = [...wanted, ...[Shift.LUNCH, Shift.DINNER].filter(s => !wanted.includes(s))];
     let found = 0;
     let checked = 0;
@@ -37367,10 +37423,15 @@ const handlePublicAvailability = async (tenantId: number, req: express.Request, 
         if (to < from) {
             return res.status(400).json({ error: 'invalid_range', message: 'to non può precedere from' });
         }
-        const cappedTo = to > addDaysIso(from, PUBLIC_CALENDAR_MAX_DAYS - 1)
+        const windowTo = to > addDaysIso(from, PUBLIC_CALENDAR_MAX_DAYS - 1)
             ? addDaysIso(from, PUBLIC_CALENDAR_MAX_DAYS - 1)
             : to;
         try {
+            // Oltre il limite del locale (7 o 14 giorni) il calendario si
+            // ferma: la pagina disegna quei giorni come non prenotabili.
+            const lastDay = await lastSelfServiceDate(tenantId, oggiLocale);
+            const cappedTo = lastDay && windowTo > lastDay ? lastDay : windowTo;
+            if (cappedTo < from) return res.json({ from, to: cappedTo, days: [] });
             const days = await buildPublicCalendar(tenantId, from, cappedTo, oggiLocale);
             return res.json({ from, to: cappedTo, days });
         } catch (err: any) {
@@ -37385,6 +37446,13 @@ const handlePublicAvailability = async (tenantId: number, req: express.Request, 
     }
 
     try {
+        // Fuori dal periodo prenotabile (prima di oggi o oltre il limite del
+        // locale) nessun orario: la pagina lo legge come giorno non prenotabile.
+        const lastDay = await lastSelfServiceDate(tenantId, oggiLocale);
+        if (date < oggiLocale || (lastDay && date > lastDay)) {
+            return res.json({ date, lunch: { slots: [] }, dinner: { slots: [] }, out_of_range: true, last_date: lastDay });
+        }
+
         // A blocked shift comes back empty — the public form treats "no
         // slots" as "not bookable", so nothing else needs to know about blocks.
         const blocks = await getPublicBookingBlocks(tenantId);
@@ -37411,7 +37479,7 @@ const handlePublicAvailability = async (tenantId: number, req: express.Request, 
                 for (const shift of fullShifts) recordBookingMiss(tenantId, date, shift, guests, 'full');
             }
             const alternatives = fullShifts.length > 0
-                ? await instantAlternatives(tenantId, date, guests, fullShifts, { time, oggiLocale, blocks })
+                ? await instantAlternatives(tenantId, date, guests, fullShifts, { time, oggiLocale, blocks, lastDay })
                 : [];
             return res.json({ date, guests, instant: true, lunch, dinner, alternatives });
         }
@@ -37527,6 +37595,10 @@ const handlePublicContact = async (tenantId: number, _req: express.Request, res:
         // posto, le uscite che ha già: il telefono (`voice`) e la pillola
         // WhatsApp di «Farsi trovare» (`whatsapp`, qui sotto).
         instantOnly: bookingsEnabled && await isInstantOnlyBooking(tenantId),
+        // 7, 14 o null (libera): la pagina chiude il calendario lì e, con un
+        // limite, lo scrive sotto il mese.
+        bookingHorizonDays: await getPublicBookingHorizon(tenantId),
+        bookingHorizonFreeDays: PUBLIC_BOOKING_HORIZON_FREE_DAYS,
         timezone: (await getTenantLocale(tenantId)).timezone,
         currency: (await getTenantLocale(tenantId)).currency,
         deposit: {
@@ -37689,6 +37761,22 @@ const handlePublicReservationCreate = async (tenantId: number, req: express.Requ
             });
         }
 
+        // Il periodo prenotabile lo decide il locale (Impostazioni › Canali:
+        // 7 o 14 giorni, oppure libera). La pagina non offre date fuori, ma il
+        // controllo vero è qui: una POST diretta passava ogni data.
+        const oggiPrenota = getItalianTodayIso(new Date(), fusoMsg);
+        const lastBookableDay = await lastSelfServiceDate(tenantId, oggiPrenota);
+        if (date < oggiPrenota || (lastBookableDay && date > lastBookableDay)) {
+            const horizon = await getPublicBookingHorizon(tenantId);
+            return res.status(409).json({
+                error: 'out_of_range',
+                message: horizon
+                    ? `Online si prenota fino a ${horizon} giorni da oggi. Per una data più avanti chiamaci.`
+                    : 'La data scelta non è prenotabile online.',
+                last_date: lastBookableDay,
+            });
+        }
+
         // Confirm the requested slot is on the current grid for that date+shift.
         const validSlots = await getAvailableSlots(tenantId, date, shift as Shift);
         if (!validSlots.includes(time)) {
@@ -37775,7 +37863,7 @@ const handlePublicReservationCreate = async (tenantId: number, req: express.Requ
         const replyNotConfirmable = async () => {
             recordBookingMiss(tenantId, date, shift as Shift, guestsInt, 'not_confirmable');
             const oggiLocale = getItalianTodayIso(new Date(), fusoMsg);
-            const alternatives = await instantAlternatives(tenantId, date, guestsInt, [shift as Shift], { time, oggiLocale, blocks })
+            const alternatives = await instantAlternatives(tenantId, date, guestsInt, [shift as Shift], { time, oggiLocale, blocks, lastDay: lastBookableDay })
                 .catch(err => {
                     console.error('[public-booking] alternative non calcolate:', err?.message || err);
                     return [] as InstantAlternative[];

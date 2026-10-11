@@ -194,6 +194,13 @@
   "doubleSeatingToggleOn": "Turn on double seating",
   "instantOnlyLabel": "Only bookings confirmable right away",
   "instantOnlyHint": "The page offers only the times when a table is free right now and confirms the booking by itself. Where there is no room it suggests the other service or another day, or to call or write on WhatsApp: no more requests to confirm. Bookings with a deposit still wait for the payment.",
+  "horizonLabel": "How far ahead guests can book online",
+  "horizonHint": "How many days ahead a guest can book from the web page or move a booking from the link. Open: no limit.",
+  "horizon7": "7 days",
+  "horizon14": "14 days",
+  "horizonFree": "Open",
+  "horizonSaved": "Booking window saved",
+  "horizonSaveError": "Booking window not saved",
   "instantOnlyToggleOff": "Turn off bookings confirmable right away",
   "instantOnlyToggleOn": "Turn on bookings confirmable right away",
   "rev": {

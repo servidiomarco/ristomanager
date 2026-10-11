@@ -129,6 +129,7 @@
     "emailInvalid": "That email address doesn't look right.",
     "privacyRequired": "Please accept the privacy notice to continue.",
     "generic": "Something went wrong. Please try again.",
+    "outOfRange": "Online bookings are open up to {{days}} days ahead. For a later date, please call us.",
     "network": "No connection right now. Please try again in a moment."
   }
 }
