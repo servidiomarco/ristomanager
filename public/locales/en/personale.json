@@ -49,7 +49,8 @@
     "RIPOSO": "Rest day",
     "VACANZA": "Holiday",
     "MALATTIA": "Sick leave",
-    "PERMESSO": "Time off"
+    "PERMESSO": "Time off",
+    "ASSENZA": "Away"
   },
   "leaveRecorded": {
     "RIPOSO": "Rest day recorded",

@@ -3,7 +3,7 @@ import { useTranslation } from 'react-i18next';
 import { createPortal } from 'react-dom';
 import {
   StaffMember, StaffShift, StaffTimeOff, StaffCategory, StaffType,
-  Shift, TimeOffType, LinkableUser
+  Shift, TimeOffType, TIME_OFF_MASKED, LinkableUser
 } from '../types';
 import { staffApiService, CreateStaffInput, CreateTimeOffInput } from '../services/staffApiService';
 import { StaffCompensation } from './StaffCompensation';
@@ -60,18 +60,22 @@ const TIME_OFF_LABELS: Record<TimeOffType, string> = {
    invented hues: vacation is a planned good thing, illness is the one that
    costs a shift tonight, permission is informational and riposo is routine.
    Written out in full because Tailwind extracts class names statically. */
-const TIME_OFF_CHIP: Record<TimeOffType, string> = {
+const TIME_OFF_CHIP: Record<StaffTimeOff['type'], string> = {
   [TimeOffType.RIPOSO]: 'bg-[var(--ds-surface-row)] text-[var(--ds-text-secondary)]',
   [TimeOffType.VACANZA]: 'bg-[var(--ds-seated-tint)] text-[var(--ds-seated-text)]',
   [TimeOffType.MALATTIA]: 'bg-[var(--ds-critical-tint)] text-[var(--ds-critical-text)]',
-  [TimeOffType.PERMESSO]: 'bg-[var(--ds-arriving-tint)] text-[var(--ds-arriving-text)]'
+  [TimeOffType.PERMESSO]: 'bg-[var(--ds-arriving-tint)] text-[var(--ds-arriving-text)]',
+  // Il motivo non si vede (manca staff:leave): neutra come il riposo, un
+  // tono più scura per non confonderle in griglia.
+  [TIME_OFF_MASKED]: 'bg-[var(--ds-border)] text-[var(--ds-text-primary)]'
 };
 
-const TIME_OFF_PILL_TONE: Record<TimeOffType, 'neutral' | 'positive' | 'critical' | 'info'> = {
+const TIME_OFF_PILL_TONE: Record<StaffTimeOff['type'], 'neutral' | 'positive' | 'critical' | 'info'> = {
   [TimeOffType.RIPOSO]: 'neutral',
   [TimeOffType.VACANZA]: 'positive',
   [TimeOffType.MALATTIA]: 'critical',
-  [TimeOffType.PERMESSO]: 'info'
+  [TimeOffType.PERMESSO]: 'info',
+  [TIME_OFF_MASKED]: 'neutral'
 };
 
 // Format Date as YYYY-MM-DD using local components (avoids UTC timezone shift)
@@ -157,7 +161,8 @@ export const StaffManagement: React.FC<StaffManagementProps> = ({ showToast, aut
   const categoryLabel = (c: StaffCategory) => t(`category.${c}`, STAFF_CATEGORY_LABELS[c]);
   const typeLabel = (x: StaffType) => t(`type.${x}`, STAFF_TYPE_LABELS[x]);
   const typeHint = (x: StaffType) => t(`typeHint.${x}`, STAFF_TYPE_HINTS[x]);
-  const timeOffLabel = (x: TimeOffType) => t(`timeOff.${x}`, TIME_OFF_LABELS[x]);
+  const timeOffLabel = (x: StaffTimeOff['type']) =>
+    x === TIME_OFF_MASKED ? t('timeOff.ASSENZA', 'Assente') : t(`timeOff.${x}`, TIME_OFF_LABELS[x]);
 
   /* I giorni della settimana vengono dalla lingua, non da un dizionario:
      è l'unica lista che il locale conosce già meglio di noi. Il 7 gennaio
@@ -185,18 +190,28 @@ export const StaffManagement: React.FC<StaffManagementProps> = ({ showToast, aut
   const { hasPermission } = useAuth();
   const canSeeCompensation = hasPermission('staff:payments');
   const canManage = hasPermission('staff:full');
+  // Ferie e assenze degli altri (default titolare e general manager). Senza,
+  // niente piano ferie, le assenze altrui arrivano dal server come «Assente»
+  // e si registrano solo i riposi.
+  const canSeeLeave = hasPermission('staff:leave');
+  const registrableTimeOffTypes: TimeOffType[] = canSeeLeave
+    ? (Object.keys(TIME_OFF_LABELS) as TimeOffType[])
+    : [TimeOffType.RIPOSO];
+  // Senza staff:leave si tolgono solo i riposi: il server rifiuta il resto.
+  const canRemoveTimeOff = (off: StaffTimeOff) => canSeeLeave || off.type === TimeOffType.RIPOSO;
   const [area, setArea] = useState<'PERSONALE' | 'FERIE' | 'COMPENSI'>('PERSONALE');
 
   // Richieste di ferie in attesa: il numero sul segmento «Ferie» e, per
   // persona, l'avviso sulla scheda. Si rilegge quando qualcuno ne manda una.
   const [leavePending, setLeavePending] = useState<{ count: number; byStaff: Record<string, number> }>({ count: 0, byStaff: {} });
   const refreshLeavePending = useCallback(async () => {
+    if (!canSeeLeave) return;
     try {
       setLeavePending(await staffApiService.getPendingLeaveCount());
     } catch {
       // Backend precedente o permesso mancante: niente badge, niente errore.
     }
-  }, []);
+  }, [canSeeLeave]);
   useEffect(() => {
     refreshLeavePending();
     const attach = (socket: ReturnType<typeof socketClient.getSocket>) => {
@@ -942,7 +957,8 @@ export const StaffManagement: React.FC<StaffManagementProps> = ({ showToast, aut
     const singleDayOff = timeOffs.find(t =>
       t.staffId === selectedStaff.id &&
       toDateOnly(t.startDate) === dateStr &&
-      toDateOnly(t.endDate) === dateStr
+      toDateOnly(t.endDate) === dateStr &&
+      canRemoveTimeOff(t)
     );
     if (dayShifts.length === 0 && !singleDayOff) return;
     try {
@@ -1113,19 +1129,21 @@ export const StaffManagement: React.FC<StaffManagementProps> = ({ showToast, aut
     toTitleCase(s.role) || (s.category === StaffCategory.SALA ? 'Cameriere' : 'Cuoco');
 
   /* ── Toolbar ─────────────────────────────────────────────────────────── */
-  // Il toggle Personale | Compensi, condiviso dalle due aree.
-  const areaToggle = (
+  // Il toggle Personale | Ferie | Compensi, condiviso dalle aree. Chi non
+  // vede né ferie né compensi avrebbe un toggle con un'opzione sola: niente.
+  const areaOptions = [
+    { value: 'PERSONALE' as const, label: t('staff') },
+    ...(canSeeLeave ? [{ value: 'FERIE' as const, label: t('leavePlan'), badge: leavePending.count || undefined, badgeTone: 'alert' as const }] : []),
+    ...(canSeeCompensation ? [{ value: 'COMPENSI' as const, label: 'Compensi' }] : []),
+  ];
+  const areaToggle = areaOptions.length > 1 ? (
     <SegmentedControl<'PERSONALE' | 'FERIE' | 'COMPENSI'>
       value={area}
       onChange={setArea}
       ariaLabel={t('staffArea')}
-      options={[
-        { value: 'PERSONALE', label: t('staff') },
-        { value: 'FERIE', label: t('leavePlan'), badge: leavePending.count || undefined, badgeTone: 'alert' },
-        ...(canSeeCompensation ? [{ value: 'COMPENSI' as const, label: 'Compensi' }] : []),
-      ]}
+      options={areaOptions}
     />
-  );
+  ) : null;
 
   const toolbar = (
     <div ref={toolbarRef} className="space-y-3">
@@ -1547,7 +1565,9 @@ export const StaffManagement: React.FC<StaffManagementProps> = ({ showToast, aut
           stats={[
             { value: monthStats.shifts, label: t('shiftsInMonth') },
             { value: monthStats.rest, label: 'riposi' },
-            { value: monthStats.holiday, label: 'vacanza', tone: monthStats.holiday > 0 ? 'positive' : 'neutral' },
+            ...(canSeeLeave
+              ? [{ value: monthStats.holiday, label: 'vacanza', tone: monthStats.holiday > 0 ? 'positive' as const : 'neutral' as const }]
+              : []),
           ]}
         />
 
@@ -1632,7 +1652,7 @@ export const StaffManagement: React.FC<StaffManagementProps> = ({ showToast, aut
                   {t('fromContractShort')}
                 </span>
               )}
-              {(Object.keys(TIME_OFF_LABELS) as TimeOffType[]).map(type => (
+              {(canSeeLeave ? registrableTimeOffTypes : [TimeOffType.RIPOSO, TIME_OFF_MASKED] as const).map(type => (
                 <span key={type} className="flex items-center gap-1.5">
                   <span className={`h-3 w-3 rounded-[var(--ds-radius-control)] ${TIME_OFF_CHIP[type]}`} aria-hidden />
                   {timeOffLabel(type).toLowerCase()}
@@ -1645,7 +1665,7 @@ export const StaffManagement: React.FC<StaffManagementProps> = ({ showToast, aut
             {/* Le ferie passano dalla richiesta: così entrano nel monte e
                 nella proposta del piano, invece di un'assenza scritta a mano
                 che il piano scopre solo dopo. */}
-            {(leavePending.byStaff[selectedStaff.id] ?? 0) > 0 && (
+            {canSeeLeave && (leavePending.byStaff[selectedStaff.id] ?? 0) > 0 && (
               <Callout
                 tone="pending"
                 action={
@@ -1661,7 +1681,7 @@ export const StaffManagement: React.FC<StaffManagementProps> = ({ showToast, aut
                 {t('pendingLeaveHere', { count: leavePending.byStaff[selectedStaff.id] })}
               </Callout>
             )}
-            {canManage && selectedStaff.isActive && (
+            {canManage && canSeeLeave && selectedStaff.isActive && (
               <button type="button" onClick={() => setLeaveRequestFor(selectedStaff.id)} className={`${dsButton.secondary} w-full`}>
                 <CalendarDays className="h-4 w-4" aria-hidden />
                 {t('leaveRequest')}
@@ -1706,6 +1726,7 @@ export const StaffManagement: React.FC<StaffManagementProps> = ({ showToast, aut
                             <span className="text-[var(--ds-text-muted)]"> · {timeOff.notes}</span>
                           )}
                         </span>
+                        {canRemoveTimeOff(timeOff) && (
                         <button
                           type="button"
                           onClick={() => {
@@ -1719,6 +1740,7 @@ export const StaffManagement: React.FC<StaffManagementProps> = ({ showToast, aut
                         >
                           <Trash2 className="h-4 w-4" />
                         </button>
+                        )}
                       </div>
                     ))}
                   </div>
@@ -1734,7 +1756,7 @@ export const StaffManagement: React.FC<StaffManagementProps> = ({ showToast, aut
   const dayMenuStaff = selectedStaff;
   const dayMenuHasSomething = dayMenu && dayMenuStaff
     ? shifts.some(s => s.staffId === dayMenuStaff.id && toDateOnly(s.date) === dayMenu.date) ||
-      timeOffs.some(t => t.staffId === dayMenuStaff.id && toDateOnly(t.startDate) === dayMenu.date && toDateOnly(t.endDate) === dayMenu.date)
+      timeOffs.some(t => t.staffId === dayMenuStaff.id && toDateOnly(t.startDate) === dayMenu.date && toDateOnly(t.endDate) === dayMenu.date && canRemoveTimeOff(t))
     : false;
 
   const dayMenuItem =
@@ -1777,12 +1799,14 @@ export const StaffManagement: React.FC<StaffManagementProps> = ({ showToast, aut
           mark: swatch('bg-[var(--ds-text-subtle)]'),
           run: (d: string) => applyDayAbsence(d, TimeOffType.RIPOSO),
         },
-        {
-          key: 'sick',
-          label: t('timeOff.MALATTIA'),
-          mark: swatch('bg-[var(--ds-critical-solid)]'),
-          run: (d: string) => applyDayAbsence(d, TimeOffType.MALATTIA),
-        },
+        ...(canSeeLeave
+          ? [{
+              key: 'sick',
+              label: t('timeOff.MALATTIA'),
+              mark: swatch('bg-[var(--ds-critical-solid)]'),
+              run: (d: string) => applyDayAbsence(d, TimeOffType.MALATTIA),
+            }]
+          : []),
         { key: 'sep', separator: true as const },
         ...(dayMenuHasSomething
           ? [{
@@ -1818,7 +1842,7 @@ export const StaffManagement: React.FC<StaffManagementProps> = ({ showToast, aut
     run(d);
   };
 
-  if (area === 'FERIE') {
+  if (area === 'FERIE' && canSeeLeave) {
     return (
       <div className="flex h-full min-h-0 flex-col">
         <div className="bg-[var(--ds-canvas)] pb-2">
@@ -2186,7 +2210,15 @@ export const StaffManagement: React.FC<StaffManagementProps> = ({ showToast, aut
 
             {/* Monte ferie e account: il collegamento è ciò che apre al
                 dipendente «Le mie ferie» nel suo profilo. */}
-            <FormCard title={t('leaveCard')} aside={t('leaveCardAside')} className="space-y-4">
+            {(canSeeLeave || linkableUsers) && (
+            <FormCard
+              title={canSeeLeave ? t('leaveCard') : t('linkedAccount')}
+              aside={canSeeLeave ? t('leaveCardAside') : undefined}
+              className="space-y-4"
+            >
+              {/* I giorni l'anno sono dati di ferie: senza staff:leave il
+                  server li manda vuoti e ignora quello che arriva. */}
+              {canSeeLeave && (
               <Field label={t('annualLeaveDays')} htmlFor="staff-leave-days" hint={t('annualLeaveDaysHint')}>
                 <input
                   id="staff-leave-days"
@@ -2204,6 +2236,7 @@ export const StaffManagement: React.FC<StaffManagementProps> = ({ showToast, aut
                   className={dsInput}
                 />
               </Field>
+              )}
               {linkableUsers && (
                 <Field label={t('linkedAccount')} htmlFor="staff-user" hint={t('linkedAccountHint')}>
                   <select
@@ -2230,6 +2263,7 @@ export const StaffManagement: React.FC<StaffManagementProps> = ({ showToast, aut
                 </Field>
               )}
             </FormCard>
+            )}
           </div>
         )}
       </ModalShell>
@@ -2372,7 +2406,7 @@ export const StaffManagement: React.FC<StaffManagementProps> = ({ showToast, aut
         <FormCard className="space-y-4">
           <Field label="Tipo" required>
             <div className="flex flex-wrap gap-2">
-              {(Object.keys(TIME_OFF_LABELS) as TimeOffType[]).map(type => {
+              {registrableTimeOffTypes.map(type => {
                 const active = timeOffForm.type === type;
                 return (
                   <button

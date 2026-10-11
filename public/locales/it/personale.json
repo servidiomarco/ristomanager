@@ -49,7 +49,8 @@
     "RIPOSO": "Riposo",
     "VACANZA": "Vacanza",
     "MALATTIA": "Malattia",
-    "PERMESSO": "Permesso"
+    "PERMESSO": "Permesso",
+    "ASSENZA": "Assente"
   },
   "leaveRecorded": {
     "RIPOSO": "Riposo registrato",

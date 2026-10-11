@@ -17,6 +17,12 @@ export type Permission =
   // staff:full perché sono dati economici riservati — di default solo
   // OWNER, e le route esigono anche lo sblocco step-up con la password.
   | 'staff:payments'
+  // Ferie e assenze di tutti: piano ferie, richieste, giorni annui e il
+  // motivo di ogni assenza (ferie, malattia, permesso). Di default titolare
+  // e general manager. Chi ha staff:view senza questo vede i turni, e
+  // un'assenza altrui come «Assente» senza motivo; registra e toglie solo
+  // i riposi. Le proprie ferie restano nel profilo per tutti.
+  | 'staff:leave'
   | 'settings:view'
   | 'settings:full'
   | 'users:view'
@@ -125,6 +131,7 @@ const ROLE_PERMISSIONS: Record<UserRole, Permission[]> = {
     'reservations:full',
     'staff:view',
     'staff:full',
+    'staff:leave',
     'staff:payments',
     'settings:view',
     'settings:full',
@@ -178,6 +185,7 @@ const ROLE_PERMISSIONS: Record<UserRole, Permission[]> = {
     'reservations:full',
     'staff:view',
     'staff:full',
+    'staff:leave',
     'staff:payments',
     'settings:view',
     'settings:full',
@@ -231,6 +239,7 @@ const ROLE_PERMISSIONS: Record<UserRole, Permission[]> = {
     'reservations:full',
     'staff:view',
     'staff:full',
+    'staff:leave',
     'reports:view',
     'reports:full',
     'logs:view',
