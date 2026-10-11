@@ -18,6 +18,7 @@ describe('branding', () => {
         const saved = await api().put('/settings/legal').set(bearer(token)).send({
             business_name: 'Trattoria Collaudo',
             business_tagline: 'Cucina di prova',
+            public_phone: '0985 010032',
         });
         expect(saved.status).toBe(200);
         expect(saved.body.business_name).toBe('Trattoria Collaudo');
@@ -27,12 +28,16 @@ describe('branding', () => {
         const res = await api().get('/public/contact');
         expect(res.body.branding.name).toBe('Trattoria Collaudo');
         expect(res.body.branding.tagline).toBe('Cucina di prova');
+        // Il telefono pubblico è l'uscita «chiamaci» della pagina /prenota
+        // quando un orario non ha più posto.
+        expect(res.body.branding.phone).toBe('0985 010032');
 
         // Ripristino: gli altri file di test girano sullo stesso database e
         // non devono vedere il nome di prova.
         const reset = await api().put('/settings/legal').set(bearer(token)).send({
             business_name: '',
             business_tagline: '',
+            public_phone: '',
         });
         expect(reset.status).toBe(200);
         const dopo = await api().get('/public/contact');

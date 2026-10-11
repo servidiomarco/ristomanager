@@ -148,6 +148,11 @@ Pagina di prenotazione self-service, leggerissima (un solo file statico, si apre
 - La pagina offre solo i turni in cui, per quel numero di persone, un tavolo è libero **adesso**; le sale oltre la soglia di occupazione non compaiono.
 - Dove non c'è posto propone l'altro turno dello stesso giorno o i primi giorni liberi dopo, e la prenotazione non diventa mai una richiesta da confermare: allo staff non arriva più niente da approvare.
 - Due clienti che prenotano l'ultimo tavolo nello stesso istante non lo prendono entrambi: il primo è confermato, il secondo riceve le alternative.
+- Sulla pagina gli orari dipendono anche da quante persone si è: cambiando il numero si aggiornano, e un turno senza tavolo dice «al completo».
+- Se per quel giorno non c'è posto, la pagina mostra «Nessun tavolo per N persone» con gli orari che si confermano subito (l'altro turno o i giorni dopo, da toccare per prenotarli) e sotto i pulsanti **Scrivici su WhatsApp** (se il locale ha acceso «Farsi trovare» sulla pagina) e **Chiama** (il numero di Sofia, altrimenti il telefono pubblico del locale).
+- Se nel frattempo un altro cliente ha preso l'ultimo tavolo, all'invio la pagina torna agli orari e propone le alternative.
+
+**Link già compilati**: la pagina si apre già sulla data, le persone, la lingua, il turno e l'orario scritti nel link (`/prenota?date=2026-10-24&guests=4&lang=en&shift=cena&time=20:30`), utile per il sito, Google, Instagram o un partner. La data vale solo se è prenotabile; turno e orario solo se quel giorno ci sono.
 
 **Fin dove si prenota online** (Impostazioni › Prenotazioni › Prenotazioni web: **7 giorni**, **14 giorni** o **Libera**, di serie libera)
 - Con 7 o 14 giorni il calendario della pagina si ferma lì (i giorni dopo sono spenti, sotto il mese c'è scritto fino a quando si prenota) e chi prova una data più avanti viene invitato a chiamare: il limite vale anche se qualcuno scrive alla pagina senza passare dal calendario.
@@ -955,6 +960,7 @@ La **ricerca** sta accanto alle schede (sopra, sul telefono) e resta visibile me
 
 | Data | Sezione | Modifica |
 |---|---|---|
+| 2026-10-11 | Prenotazione online | **Mai più un vicolo cieco sulla pagina di prenotazione.** Con «Solo prenotazioni confermabili subito» gli orari tengono conto di quante persone si è, un turno pieno dice «al completo» e, se il giorno non ha posto, la pagina propone gli orari liberi più vicini da toccare, più i pulsanti WhatsApp e Chiama. La pagina si può anche aprire da un link già compilato con data, persone e orario. |
 | 2026-10-11 | Prenotazione online | **Fin dove si prenota online.** In Impostazioni › Prenotazioni › Prenotazioni web si sceglie se dal sito si prenota fino a 7 giorni, fino a 14 giorni o senza limiti. Con un limite il calendario si ferma lì e chi chiede una data più avanti viene invitato a chiamare; lo stesso limite vale per chi sposta la prenotazione dal link. |
 | 2026-10-11 | Agente vocale "Sofia", Messaggi: WhatsApp e SMS | **«Ora» vuol dire adesso.** A chi chiede un tavolo «per ora» Sofia non risponde più «alle 21:43 non prendiamo prenotazioni»: propone subito il primo orario libero («Posso prenotarle alle 21:45 o alle 22:00»). E per oggi non propone più orari già passati. Vale anche per l'agente WhatsApp. |
 | 2026-10-11 | Prenotazione online | **Prenotazioni web senza nulla da confermare.** Nuovo interruttore «Solo prenotazioni confermabili subito» in Impostazioni › Prenotazioni › Prenotazioni web: dal sito si prenota solo dove un tavolo è libero adesso, la prenotazione si conferma da sola e, dove non c'è posto, al cliente si propongono l'altro turno o un altro giorno. Corretto anche il calendario della pagina /prenota, che non mostrava più i pallini dei giorni liberi, quasi pieni e chiusi. |
