@@ -859,6 +859,51 @@ export async function findAvailability(tenantId: number, input: AvailabilityInpu
 // VOICE RESERVATION CREATION
 // ============================================
 
+/**
+ * Chi scrive la prenotazione. Queste funzioni sono nate per Sofia e le usa
+ * anche l'agente WhatsApp (services/bookingTools.ts): senza l'etichetta, una
+ * prenotazione nata su WhatsApp finiva in agenda come vocale, con la nota
+ * «[Voce]» e il microfono sulla card (al Frantoio, all'11/10/2026, nessuna
+ * prenotazione aveva source WHATSAPP).
+ */
+export interface ReservationChannelTag {
+    source: ReservationSource;
+    /** Prefisso delle note scritte dal canale. */
+    notePrefix: string;
+    /** La nota quando il cliente non ne ha date. */
+    defaultNote: string;
+    /** L'attore nel log di replica. */
+    actor: 'voice' | 'whatsapp';
+}
+
+export const VOICE_CHANNEL_TAG: ReservationChannelTag = {
+    source: ReservationSource.VOICE,
+    notePrefix: '[Voce]',
+    defaultNote: '[Voce] Prenotazione presa da Sofia',
+    actor: 'voice',
+};
+
+export const WHATSAPP_CHANNEL_TAG: ReservationChannelTag = {
+    source: ReservationSource.WHATSAPP,
+    notePrefix: '[WhatsApp]',
+    defaultNote: "[WhatsApp] Prenotazione presa dall'agente WhatsApp",
+    actor: 'whatsapp',
+};
+
+/** Una nota in più in coda a quelle che ci sono: le note dello staff non si
+ *  perdono mai. Il separatore è quello del modulo prenotazione (« | »): le
+ *  note sono segmenti («Allergie: …», «2× Stinco», testo libero) e un
+ *  separatore diverso farebbe finire la nota dentro il segmento prima — il
+ *  modulo, togliendo il segmento delle allergie, la cancellerebbe. */
+export function appendReservationNote(current: string | null | undefined, extra: string): string {
+    const base = (current ?? '').trim();
+    const add = extra.trim();
+    if (!add) return base;
+    if (!base) return add;
+    if (base.includes(add)) return base;
+    return `${base} | ${add}`;
+}
+
 export interface VoiceReservationInput {
     customer_name: string;
     phone: string;
@@ -877,6 +922,8 @@ export interface VoiceReservationInput {
     // Card #32 — lingua rilevata dal canale (payload ElevenLabs, prefisso
     // WhatsApp). Null quando nessun segnale è disponibile.
     language?: string | null;
+    /** Il canale che scrive; di serie Sofia. */
+    channelTag?: ReservationChannelTag;
 }
 
 export interface VoiceReservationOutput {
@@ -1000,9 +1047,10 @@ export async function createVoiceReservation(
     const phone = normalizeItalianPhone(input.phone);
     const children = Math.max(0, Math.min(Number(input.children) || 0, input.guests));
     const reservationDate = input.reservation_time.slice(0, 10);
+    const tag = input.channelTag ?? VOICE_CHANNEL_TAG;
     const notes = input.notes
-        ? `[Voce] ${await annotateImpossibleZonePromise(tenantId, reservationDate, input.shift, input.notes)}`
-        : '[Voce] Prenotazione presa da Sofia';
+        ? `${tag.notePrefix} ${await annotateImpossibleZonePromise(tenantId, reservationDate, input.shift, input.notes)}`
+        : tag.defaultNote;
 
     // No table while a deposit is pending: assigning one would guarantee the
     // very thing the deposit exists to secure.
@@ -1039,7 +1087,7 @@ export async function createVoiceReservation(
         children,
         phone,
         notes,
-        ReservationSource.VOICE,
+        tag.source,
         assigned?.id ?? null,
         input.deposit_required ? 'PENDING' : 'CONFIRMED',
         tenantId,
@@ -1047,7 +1095,7 @@ export async function createVoiceReservation(
     ]);
         if (ins.rows[0]) {
             await outboxEnqueueInTx(client, tenantId, 'reservation:created', `reservation:${ins.rows[0].id}`,
-                { reservation_id: ins.rows[0].id }, { actor: { channel: 'voice' } });
+                { reservation_id: ins.rows[0].id }, { actor: { channel: tag.actor } });
         }
         return ins;
     });
@@ -1074,6 +1122,10 @@ export interface CancelVoiceReservationInput {
     date: string;           // YYYY-MM-DD
     time?: string;          // HH:MM, used to disambiguate when caller has >1 booking that day
     conversation_id?: string;
+    /** Il canale che scrive; di serie Sofia. */
+    channelTag?: ReservationChannelTag;
+    /** La prenotazione esatta, quando chi chiama l'ha già individuata. */
+    reservation_id?: number;
 }
 
 // Confronto nomi accent-insensitive: la trascrizione vocale scrive "Tàmmaro",
@@ -1098,6 +1150,20 @@ function normalizeNameNeedle(input: string | undefined): string {
  * cancellate: chi chiama distingue tra attive e già annullate.
  */
 async function findVoiceReservationMatches(
+    tenantId: number,
+    input: { phone: string; customer_name?: string; date: string; time?: string; reservation_id?: number }
+): Promise<any[]> {
+    // Con l'id si colpisce quella prenotazione e nessun'altra: l'agente
+    // WhatsApp l'ha già scelta fra quelle del numero, e il ripiego per nome
+    // non deve poterne trovare una diversa.
+    if (input.reservation_id != null) {
+        const rows = await findVoiceReservationMatchesBy(tenantId, { ...input, customer_name: undefined });
+        return rows.filter((r: any) => Number(r.id) === Number(input.reservation_id));
+    }
+    return findVoiceReservationMatchesBy(tenantId, input);
+}
+
+async function findVoiceReservationMatchesBy(
     tenantId: number,
     input: { phone: string; customer_name?: string; date: string; time?: string }
 ): Promise<any[]> {
@@ -1254,15 +1320,18 @@ export async function cancelVoiceReservation(
     // restava solo il broadcast, che il nodo di sala non vede: lì la
     // prenotazione annullata da Sofia restava viva sul suo tavolo.
     const updated = await withOutboxTx(async (client) => {
+        // Su WhatsApp a chiedere l'annullo è l'ospite stesso, come dal link
+        // «La tua prenotazione»: la scheda lo dice («annullata dall'ospite»).
         const upd = await client.query(`
             UPDATE reservations
-            SET reservation_status = 'CANCELLED', table_id = NULL
+            SET reservation_status = 'CANCELLED', table_id = NULL,
+                guest_cancelled_at = CASE WHEN $3::boolean THEN NOW() ELSE guest_cancelled_at END
             WHERE id = $1 AND tenant_id = $2
             RETURNING id, tenant_id, customer_name, reservation_time, shift, guests
-        `, [target.id, tenantId]);
+        `, [target.id, tenantId, (input.channelTag ?? VOICE_CHANNEL_TAG).actor === 'whatsapp']);
         if (upd.rows[0]) {
             await outboxEnqueueInTx(client, tenantId, 'reservation:updated', `reservation:${target.id}`,
-                { reservation_id: target.id }, { actor: { channel: 'voice' } });
+                { reservation_id: target.id }, { actor: { channel: (input.channelTag ?? VOICE_CHANNEL_TAG).actor } });
         }
         return upd;
     });
@@ -1335,7 +1404,12 @@ export interface ModifyVoiceReservationInput {
     new_shift?: Shift;                          // LUNCH | DINNER
     new_guests?: number;
     new_location_preference?: 'INDOOR' | 'OUTDOOR';
-    new_notes?: string;                         // free text — appended after the "[Voce]" prefix
+    new_notes?: string;                         // testo libero, aggiunto IN CODA alle note esistenti col prefisso del canale
+    /** Il canale che scrive; di serie Sofia. */
+    channelTag?: ReservationChannelTag;
+    /** La prenotazione esatta da toccare, quando chi chiama l'ha già
+     *  individuata (agente WhatsApp): restringe la ricerca a quell'id. */
+    reservation_id?: number;
 }
 
 export interface ModifiedReservation {
@@ -1455,8 +1529,12 @@ export async function modifyVoiceReservation(
     // 4) UPDATE. Reconstruct the reservation_time in local wall-clock form so
     // downstream code (which slices the ISO string) sees the intended values.
     const newReservationTime = `${newDate}T${newTime}:00`;
-    const notesToStore = input.new_notes !== undefined
-        ? `[Voce] ${await annotateImpossibleZonePromise(tenantId, newDate, newShift, input.new_notes.trim())}`
+    const tag = input.channelTag ?? VOICE_CHANNEL_TAG;
+    // In coda, mai al posto: prima la nota nuova sostituiva tutte le note
+    // della prenotazione, comprese quelle scritte dallo staff (il tavolo
+    // promesso, l'allergia), e nessuno se ne accorgeva.
+    const notesToStore = input.new_notes !== undefined && input.new_notes.trim() !== ''
+        ? appendReservationNote(current.notes, `${tag.notePrefix} ${await annotateImpossibleZonePromise(tenantId, newDate, newShift, input.new_notes.trim())}`)
         : current.notes;
 
     // The two branches use different SQL parameter counts. Postgres refuses
@@ -1473,7 +1551,7 @@ export async function modifyVoiceReservation(
                 `UPDATE reservations
                  SET reservation_time = $1, shift = $2, guests = $3, table_id = $4,
                      children = LEAST(COALESCE(children, 0), $3),
-                     notes = $5, reservation_status = 'CONFIRMED',
+                     notes = $5,
                      guest_confirmed_at = CASE WHEN reservation_time IS DISTINCT FROM $1::timestamptz THEN NULL ELSE guest_confirmed_at END
                  WHERE id = $6 AND tenant_id = $7
                  RETURNING ${returning}`,
@@ -1482,14 +1560,14 @@ export async function modifyVoiceReservation(
               )
             : await client.query(
                 `UPDATE reservations
-                 SET notes = $1, reservation_status = 'CONFIRMED'
+                 SET notes = $1
                  WHERE id = $2 AND tenant_id = $3
                  RETURNING ${returning}`,
                 [notesToStore, current.id, tenantId]
               );
         if (upd.rows[0]) {
             await outboxEnqueueInTx(client, tenantId, 'reservation:updated', `reservation:${current.id}`,
-                { reservation_id: current.id }, { actor: { channel: 'voice' } });
+                { reservation_id: current.id }, { actor: { channel: tag.actor } });
         }
         return upd;
     });

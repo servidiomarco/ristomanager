@@ -1,4 +1,4 @@
-import { COMMON_ALLERGENS } from '../types';
+import { COMMON_ALLERGENS } from '../types.js';
 
 // Dietary flags on a reservation are persisted inside the free-text `notes`
 // field as two labelled segments: "Allergie: X, Y | Intolleranze: Z". Allergie

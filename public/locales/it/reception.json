@@ -32,6 +32,7 @@
   },
   "late": "in ritardo",
   "arriving": "in arrivo",
+  "etaHint": "Arriva alle {{ora}}: l'ha scritto l'ospite",
   "noName": "Senza nome",
   "hasNote": "Ha una nota",
   "tableTooSmall": "Tavolo {{tavolo}}: {{posti}} posti per {{coperti}} coperti",

@@ -98,7 +98,8 @@
     "notesPlaceholder": "Occasione speciale, seggiolone, tavolo tranquillo…"
   },
   "consent": {
-    "html": "Ho letto <a href=\"/privacy\" target=\"_blank\" rel=\"noopener\">l'informativa sulla privacy</a> e acconsento al trattamento dei dati per gestire la prenotazione, comprese le allergie che scelgo di indicare (art. 9 GDPR)."
+    "html": "Ho letto <a href=\"/privacy\" target=\"_blank\" rel=\"noopener\">l'informativa sulla privacy</a> e acconsento al trattamento dei dati per gestire la prenotazione, comprese le allergie che scelgo di indicare (art. 9 GDPR).",
+    "marketing": "Voglio ricevere su WhatsApp offerte e novità del ristorante. Posso smettere quando voglio scrivendo STOP."
   },
   "terms": {
     "summary": "Caparra e cancellazioni",

@@ -56,7 +56,8 @@
       "haccpManage": "Configura punti e limiti",
       "inventoryInvoices": "Fatture fornitori e prezzi d'acquisto",
       "foodcostView": "Visualizza costi e margini",
-      "foodcostManage": "Modifica prezzi e schede"
+      "foodcostManage": "Modifica prezzi e schede",
+      "campaignsManage": "Crea e manda campagne WhatsApp"
     }
   },
   "prom": {
