@@ -178,6 +178,24 @@ export function formatItalianDateReadback(iso: string, language?: string | null)
     return `${weekday} ${d} ${month}`;
 }
 
+const addDaysIso = (iso: string, days: number): string => {
+    const [y, mo, d] = iso.split('-').map(Number);
+    return new Date(Date.UTC(y, mo - 1, d + days)).toISOString().slice(0, 10);
+};
+
+/**
+ * Il giorno nei messaggi che l'agente legge: "oggi", "domani", altrimenti il
+ * readback con il giorno della settimana. Il cliente che chiede un tavolo per
+ * oggi si sentiva rispondere "quel giorno non prendiamo prenotazioni"
+ * (chiamata dell'11/10/2026): se ha detto oggi, si continua a dire oggi.
+ */
+function spokenDayRef(date: string, tz: string): string {
+    const today = getDatePartInTz(new Date(), tz);
+    if (date === today) return 'oggi';
+    if (date === addDaysIso(today, 1)) return 'domani';
+    return formatItalianDateReadback(date);
+}
+
 export function parseFlexibleDate(input: unknown, tz: string = 'Europe/Rome'): string | null {
     if (typeof input !== 'string') return null;
     const s = input.trim();
@@ -811,6 +829,7 @@ export async function findAvailability(tenantId: number, input: AvailabilityInpu
     // Only offer the other shift if it hasn't already passed today — otherwise
     // a 18:00 caller with a full dinner would be told "posso proporle a pranzo
     // dello stesso giorno?", which is nonsensical.
+    const dayRef = spokenDayRef(date, (await getTenantLocale(tenantId)).timezone);
     if (altFree > 0 && !(await isShiftAlreadyOverToday(tenantId, date, otherShift))) {
         const altLabel = otherShift === Shift.LUNCH ? 'a pranzo' : 'a cena';
         return {
@@ -821,7 +840,7 @@ export async function findAvailability(tenantId: number, input: AvailabilityInpu
             indoor_closed: indoorClosed,
             outdoor_closed: outdoorClosed,
             alternative_shift: otherShift,
-            message: `Mi dispiace, per quella fascia siamo al completo. Posso proporle ${altLabel} dello stesso giorno?`
+            message: `Mi dispiace, per quella fascia siamo al completo. Posso proporle ${dayRef} ${altLabel}?`
         };
     }
 
@@ -832,7 +851,7 @@ export async function findAvailability(tenantId: number, input: AvailabilityInpu
         free_outdoor: 0,
         indoor_closed: indoorClosed,
         outdoor_closed: outdoorClosed,
-        message: 'Mi dispiace, per quel giorno siamo al completo. Possiamo provare un altro giorno?'
+        message: `Mi dispiace, per ${dayRef} siamo al completo. Possiamo provare un altro giorno?`
     };
 }
 
@@ -1262,16 +1281,16 @@ export function formatItalianCancellation(r: CancelCandidate, language?: string 
     const rome = romeWallClock(r.reservation_time, english, tz);
     const firstName = spokenFirstName(r.customer_name);
     if (english) {
-        return `Cancellation confirmed ${firstName}, your reservation for ${rome.weekday} ${rome.day} ${rome.month} at ${rome.hh}:${rome.mm} has been cancelled. We will send you a confirmation on WhatsApp.`;
+        return `Cancellation confirmed ${firstName}, your reservation for ${wallClockDay(rome, true)} at ${rome.hh}:${rome.mm} has been cancelled. We will send you a confirmation on WhatsApp.`;
     }
-    return `Cancellazione confermata ${firstName}, la prenotazione di ${rome.weekday} ${rome.day} ${rome.month} alle ${rome.hh}:${rome.mm} è stata annullata. Le invieremo conferma su WhatsApp.`;
+    return `Cancellazione confermata ${firstName}, la prenotazione di ${wallClockDay(rome, false)} alle ${rome.hh}:${rome.mm} è stata annullata. Le invieremo conferma su WhatsApp.`;
 }
 
 // Legge i componenti da orologio da parete di un reservation_time nel fuso del
 // locale, così le risposte dell'agente dicono l'ora che il cliente ha davvero
 // prenotato — non l'ora UTC del timestamptz.
 function romeWallClock(iso: string | Date, english: boolean = false, tz: string = 'Europe/Rome'): {
-    weekday: string; day: number; month: string; hh: string; mm: string;
+    weekday: string; day: number; month: string; hh: string; mm: string; today: boolean;
 } {
     const d = iso instanceof Date ? iso : new Date(iso);
     const [datePart, timePart] = [getDatePartInTz(d, tz), getTimePartInTz(d, tz)];
@@ -1286,7 +1305,15 @@ function romeWallClock(iso: string | Date, english: boolean = false, tz: string 
         month: english ? ENGLISH_MONTH_NAMES[mo - 1] : ITALIAN_MONTHS[mo - 1],
         hh,
         mm,
+        today: datePart === getDatePartInTz(new Date(), tz),
     };
+}
+
+// Il giorno nelle frasi di conferma: "oggi" se la prenotazione è per oggi,
+// come l'ha detto il cliente, altrimenti giorno della settimana e data.
+function wallClockDay(rome: ReturnType<typeof romeWallClock>, english: boolean): string {
+    if (rome.today) return english ? 'today' : 'oggi';
+    return `${rome.weekday} ${rome.day} ${rome.month}`;
 }
 
 // ============================================
@@ -1499,9 +1526,9 @@ export function formatItalianModification(r: ModifiedReservation, language?: str
     const rome = romeWallClock(r.reservation_time, english, tz);
     const firstName = spokenFirstName(r.customer_name);
     if (english) {
-        return `Reservation updated ${firstName}: ${rome.weekday} ${rome.day} ${rome.month} at ${rome.hh}:${rome.mm} for ${r.guests} ${r.guests === 1 ? 'guest' : 'guests'}. We will send you a confirmation on WhatsApp.`;
+        return `Reservation updated ${firstName}: ${wallClockDay(rome, true)} at ${rome.hh}:${rome.mm} for ${r.guests} ${r.guests === 1 ? 'guest' : 'guests'}. We will send you a confirmation on WhatsApp.`;
     }
-    return `Prenotazione aggiornata ${firstName}: ${rome.weekday} ${rome.day} ${rome.month} alle ${rome.hh}:${rome.mm} per ${r.guests} persone. Le invieremo la conferma su WhatsApp.`;
+    return `Prenotazione aggiornata ${firstName}: ${wallClockDay(rome, false)} alle ${rome.hh}:${rome.mm} per ${r.guests} persone. Le invieremo la conferma su WhatsApp.`;
 }
 
 // ============================================
@@ -1661,11 +1688,11 @@ export function formatItalianConfirmation(r: VoiceReservationOutput, language?: 
         const childrenSuffix = r.children && r.children > 0
             ? ` including ${r.children} ${r.children === 1 ? 'child' : 'children'}`
             : '';
-        return `Confirmed ${firstName}, table for ${r.guests} ${guestsLabel}${childrenSuffix} on ${rome.weekday} ${rome.day} ${rome.month} at ${rome.hh}:${rome.mm}. We will send you a confirmation on WhatsApp.`;
+        return `Confirmed ${firstName}, table for ${r.guests} ${guestsLabel}${childrenSuffix} ${rome.today ? 'today' : `on ${wallClockDay(rome, true)}`} at ${rome.hh}:${rome.mm}. We will send you a confirmation on WhatsApp.`;
     }
     const persone = r.guests === 1 ? 'persona' : 'persone';
     const childrenSuffix = r.children && r.children > 0
         ? ` di cui ${r.children} ${r.children === 1 ? 'bambino' : 'bambini'}`
         : '';
-    return `Confermato ${firstName}, tavolo per ${r.guests} ${persone}${childrenSuffix} ${rome.weekday} ${rome.day} ${rome.month} alle ${rome.hh}:${rome.mm}. Le invieremo conferma su WhatsApp.`;
+    return `Confermato ${firstName}, tavolo per ${r.guests} ${persone}${childrenSuffix} ${wallClockDay(rome, false)} alle ${rome.hh}:${rome.mm}. Le invieremo conferma su WhatsApp.`;
 }
