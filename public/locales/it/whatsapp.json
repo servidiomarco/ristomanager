@@ -7,12 +7,40 @@
     "provider": "Provider: {{p}}",
     "connected": "Collegato",
     "notConnectedTitle": "Nessun numero collegato",
-    "notConnected": "I messaggi ai clienti partono per email, se configurata. Il collegamento del numero del locale arriva con un prossimo aggiornamento.",
     "sms": "Ripiego SMS",
     "on": "Attivo",
     "off": "Spento",
     "webhookInbound": "Messaggi in arrivo",
-    "webhookStatus": "Esito dei messaggi"
+    "webhookStatus": "Esito dei messaggi",
+    "notConnectedNow": "I messaggi ai clienti partono per email, se configurata.",
+    "meta": {
+      "provider": "Meta · API Cloud",
+      "quality": "Qualità del numero",
+      "limit": "Limite d'invio",
+      "limitPerDay": "{{n}} clienti al giorno",
+      "limitUnlimited": "senza limite",
+      "q": {
+        "green": "alta",
+        "yellow": "media",
+        "red": "bassa",
+        "unknown": "non ancora valutata"
+      },
+      "notSubscribed": "Il numero manda, ma Meta non ha iscritto l'app all'account: i messaggi dei clienti non arrivano. Collega di nuovo col token giusto.",
+      "open": "Collega un numero Meta",
+      "formHint": "I tre valori sono nella console di Meta, in WhatsApp › Configurazione API.",
+      "phoneNumberId": "Id del numero",
+      "wabaId": "Id dell'account WhatsApp Business",
+      "token": "Token d'accesso",
+      "tokenHint": "Meglio quello di un utente di sistema: non scade. Si salva cifrato.",
+      "connect": "Collega",
+      "cancel": "Annulla",
+      "connectError": "Numero non collegato",
+      "disconnectOpen": "Scollega il numero",
+      "disconnectConfirm": "Da adesso i messaggi ai clienti partono per email. Il numero resta su Meta.",
+      "disconnect": "Scollega",
+      "disconnectError": "Numero non scollegato",
+      "webhook": "Webhook dell'app Meta"
+    }
   },
   "templates": {
     "loadError": "Template non disponibili",

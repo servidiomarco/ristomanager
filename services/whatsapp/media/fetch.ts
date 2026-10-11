@@ -4,6 +4,7 @@
 
 import { getSender, twilioRestBase } from '../config.js';
 import { twilioMediaAuthHeader } from '../providers/twilio.js';
+import { META_MEDIA_PREFIX, metaFetchMedia } from '../providers/meta.js';
 
 export interface MediaItem {
     url?: string | null;
@@ -34,10 +35,23 @@ function allowedHost(url: string): boolean {
 export async function fetchInboundMedia(tenantId: number, item: MediaItem): Promise<{ bytes: Buffer; contentType: string }> {
     const url = String(item.url || '');
     if (!url) throw new MediaFetchError('Allegato senza indirizzo', 404);
+    // Meta: nel database c'è l'id dell'allegato, l'url si chiede adesso.
+    if (url.startsWith(META_MEDIA_PREFIX)) {
+        const sender = await getSender(tenantId);
+        if (sender?.provider !== 'meta') throw new MediaFetchError('WhatsApp non collegato', 503);
+        try {
+            const file = await metaFetchMedia(sender, url.slice(META_MEDIA_PREFIX.length));
+            if (file.bytes.length > MEDIA_MAX_BYTES) throw new MediaFetchError('Allegato troppo grande', 413);
+            return file;
+        } catch (err: any) {
+            if (err instanceof MediaFetchError) throw err;
+            throw new MediaFetchError(err?.message || 'Allegato non recuperabile', 502);
+        }
+    }
     if (!allowedHost(url)) throw new MediaFetchError('Host non consentito', 400);
     // Un allegato si scarica solo dall'account che l'ha ricevuto.
     const sender = await getSender(tenantId);
-    if (!sender) throw new MediaFetchError('WhatsApp non collegato', 503);
+    if (sender?.provider !== 'twilio') throw new MediaFetchError('WhatsApp non collegato', 503);
     const upstream = await fetch(url, { headers: { Authorization: twilioMediaAuthHeader(sender) } });
     if (!upstream.ok) throw new MediaFetchError(`Il provider ha risposto ${upstream.status}`, 502);
     const declared = Number(upstream.headers.get('content-length') || 0);

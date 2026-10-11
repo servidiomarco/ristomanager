@@ -34,3 +34,5 @@ export { getTakeawayPolicy } from './settings.js';
 export {
     recordMarketingConsent, registerStopHook, configureCampaigns, campaignsTick, type ConsentSource,
 } from './campaigns/index.js';
+export { handleMetaWebhook, handleMetaWebhookVerify } from './webhooks.js';
+export { invalidateSenderCache, metaGraphBase } from './config.js';

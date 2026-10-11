@@ -74,7 +74,7 @@ export async function templateStatus(tenantId: number, env: NodeJS.ProcessEnv = 
         languages: await Promise.all(def.languages.map(async (language): Promise<TemplateLanguageStatus> => {
             const sid = usesEnv ? env[templateEnvKey(def.key, language)] : undefined;
             if (!sid) return { language, configured: false, approval: null, rejectionReason: null };
-            if (!sender) return { language, configured: true, approval: 'unknown', rejectionReason: null };
+            if (sender?.provider !== 'twilio') return { language, configured: true, approval: 'unknown', rejectionReason: null };
             const { status, reason } = await twilioApproval(sender, sid);
             return { language, configured: true, approval: status, rejectionReason: reason };
         })),

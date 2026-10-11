@@ -57,6 +57,7 @@ import {
     configureWhatsApp, isWhatsAppReady, isSmsReady, getSender, backendBaseUrl,
     sendWhatsAppText, sendTwilioSms, logOutboundMessage, logInboundMessage,
     handleTwilioWhatsAppInbound, validateTwilioSignature, pickTemplate, twilioMediaAuthHeader,
+    handleMetaWebhook, handleMetaWebhookVerify,
     createWhatsAppRouter, isWindowOpen, configureReservationButtons, publicWhatsAppLink, getRemindersPolicy,
     configureWhatsAppMedia, fetchInboundMedia, MediaFetchError, agentMessageBody, photosForAgent,
     notifyTakeawayReady, getTakeawayPolicy,
@@ -963,16 +964,26 @@ async function handleTwilioWhatsAppStatus(tenantId: number, req: express.Request
     console.log(`[Twilio] Status: ${MessageSid} → ${MessageStatus} (to ${To})${errSuffix}`);
     res.status(200).send();
 
+    if (!MessageSid || !MessageStatus) return;
+    await persistDeliveryStatus(
+        tenantId, String(MessageSid), String(MessageStatus),
+        ErrorCode ? String(ErrorCode) : null,
+        ErrorCode ? `${ErrorCode}${ErrorMessage ? ` (${ErrorMessage})` : ''}` : null
+    );
+}
+
+/**
+ * Lo stato di consegna di un messaggio, da Twilio o da Meta (services/
+ * whatsapp/webhooks.ts): la conferma della prenotazione, la riga
+ * dell'inbox, il ripiego su SMS per gli errori WhatsApp definitivi.
+ */
+async function persistDeliveryStatus(tenantId: number, MessageSid: string, rawStatus: string, ErrorCode: string | null, errText: string | null): Promise<void> {
     // Persist the delivery status on the reservation, if we tracked this SID.
     // Twilio delivers callbacks out of order; only advance the status when the
     // new state is meaningful (delivered/failed/undelivered), and only stamp
     // confirmation_delivered_at once, on the first 'delivered' event.
-    if (!MessageSid || !MessageStatus) return;
     try {
-        const status = String(MessageStatus).toLowerCase();
-        const errText = ErrorCode
-            ? `${ErrorCode}${ErrorMessage ? ` (${ErrorMessage})` : ''}`
-            : null;
+        const status = String(rawStatus).toLowerCase();
         const updated = await queryWithRetry(
             `UPDATE reservations
              SET confirmation_status = $1::text,
@@ -1042,6 +1053,13 @@ async function handleTwilioWhatsAppStatus(tenantId: number, req: express.Request
         console.warn('[Twilio] status persist failed:', err?.message || err);
     }
 }
+
+// Il numero WhatsApp di un locale sull'API Cloud di Meta (Fase 12a): un solo
+// indirizzo per tutti, il ristorante viene da phone_number_id. Il corpo JSON
+// arriva già letto, col grezzo in req.rawBody per la firma.
+app.get('/webhook/meta-whatsapp', (req, res) => handleMetaWebhookVerify(req, res));
+// rls-bypass: webhook di Meta senza JWT; ogni messaggio gira poi nel contesto del tenant del numero
+app.post('/webhook/meta-whatsapp', (req, res) => { void handleMetaWebhook(req, res); });
 
 // Alias tenant 1 finché i provider non sono riconfigurati sui path con token.
 app.post('/webhook/twilio-whatsapp-status', twilioUrlEncoded, (req, res) => { void runWithTenantContext(PUBLIC_TENANT_ID, () => handleTwilioWhatsAppStatus(PUBLIC_TENANT_ID, req, res)); });
@@ -13474,7 +13492,7 @@ app.get('/messages/:id/media/:index', authenticate, requirePermission('reservati
         } catch (err: any) {
             if (err instanceof MediaFetchError) {
                 if (err.status === 502) console.warn(`[media] ${err.message} per il messaggio ${id}`);
-                const message = err.status === 400 ? 'Host non consentito' : err.status === 503 ? 'Twilio non configurato' : 'Allegato non recuperabile';
+                const message = err.status === 400 ? 'Host non consentito' : err.status === 503 ? 'WhatsApp non collegato' : 'Allegato non recuperabile';
                 return res.status(err.status === 413 ? 502 : err.status).json({ error: message });
             }
             throw err;
@@ -38081,7 +38099,7 @@ app.post('/debug/whatsapp-test', authenticate, requireFeature('whatsapp'), requi
     if (useTwilio) {
         // Il mittente è quello del ristorante (services/whatsapp/config.ts):
         // un locale senza numero proprio non prova più dal numero del Frantoio.
-        if (!sender) {
+        if (!sender || sender.provider !== 'twilio') {
             return res.status(500).json({
                 error: 'missing_twilio_config',
                 message: 'Nessun mittente WhatsApp per questo locale',
@@ -45603,6 +45621,7 @@ app.delete('/sala/profiles/:id', authenticate, requirePermission('settings:full'
 configureWhatsApp({
     broadcastToAll: (tenantId, event, payload) => { socketService?.broadcastToAll(tenantId, event, payload); },
     broadcastReservationsUpdatedByIds: ids => broadcastReservationsUpdatedByIds(ids),
+    persistDeliveryStatus: (tenantId, sid, status, errorCode, errText) => persistDeliveryStatus(tenantId, sid, status, errorCode, errText),
 });
 
 // L'agente WhatsApp che parte da solo: la coda chiede a server.ts il

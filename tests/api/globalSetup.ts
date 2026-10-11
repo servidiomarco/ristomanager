@@ -151,6 +151,15 @@ export default async function globalSetup(): Promise<() => Promise<void>> {
             // con una chiave sua: la chiave di Sofia nei test non c'è.
             ELEVENLABS_STT_URL: `http://127.0.0.1:${port + 13}/v1/speech-to-text`,
             ELEVENLABS_STT_KEY: 'test-stt-key',
+            // Il numero di un locale sull'API Cloud di Meta (Fase 12a): la
+            // Graph API su uno stub che il test di Meta accende da sé (porta
+            // del server + 14), il segreto dell'app che firma i webhook, il
+            // token della verifica dell'indirizzo e la chiave che cifra i
+            // token dei locali nel database.
+            META_GRAPH_URL: `http://127.0.0.1:${port + 14}`,
+            META_APP_SECRET: 'test-meta-app-secret',
+            META_WEBHOOK_VERIFY_TOKEN: 'test-meta-verify-token',
+            INTEGRATION_SECRETS_KEY: '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef',
             DEFAULT_OWNER_PASSWORD: OWNER_PASSWORD,
             // Gate degli endpoint /admin/tenants (Fase D1): senza questo i
             // test di provisioning riceverebbero solo 503.
