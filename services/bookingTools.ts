@@ -29,6 +29,10 @@ import { normalizeLanguageCode, detectLanguageFromPhonePrefix } from '../utils/l
 import { spokenFirstName } from '../utils/text.js';
 import type { ActiveReservationByPhone, ReservationChannelTag } from './elevenlabsService.js';
 import { VOICE_CHANNEL_TAG, WHATSAPP_CHANNEL_TAG } from './elevenlabsService.js';
+import { hmToMinutes, nearestSlots, offGridMessage, slotProposal, type SlotProposal } from './slotProposal.js';
+
+// server.ts la usa come bookingTools.nearestSlots (alternative del sito).
+export { nearestSlots };
 
 // Chi riceve le notifiche di prenotazione (nuova, richiesta, modificata,
 // annullata), da ogni canale: CRM, sito, agente vocale e WhatsApp. Una lista
@@ -350,20 +354,13 @@ export interface CheckAvailabilityParams {
     caller_id?: any;
 }
 
-/** I due orari della griglia più vicini a quello richiesto, per proporli a
- *  voce al posto della lista completa (7–9 slot letti al telefono sono il
- *  punto in cui i clienti riattaccano). */
-export function nearestSlots(requested: string, slots: string[]): string[] {
-    const toMin = (t: string) => {
-        const [h, m] = t.split(':').map(Number);
-        return h * 60 + m;
-    };
-    const req = toMin(requested);
-    return [...slots]
-        .sort((a, b) => Math.abs(toMin(a) - req) - Math.abs(toMin(b) - req) || toMin(a) - toMin(b))
-        .slice(0, 2)
-        .sort((a, b) => toMin(a) - toMin(b));
-}
+/** L'ora attuale "HH:MM" nel fuso del locale. */
+const nowHmInTz = (tz: string): string =>
+    new Intl.DateTimeFormat('en-GB', { timeZone: tz, hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).format(new Date());
+
+/** slotProposal con l'orologio del locale. */
+const proposeSlots = (requested: string, slots: string[], date: string, tz: string): SlotProposal =>
+    slotProposal(requested, slots, { isToday: date === todayInTz(tz), nowMinutes: hmToMinutes(nowHmInTz(tz)) });
 
 export async function checkAvailability(
     tenantId: number,
@@ -435,27 +432,32 @@ export async function checkAvailability(
             if (validSlots.includes(requestedTime)) {
                 timeFields = { requested_time: requestedTime, requested_time_available: true };
             } else {
-                const near = nearestSlots(requestedTime, validSlots);
+                const prop = proposeSlots(requestedTime, validSlots, normalizedDate, tz);
+                const near = prop.near;
                 const proposal = english
                     ? (near.length === 2 ? `${near[0]} or ${near[1]}` : near.length === 1 ? `${near[0]}` : '')
                     : (near.length === 2 ? `alle ${near[0]} o alle ${near[1]}` : near.length === 1 ? `alle ${near[0]}` : '');
                 const day = spokenDay(normalizedDate, tz, english);
                 const shiftAt = rawShift === 'LUNCH' ? (english ? 'lunch' : 'a pranzo') : (english ? 'dinner' : 'a cena');
+                // «Non ci sono PIÙ orari»: la griglia c'era, ma per oggi è passata.
+                const noneLeft = validSlots.length > 0 && prop.future.length === 0;
                 console.warn(`${channel.logPrefix} check-availability: requested time off grid`, {
-                    date: normalizedDate, shift: rawShift, requested_time: requestedTime, available_slots: validSlots,
+                    date: normalizedDate, shift: rawShift, requested_time: requestedTime, available_slots: validSlots, asap: prop.asap,
                 });
                 timeFields = {
                     requested_time: requestedTime,
                     requested_time_available: false,
-                    available_slots: validSlots,
+                    available_slots: prop.future,
                     nearest_slots: near,
                     message: proposal
-                        ? (english
-                            ? `We do not take bookings at ${requestedTime} ${spokenDayEn(normalizedDate, tz)}. The closest times are ${proposal}: which one do you prefer?`
-                            : `${capitalize(day)} alle ${requestedTime} non prendiamo prenotazioni. Gli orari più vicini sono ${proposal}: quale preferisce?`)
+                        ? (prop.asap
+                            ? offGridMessage(requestedTime, prop, english)
+                            : english
+                                ? `We do not take bookings at ${requestedTime} ${spokenDayEn(normalizedDate, tz)}. The closest times are ${proposal}: which one do you prefer?`
+                                : `${capitalize(day)} alle ${requestedTime} non prendiamo prenotazioni. Gli orari più vicini sono ${proposal}: quale preferisce?`)
                         : (english
-                            ? `There are no bookable times for ${shiftAt} ${spokenDayEn(normalizedDate, tz)}. Shall we try another day?`
-                            : `${capitalize(day)} ${shiftAt} non ci sono orari prenotabili. Possiamo provare un altro giorno?`),
+                            ? `There are no ${noneLeft ? 'more ' : ''}bookable times for ${shiftAt} ${spokenDayEn(normalizedDate, tz)}. Shall we try another day?`
+                            : `${capitalize(day)} ${shiftAt} non ci sono ${noneLeft ? 'più ' : ''}orari prenotabili. Possiamo provare un altro giorno?`),
                 };
             }
         }
@@ -812,20 +814,21 @@ export async function createReservation(
         // I due orari più vicini, non la lista completa: 7–9 slot recitati al
         // telefono sono il punto esatto in cui i clienti dell'estate 2026
         // riattaccavano ("Non ho capito gli orari").
-        const near = nearestSlots(normalizedTime, validSlots);
         const tz = await d.getTenantTimeZone(tenantId);
+        const prop = proposeSlots(normalizedTime, validSlots, normalizedDate, tz);
+        const near = prop.near;
         const message = english
-            ? (validSlots.length === 0
+            ? (prop.future.length === 0
                 ? `I am sorry, ${shiftLabel} is not available ${spokenDayEn(normalizedDate, tz)}. Shall we try another day?`
-                : near.length === 2
-                    ? `We do not take bookings at ${normalizedTime}: the closest times are ${near[0]} or ${near[1]}. Which one do you prefer?`
-                    : `For ${shiftLabel} we can only book at ${d.formatSlotListItalian(validSlots, 'en')}. Which time do you prefer?`)
-            : (validSlots.length === 0
+                : near.length === 2 || prop.asap
+                    ? offGridMessage(normalizedTime, prop, true)!
+                    : `For ${shiftLabel} we can only book at ${d.formatSlotListItalian(prop.future, 'en')}. Which time do you prefer?`)
+            : (prop.future.length === 0
                 ? `Mi dispiace, ${shiftLabel} di ${spokenDay(normalizedDate, tz, false)} non è disponibile. Possiamo provare un altro giorno?`
-                : near.length === 2
-                    ? `Alle ${normalizedTime} non prendiamo prenotazioni: gli orari più vicini sono le ${near[0]} o le ${near[1]}. Quale preferisce?`
-                    : `Per ${shiftLabel} possiamo prenotare solo alle ${d.formatSlotListItalian(validSlots)}. Quale orario preferisce?`);
-        return fail('invalid_slot', message, { available_slots: validSlots, nearest_slots: near });
+                : near.length === 2 || prop.asap
+                    ? offGridMessage(normalizedTime, prop, false)!
+                    : `Per ${shiftLabel} possiamo prenotare solo alle ${d.formatSlotListItalian(prop.future)}. Quale orario preferisce?`);
+        return fail('invalid_slot', message, { available_slots: prop.future, nearest_slots: near });
     }
     if (!Number.isFinite(guests) || guests < 1 || guests > 50) return fail('invalid_guests', msg(english).invalidGuests);
 
@@ -1350,15 +1353,14 @@ export async function modifyReservation(
         if (dateBlock) return fail('date_blocked', d.buildVoiceDateBlockMessage(targetDate, newShift, dateBlock, english ? 'en' : null));
         const validSlots = await d.getAvailableSlots(tenantId, targetDate, newShift);
         if (!validSlots.includes(newTime)) {
-            const near = nearestSlots(newTime, validSlots);
-            const message = english
-                ? (validSlots.length === 0
+            const prop = proposeSlots(newTime, validSlots, targetDate, await d.getTenantTimeZone(tenantId));
+            const near = prop.near;
+            const message = near.length === 0
+                ? (english
                     ? 'That shift is not available on that day. Shall we try another day?'
-                    : `We do not take bookings at ${newTime}: the closest times are ${near.join(' or ')}.`)
-                : (validSlots.length === 0
-                    ? 'Quel turno non è disponibile in quel giorno. Possiamo provare un altro giorno?'
-                    : `Alle ${newTime} non prendiamo prenotazioni: gli orari più vicini sono le ${near.join(' o le ')}.`);
-            return { body: { success: false, error: 'invalid_slot', message, available_slots: validSlots, nearest_slots: near } };
+                    : 'Quel turno non è disponibile in quel giorno. Possiamo provare un altro giorno?')
+                : offGridMessage(newTime, prop, english)!;
+            return { body: { success: false, error: 'invalid_slot', message, available_slots: prop.future, nearest_slots: near } };
         }
     }
 
