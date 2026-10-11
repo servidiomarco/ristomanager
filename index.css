@@ -1120,54 +1120,124 @@ body {
   .ds-ai-frame { animation: none; }
 }
 
-/* Il telaio della chiamata (CallBanner). Stesso meccanismo di .ds-ai-frame,
-   ma qui al telefono c'e' una persona del locale, non Sofia: il movimento
-   dice «la linea e' viva». Due stati, due famiglie:
-   - squilla → `pending` (serve qualcuno che risponda), due archi e un giro
-     veloce, come uno squillo;
-   - in corso → `seated` (live, la stessa della durata nella card), un arco
-     e un giro calmo.
-   Prima la card di una chiamata presa dal locale aveva un bordo fermo, uguale
-   a quella appena finita: da lontano non si capiva se si stava parlando.
+/* Il telaio della chiamata (CallBanner). Una telefonata è l'unica cosa del
+   CRM che chiede attenzione ADESSO, e in servizio lo schermo si guarda da un
+   metro, di sbieco, mentre si fa altro. Per questo è più forte degli altri
+   telai (.ds-live-frame, .ds-ai-frame), che devono restare discreti:
+   - 3 px invece di 1,5, e il binario non è grigio ma la tinta dello stato:
+     anche fermo, il bordo dice di che colore è la chiamata;
+   - l'arco è pieno con un riflesso chiaro al centro, e gira;
+   - dietro la card c'è lo stesso telaio sfocato (::before, `background:
+     inherit` segue il giro): la luce esce dal bordo e si nota con la coda
+     dell'occhio, anche su fondo scuro.
+   Tre stati, tre famiglie, tre velocità:
+   - squilla → `pending`, due archi veloci e un alone che respira: serve
+     qualcuno che risponda;
+   - in corso col locale → `seated`, un arco calmo;
+   - Sofia → `arriving`, il colore dell'AI, un arco lento.
    Senza movimento (reduce-motion) il bordo resta pieno nel colore dello
-   stato, cosi' lo stato si legge lo stesso. */
+   stato e l'alone fermo: lo stato si legge lo stesso. */
 .ds-call-frame {
   --ds-call-accent: var(--ds-seated-solid);
-  padding: 2px;
+  --ds-call-glint: color-mix(in srgb, var(--ds-call-accent) 45%, #ffffff);
+  --ds-call-track: color-mix(in srgb, var(--ds-call-accent) 30%, var(--ds-surface));
+  position: relative;
+  isolation: isolate;
+  padding: 3px;
   border-radius: var(--ds-radius);
   background: conic-gradient(
     from var(--ds-live-angle),
-    var(--ds-border) 0deg,
-    var(--ds-border) 50deg,
-    var(--ds-call-accent) 140deg,
-    var(--ds-border) 230deg,
-    var(--ds-border) 360deg
+    var(--ds-call-track) 0deg,
+    var(--ds-call-track) 40deg,
+    var(--ds-call-accent) 100deg,
+    var(--ds-call-glint) 130deg,
+    var(--ds-call-accent) 160deg,
+    var(--ds-call-track) 220deg,
+    var(--ds-call-track) 360deg
   );
+  box-shadow: 0 6px 14px rgba(16, 17, 25, 0.10), 0 24px 56px rgba(16, 17, 25, 0.18);
   animation: ds-live-sweep 3s linear infinite;
+}
+
+.ds-call-frame::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  border-radius: inherit;
+  background: inherit;
+  filter: blur(16px);
+  opacity: 0.75;
 }
 
 .ds-call-frame--ring {
   --ds-call-accent: var(--ds-pending-solid);
   background: conic-gradient(
     from var(--ds-live-angle),
-    var(--ds-border) 0deg,
-    var(--ds-call-accent) 60deg,
-    var(--ds-border) 120deg,
-    var(--ds-border) 180deg,
-    var(--ds-call-accent) 240deg,
-    var(--ds-border) 300deg,
-    var(--ds-border) 360deg
+    var(--ds-call-track) 0deg,
+    var(--ds-call-accent) 45deg,
+    var(--ds-call-glint) 70deg,
+    var(--ds-call-accent) 95deg,
+    var(--ds-call-track) 150deg,
+    var(--ds-call-track) 180deg,
+    var(--ds-call-accent) 225deg,
+    var(--ds-call-glint) 250deg,
+    var(--ds-call-accent) 275deg,
+    var(--ds-call-track) 330deg,
+    var(--ds-call-track) 360deg
   );
   animation-duration: 1.6s;
 }
+.ds-call-frame--ring::before { animation: ds-call-breathe 1.6s ease-in-out infinite; }
+
+.ds-call-frame--ai {
+  --ds-call-accent: var(--ds-arriving-solid);
+  animation-duration: 5s;
+}
 
 /* Al buio i `-solid` su fondo scuro si vedono appena: l'arco usa i `-text`,
-   che sono le varianti chiare delle stesse famiglie. */
-.dark .ds-call-frame { --ds-call-accent: var(--ds-seated-text); }
+   che sono le varianti chiare delle stesse famiglie. L'ombra nera non si
+   vede sul nero: lì il distacco lo fa l'alone. */
+.dark .ds-call-frame { --ds-call-accent: var(--ds-seated-text); box-shadow: 0 16px 44px rgba(0, 0, 0, 0.6); }
 .dark .ds-call-frame--ring { --ds-call-accent: var(--ds-pending-text); }
+.dark .ds-call-frame--ai { --ds-call-accent: var(--ds-arriving-text); }
+.dark .ds-call-frame::before { opacity: 0.55; }
+
+@keyframes ds-call-breathe {
+  0%, 100% { opacity: 0.3; transform: scale(1); }
+  50% { opacity: 0.95; transform: scale(1.03); }
+}
+
+/* La cornetta che vibra mentre squilla: tre colpi e una pausa, allo stesso
+   passo del giro (1,6 s), come una suoneria. */
+.ds-call-wiggle { animation: ds-call-wiggle 1.6s ease-in-out infinite; }
+@keyframes ds-call-wiggle {
+  0%, 36%, 100% { transform: rotate(0deg); }
+  4%, 12%, 20%, 28% { transform: rotate(-14deg); }
+  8%, 16%, 24%, 32% { transform: rotate(14deg); }
+}
+
+/* L'entrata: da destra con un piccolo rimbalzo, dove sta la card da md in
+   su; dall'alto su telefono, dove è a tutta larghezza. Più ampia di tileIn
+   (8 px): una chiamata deve farsi notare mentre arriva. */
+.ds-call-enter { animation: ds-call-in 360ms cubic-bezier(0.2, 0.9, 0.3, 1.15) both; }
+@keyframes ds-call-in {
+  from { opacity: 0; transform: translateX(32px) scale(0.96); }
+  to { opacity: 1; transform: none; }
+}
+@keyframes ds-call-in-top {
+  from { opacity: 0; transform: translateY(-16px) scale(0.98); }
+  to { opacity: 1; transform: none; }
+}
+@media (max-width: 767.98px) {
+  .ds-call-enter { animation-name: ds-call-in-top; }
+}
 
 @media (prefers-reduced-motion: reduce) {
   .ds-call-frame { animation: none; background: var(--ds-call-accent); }
+  .ds-call-frame::before { animation: none; opacity: 0.4; }
+  .ds-call-wiggle { animation: none; }
+  .ds-call-enter { animation: none; }
 }
 
 /* Motion here is decorative — the deck reads identically without it. */

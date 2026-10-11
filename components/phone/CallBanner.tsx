@@ -1,7 +1,8 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Bell, BellOff, CalendarDays, CalendarPlus, Loader2, Mic, MicOff, NotebookPen, Phone, PhoneCall, PhoneIncoming, PhoneOff, PhoneOutgoing, Wand2, X } from 'lucide-react';
-import { Avatar, StatusPill, dsButton } from '../ds';
+import { Bell, BellOff, CalendarDays, CalendarPlus, Loader2, Mic, MicOff, NotebookPen, PhoneCall, PhoneIncoming, PhoneOff, PhoneOutgoing, Wand2, X } from 'lucide-react';
+import { StatusPill, dsButton } from '../ds';
+import { PulseDot } from '../reservationState';
 import { useSoftphone, answer, decline, hangUp, toggleMute, type SoftphoneCall } from '../../services/softphone';
 import { socketClient } from '../../services/socketClient';
 import { voiceCallsApiService, type LiveCall, type LiveCallEnded, type LiveCallStage } from '../../services/voiceCallsApiService';
@@ -18,9 +19,13 @@ import { chime } from '../../utils/chime';
    destra appena sotto la testata, per non coprirne ricerca, campanella e
    «+» (i toast stanno in basso); su telefono in alto, a tutta larghezza.
 
-   Finché la chiamata è viva il bordo gira: .ds-ai-frame mentre parla Sofia
-   («la macchina sta lavorando, guarda»), .ds-call-frame quando squilla o
-   parla il locale. Si ferma quando la chiamata finisce, e la card mostra
+   Finché la chiamata è viva il bordo gira (.ds-call-frame, in index.css il
+   perché di spessore, alone e velocità): oro mentre squilla, verde col
+   locale, viola con Sofia. Le card stanno sopra il modulo di prenotazione
+   (z-50), così durante la chiamata si prenota vedendo chi è; mentre squilla
+   salgono anche sopra pannelli e conferme (z-60: notifiche, scelta cliente,
+   Reception), perché chi sta facendo altro deve vedere chi chiama. Presa la
+   chiamata tornano sotto. Si ferma quando la chiamata finisce, e la card mostra
    l'esito per qualche secondo prima di sparire. Una chiamata presa dal locale lascia scrivere
    una nota: mentre la si scrive la card resta, e la nota torna nella card
    la volta dopo che lo stesso numero chiama. */
@@ -57,19 +62,49 @@ const displayPhone = (e164: string): string => {
 
 // Il bordo della card: Sofia al telefono, squilla, si parla col locale,
 // oppure finita (fermo). Il giro è l'`animation` della classe del telaio:
-// l'entrata (tileIn) sta sull'involucro esterno, perché uno style inline
-// sullo stesso elemento la sostituiva e il bordo restava fermo.
+// l'entrata (.ds-call-enter) sta sull'involucro esterno, perché due
+// `animation` sullo stesso elemento si sostituiscono e il bordo restava fermo.
 type Frame = 'ai' | 'ring' | 'call' | null;
 const frameClass = (f: Frame): string =>
-  f === 'ai' ? 'ds-ai-frame'
+  f === 'ai' ? 'ds-call-frame ds-call-frame--ai'
   : f === 'ring' ? 'ds-call-frame ds-call-frame--ring'
   : f === 'call' ? 'ds-call-frame'
-  : 'rounded-[var(--ds-radius)] border border-[var(--ds-border)]';
-// Raggio interno = raggio della cornice − il suo spessore (1,5 px Sofia, 2 px telefono).
+  : 'rounded-[var(--ds-radius)] border border-[var(--ds-border)] shadow-[var(--ds-shadow-raised)]';
+// Raggio interno = raggio della cornice − il suo spessore (3 px).
 const innerRadius = (f: Frame): string =>
-  f === 'ai' ? 'rounded-[calc(var(--ds-radius)-1.5px)]'
-  : f ? 'rounded-[calc(var(--ds-radius)-2px)]'
-  : 'rounded-[var(--ds-radius)]';
+  f ? 'rounded-[calc(var(--ds-radius)-3px)]' : 'rounded-[var(--ds-radius)]';
+// Disco, riga di stato e pallino nel colore dello stato, come il bordo: da
+// lontano si legge il colore prima delle parole. Classi scritte per intero
+// (Tailwind le estrae dal sorgente).
+const discTone = (f: Frame): string =>
+  f === 'ring' ? 'bg-[var(--ds-pending-tint)] text-[var(--ds-pending-text)]'
+  : f === 'call' ? 'bg-[var(--ds-seated-tint)] text-[var(--ds-seated-text)]'
+  : f === 'ai' ? 'bg-[var(--ds-arriving-tint)] text-[var(--ds-arriving-text)]'
+  : 'bg-[var(--ds-surface-row)] text-[var(--ds-text-secondary)]';
+const headTone = (f: Frame): string =>
+  f === 'ring' ? 'text-[var(--ds-pending-text)]'
+  : f === 'call' ? 'text-[var(--ds-seated-text)]'
+  : f === 'ai' ? 'text-[var(--ds-arriving-text)]'
+  : 'text-[var(--ds-text-secondary)]';
+const dotTone = (f: Frame): string =>
+  f === 'ring' ? 'bg-[var(--ds-pending-solid)]'
+  : f === 'call' ? 'bg-[var(--ds-seated-solid)]'
+  : 'bg-[var(--ds-arriving-solid)]';
+
+// La cornetta e non le iniziali: è una chiamata, non una scheda. Mentre
+// squilla vibra.
+const CallDisc: React.FC<{ icon: React.ComponentType<{ className?: string }>; frame: Frame; critical?: boolean }> = ({ icon: Icon, frame, critical }) => (
+  <div className={`flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-full md:h-12 md:w-12 ${critical ? 'bg-[var(--ds-critical-tint)] text-[var(--ds-critical-text)]' : discTone(frame)}`}>
+    <Icon className={`h-5 w-5 ${frame === 'ring' ? 'ds-call-wiggle' : ''}`} aria-hidden />
+  </div>
+);
+
+const StatusLine: React.FC<{ frame: Frame; children: React.ReactNode }> = ({ frame, children }) => (
+  <p className={`flex items-center gap-2 text-[13px] font-semibold ${headTone(frame)}`}>
+    {frame && <PulseDot dotClass={dotTone(frame)} pulse sizeClass="h-2 w-2" />}
+    <span className="truncate">{children}</span>
+  </p>
+);
 
 const readMuted = (): boolean => {
   try { return localStorage.getItem(MUTE_KEY) === '1'; } catch { return false; }
@@ -232,10 +267,17 @@ export const CallBanner: React.FC<{
   const shortDate = (iso: string): string =>
     new Intl.DateTimeFormat(i18n.language, { timeZone: 'Europe/Rome', day: 'numeric', month: 'short' }).format(new Date(iso));
 
-  // Le più recenti in alto; oltre tre si vedono le ultime.
-  const visible = calls.slice(-MAX_VISIBLE).reverse();
-
   const isHere = (sc: SoftphoneCall | null, id: string): boolean => !!sc && sc.parentCallSid === id;
+
+  // In alto quella che squilla (aspetta qualcuno), poi quelle in corso, poi
+  // gli esiti; a parità, le più recenti. Oltre tre si vedono le prime.
+  const rank = (c: BannerCall): number =>
+    c.ended ? 2 : (c.stage === 'ringing' || isHere(soft.incoming, c.id)) ? 0 : 1;
+  const visible = calls
+    .map((c, i) => ({ c, i }))
+    .sort((a, b) => rank(a.c) - rank(b.c) || b.i - a.i)
+    .slice(0, MAX_VISIBLE)
+    .map(x => x.c);
   // Una chiamata del telefono di questo browser senza la sua card: in uscita
   // («Richiama») o arrivata prima dell'evento del banner.
   const orphan = [soft.incoming, soft.active].find(sc => sc && !(sc.parentCallSid && calls.some(c => c.id === sc.parentCallSid))) ?? null;
@@ -278,19 +320,21 @@ export const CallBanner: React.FC<{
     </div>
   );
 
+  const ringing = !!soft.incoming || calls.some(c => !c.ended && c.stage === 'ringing');
+
   return (
-    <div className="pointer-events-none fixed inset-x-2 top-2 z-[58] flex flex-col gap-2 md:inset-x-auto md:right-4 md:top-[88px] md:w-[380px]">
+    <div className={`pointer-events-none fixed inset-x-2 top-2 flex flex-col gap-2 md:inset-x-auto md:gap-3 md:right-4 md:top-[88px] md:w-[420px] ${ringing ? 'z-[65]' : 'z-[58]'}`}>
       {orphan && (
-        <div role="status" aria-live="polite" className="pointer-events-auto" style={{ animation: 'tileIn 200ms ease-out both' }}>
-          <div className={`shadow-[var(--ds-shadow-raised)] ${frameClass(orphan === soft.incoming ? 'ring' : 'call')}`}>
-            <div className={`${innerRadius('call')} bg-[var(--ds-surface)] p-3`}>
+        <div role="status" aria-live="polite" className="pointer-events-auto ds-call-enter">
+          <div className={frameClass(orphan === soft.incoming ? 'ring' : 'call')}>
+            <div className={`${innerRadius('call')} bg-[var(--ds-surface)] p-3 md:p-4`}>
               <div className="flex items-start gap-3">
-                <Avatar icon={orphan.direction === 'out' ? PhoneOutgoing : PhoneIncoming} tone="info" />
+                <CallDisc icon={orphan.direction === 'out' ? PhoneOutgoing : PhoneIncoming} frame={orphan === soft.incoming ? 'ring' : 'call'} />
                 <div className="min-w-0 flex-1">
-                  <p className="text-[12px] font-medium text-[var(--ds-arriving-text)]">
+                  <StatusLine frame={orphan === soft.incoming ? 'ring' : 'call'}>
                     {orphan.direction === 'out' ? t('phone.outgoing') : t('phone.incomingHere')}
-                  </p>
-                  <p className="truncate text-[16px] font-semibold tabular-nums text-[var(--ds-text-primary)]">
+                  </StatusLine>
+                  <p className="mt-0.5 truncate text-[18px] font-semibold leading-tight md:text-[20px] tabular-nums text-[var(--ds-text-primary)]">
                     {orphan.number ? displayPhone(orphan.number) : t('phone.hiddenNumber')}
                   </p>
                 </div>
@@ -323,38 +367,33 @@ export const CallBanner: React.FC<{
         // La bacchetta solo dove c'è Sofia di mezzo; il resto è telefono.
         const HeadIcon = ended
           ? (ended.outcome === 'answered' ? PhoneCall : ended.outcome === 'missed' ? PhoneIncoming : Wand2)
-          : stage === 'ringing' ? PhoneIncoming : stage === 'staff' ? PhoneCall : Wand2;
+          : frame === 'ring' ? PhoneIncoming : frame === 'call' ? PhoneCall : Wand2;
         return (
           <div
             key={call.id}
             role="status"
             aria-live="polite"
-            className="pointer-events-auto"
-            style={{ animation: 'tileIn 200ms ease-out both' }}
+            className="pointer-events-auto ds-call-enter"
           >
-            <div className={`shadow-[var(--ds-shadow-raised)] ${frameClass(frame)}`}>
-              <div className={`${innerRadius(frame)} bg-[var(--ds-surface)] p-3`}>
+            <div className={frameClass(frame)}>
+              <div className={`${innerRadius(frame)} bg-[var(--ds-surface)] p-3 md:p-4`}>
                 <div className="flex items-start gap-3">
-                  {/* La cornetta e non le iniziali: è una chiamata, non una scheda. */}
-                  <Avatar icon={Phone} tone={customer?.is_blacklisted ? 'critical' : 'info'} />
+                  <CallDisc icon={HeadIcon} frame={frame} critical={customer?.is_blacklisted} />
                   <div className="min-w-0 flex-1">
-                    <p className="flex items-center gap-1.5 text-[12px] font-medium text-[var(--ds-arriving-text)]">
-                      <HeadIcon className="h-3.5 w-3.5 flex-shrink-0" aria-hidden />
-                      <span className="truncate">{headline}</span>
-                    </p>
+                    <StatusLine frame={frame}>{headline}</StatusLine>
                     {customer?.phone ? (
                       <button
                         type="button"
                         onClick={() => onOpenCustomer(customer.phone!)}
-                        className="block max-w-full truncate text-left text-[16px] font-semibold text-[var(--ds-text-primary)] hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] rounded-[var(--ds-radius-sm)]"
+                        className="mt-0.5 block max-w-full truncate text-left text-[18px] font-semibold leading-tight md:text-[20px] text-[var(--ds-text-primary)] hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] rounded-[var(--ds-radius-sm)]"
                       >
                         {title}
                       </button>
                     ) : (
-                      <p className="truncate text-[16px] font-semibold text-[var(--ds-text-primary)]">{title}</p>
+                      <p className="mt-0.5 truncate text-[18px] font-semibold leading-tight md:text-[20px] text-[var(--ds-text-primary)]">{title}</p>
                     )}
                     {name && phoneLabel && (
-                      <p className="truncate text-[13px] tabular-nums text-[var(--ds-text-secondary)]">{phoneLabel}</p>
+                      <p className="mt-0.5 truncate text-[14px] tabular-nums text-[var(--ds-text-secondary)]">{phoneLabel}</p>
                     )}
                   </div>
                   <button
@@ -376,7 +415,7 @@ export const CallBanner: React.FC<{
                   </button>
                 </div>
 
-                <div className="mt-2 flex flex-wrap gap-1.5">
+                <div className="mt-3 flex flex-wrap gap-1.5">
                   {customer?.is_blacklisted && <StatusPill tone="critical">{t('phone.blacklisted')}</StatusPill>}
                   {customer?.is_vip && <StatusPill tone="pending">{t('phone.vip')}</StatusPill>}
                   {card.no_shows > 0 && <StatusPill tone="critical">{t('phone.noShows', { count: card.no_shows })}</StatusPill>}
