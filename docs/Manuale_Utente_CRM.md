@@ -2,7 +2,7 @@
 
 **Gestione clienti, comunicazioni e relazioni**
 
-Versione 1.1 · Ottobre 2026
+Versione 1.2 · Ottobre 2026
 
 ---
 
@@ -20,9 +20,10 @@ Versione 1.1 · Ottobre 2026
 10. [Il modulo Conversazioni](#10-il-modulo-conversazioni)
 11. [Messaggi automatici e «La tua prenotazione»](#11-messaggi-automatici-e-la-tua-prenotazione)
 12. [Collegamento con Prenotazioni e Banchetti](#12-collegamento-con-prenotazioni-e-banchetti)
-13. [Flussi di lavoro consigliati](#13-flussi-di-lavoro-consigliati)
-14. [Domande frequenti (FAQ)](#14-domande-frequenti-faq)
-15. [Glossario](#15-glossario)
+13. [Chi ha fatto cosa: cronologia e log attività](#13-chi-ha-fatto-cosa-cronologia-e-log-attività)
+14. [Flussi di lavoro consigliati](#14-flussi-di-lavoro-consigliati)
+15. [Domande frequenti (FAQ)](#15-domande-frequenti-faq)
+16. [Glossario](#16-glossario)
 
 ---
 
@@ -44,6 +45,7 @@ Il CRM è l'insieme degli strumenti che permettono di **conoscere e gestire la c
 - **Conversazioni** — il registro delle chiamate gestite dall'agente vocale e dei messaggi inviati, con la possibilità di ricontattare, prendere nota e creare prenotazioni.
 - **Prenotazioni e Banchetti** — ogni prenotazione e ogni evento a banchetto è associato a un cliente, alimentando automaticamente il suo storico.
 - **Messaggi automatici** — conferma, promemoria e il link «La tua prenotazione», da cui l'ospite conferma, cambia o annulla da solo (vedi §11).
+- **Cronologia e log attività** — chi ha fatto cosa su una prenotazione o nel locale, e quando: chi l'ha presa, spostata, chi ha unito i tavoli (vedi §13).
 
 L'obiettivo del CRM è duplice: da un lato **velocizzare il lavoro in sala** (riconoscere subito un cliente abituale, il suo tavolo preferito, le sue allergie), dall'altro **supportare le decisioni commerciali** (identificare i clienti VIP, monitorare i no-show, non perdere occasioni di ricontatto).
 
@@ -72,6 +74,8 @@ La tabella seguente riassume l'accesso al CRM per ruolo:
 In pratica: la reception e i manager hanno il pieno controllo del CRM; i camerieri possono consultare le schede cliente (utile per allergie e preferenze) ma non modificarle; la cucina non accede alla rubrica.
 
 Il modulo **Conversazioni** richiede il permesso `voice_calls:view`, disponibile per Titolare, Direttore generale, Manager e Reception.
+
+La **cronologia della prenotazione** e il **log attività** richiedono il permesso `logs:view`, disponibile per Titolare, Direttore generale e Manager (vedi §13).
 
 > **Nota per l'amministratore.** I permessi si gestiscono dalla sezione **Utenti** e **Impostazioni → Amministrazione → Permessi ruoli**. Se un collaboratore non vede il menu "Clienti" o "Conversazioni", verificare il ruolo assegnato al suo account.
 
@@ -292,7 +296,39 @@ Questa integrazione fa sì che ogni interazione — una telefonata, una prenotaz
 
 ---
 
-## 13. Flussi di lavoro consigliati
+## 13. Chi ha fatto cosa: cronologia e log attività
+
+Quando in una prenotazione qualcosa è cambiato — il tavolo, l'orario, le persone, un'unione di tavoli — il CRM dice **chi è stato e quando**, senza dover chiedere in giro. Le due viste mostrano le stesse informazioni: la cronologia parte da una prenotazione, il log attività da tutto il locale.
+
+Entrambe sono riservate a **Titolare, Direttore generale e Manager** (permesso `logs:view`).
+
+### 13.1 La cronologia della prenotazione
+
+Si apre dalla prenotazione: **passo Cronologia**, il quarto dopo Dettagli, Pagamenti e Comunicazione. Racconta la prenotazione dalla prima operazione all'ultima, una riga per operazione, con l'ora e il nome di chi l'ha fatta:
+
+- **chi l'ha presa**, anche quando non è una persona dello staff: Sofia al telefono, l'agente WhatsApp, l'ospite dalla pagina «La tua prenotazione»;
+- **chi l'ha confermata, spostata o cambiata**, con il prima e il dopo: per esempio «Ora 20:30 → 21:00 · Persone 9 → 10 · Tavolo 24 → 26»;
+- **le unioni e divisioni dei suoi tavoli in quel turno**, anche quando sono state fatte dalla pianta e non dalla prenotazione: «Roberto Donato ha unito i tavoli 26 + 27 · Cena 11/10»;
+- chi ha accettato la **proposta di tavoli dell'AI**, e quali tavoli proponeva.
+
+Per **nome, telefono, email e note** la cronologia dice solo che sono stati cambiati, non il valore vecchio né quello nuovo: sono dati personali, e quando un cliente chiede la cancellazione non devono restare nei registri.
+
+La freccia a destra di ogni riga apre i **dati registrati** così come sono (account di chi ha agito, identificativi): servono soprattutto all'assistenza.
+
+### 13.2 Il log attività
+
+Da **Impostazioni → Amministrazione → Log attività**: tutte le operazioni del locale, dalla più recente, divise per giorno (Oggi, Ieri, poi le date).
+
+- **Periodo**: Tutto, Oggi, Ieri, 7 giorni oppure Date, per scegliere un intervallo.
+- **Filtri** per utente, per risorsa (prenotazione, tavolo, piatto, impostazioni…) e per azione. Sul telefono stanno dietro il pulsante Filtri, accanto alla ricerca.
+- **Ricerca**: scrivendo il nome di un cliente escono le sue prenotazioni **e anche le unioni dei tavoli dove siede** in quel giorno e turno. Si possono cercare anche il nome di chi ha agito o di un piatto.
+- Toccando il **nome del cliente** in una riga si apre la cronologia della sua prenotazione (§13.1); il pulsante **Registro** in alto riporta alla lista.
+
+> **Da quando vale.** Il prima e il dopo delle modifiche, e l'elenco dei tavoli che erano uniti quando si fa una divisione, si registrano dall'11 ottobre 2026. Le operazioni precedenti compaiono comunque, ma dicono lo stato salvato («ha salvato la prenotazione») invece di cosa è cambiato.
+
+---
+
+## 14. Flussi di lavoro consigliati
 
 **Accoglienza di un cliente abituale (reception/sala).**
 Cercare il cliente nella rubrica → aprire la scheda → verificare tavolo preferito, allergie e note → riconoscere l'eventuale stato VIP → procedere con l'accoglienza personalizzata.
@@ -318,9 +354,12 @@ Aprire la prenotazione → passo Comunicazione → «Copia link ospite» → inc
 **Ospite che annulla dal link con una caparra pagata (reception).**
 Arriva l'avviso «Annullata dall'ospite». Se dice «caparra da rimborsare», aprire la prenotazione → passo Pagamenti → rimborso. Sotto le 24 ore dall'arrivo la caparra resta al locale e non c'è niente da fare.
 
+**Capire chi ha spostato una prenotazione o unito i tavoli (titolare/manager).**
+Aprire la prenotazione → passo Cronologia: le righe sono in ordine di tempo, con nome e ora. In alternativa: Impostazioni → Amministrazione → Log attività → periodo «Oggi» → cercare il nome del cliente → toccare il nome per la sua cronologia.
+
 ---
 
-## 14. Domande frequenti (FAQ)
+## 15. Domande frequenti (FAQ)
 
 **Perché non riesco a modificare una scheda cliente?**
 Probabilmente il tuo ruolo ha solo il permesso di consultazione (`customers:view`). La modifica richiede `customers:full`, disponibile per Reception, Manager, Direttore generale e Titolare.
@@ -352,9 +391,18 @@ La pagina mostra solo gli orari dove un tavolo si trova da solo. Dove servirebbe
 **Non vedo la spesa nella scheda del cliente.**
 La striscia della spesa compare solo quando il cliente ha almeno un conto chiuso.
 
+**Non vedo il passo Cronologia nella prenotazione.**
+È riservato a Titolare, Direttore generale e Manager (permesso `logs:view`). Su una prenotazione nuova, non ancora salvata, il passo è grigio: la cronologia comincia con il salvataggio.
+
+**Nella cronologia c'è un'unione di tavoli che non riguarda il mio cliente.**
+La cronologia mostra le unioni e divisioni di tutti i tavoli su cui la prenotazione è stata in quel turno. Se dopo uno spostamento qualcuno ha unito il vecchio tavolo per un altro gruppo, compare anche quella: guarda l'ora e i tavoli della riga.
+
+**Perché una modifica dice «ha salvato la prenotazione» e non cosa è cambiato?**
+È un'operazione registrata prima dell'11 ottobre 2026, quando il prima e il dopo non si salvavano ancora (vedi §13.2).
+
 ---
 
-## 15. Glossario
+## 16. Glossario
 
 **CRM** — Customer Relationship Management: l'insieme degli strumenti per gestire dati e relazioni con i clienti.
 
@@ -380,6 +428,10 @@ La striscia della spesa compare solo quando il cliente ha almeno un conto chiuso
 
 **Caparra** — somma pagata online in anticipo per garantire il tavolo; si scala dal conto e, se l'ospite annulla per tempo, si rimborsa.
 
+**Cronologia** — il passo della prenotazione che elenca chi ha fatto cosa, dalla creazione all'ultima modifica, comprese le unioni dei suoi tavoli.
+
+**Log attività** — il registro di tutte le operazioni del locale, con nome di chi ha agito, ora e cosa è cambiato.
+
 ---
 
-*Documento generato per RistoManager AI. Le funzionalità descritte fanno riferimento ai moduli Clienti, Conversazioni, ai messaggi automatici all'ospite e ai relativi collegamenti con Prenotazioni e Banchetti.*
+*Documento generato per RistoManager AI. Le funzionalità descritte fanno riferimento ai moduli Clienti, Conversazioni, ai messaggi automatici all'ospite, alla cronologia delle prenotazioni e al log attività, e ai relativi collegamenti con Prenotazioni e Banchetti.*
