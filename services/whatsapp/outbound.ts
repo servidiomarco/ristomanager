@@ -14,6 +14,8 @@ import { statusCallbackUrl } from './callbacks.js';
 import { twilioSendMessage } from './providers/twilio.js';
 import { metaSendMessage } from './providers/meta.js';
 import { isVonageConfigured, sendVonageWhatsApp } from './providers/vonage.js';
+import { buildMetaTemplateMessage, isMetaTemplateSendable, parseMetaTemplateRef, type MetaTemplateMessage } from './templates/meta.js';
+import { metaSpec } from './templates/metaCatalog.js';
 import type { OutboundConfirmationResult, WhatsAppTemplateOpts } from './types.js';
 
 // Una riga in outbound_messages per ogni invio, così l'operatore vede tutta
@@ -91,13 +93,23 @@ export async function sendWhatsAppText(
 
     const sender = await getSender(tenantId);
     if (sender?.provider === 'meta') {
-        // L'API Cloud di Meta (Fase 12a). I template su Meta arrivano con la
-        // Fase 12b: fino ad allora un template non parte da qui, e chi chiama
-        // ripiega come quando il template non è impostato.
-        if (template) throw new Error('Template WhatsApp non ancora disponibili sul numero Meta del locale');
+        // L'API Cloud di Meta. Il template arriva come riferimento
+        // `meta:<chiave>:<lingua>` (templates/registry.ts) con le variabili
+        // numerate come per Twilio: qui diventa il template del locale. Uno
+        // che non è (più) approvato non parte, e chi chiama ripiega come
+        // quando il template non è impostato.
+        let metaTemplate: MetaTemplateMessage | undefined;
+        if (template) {
+            const ref = parseMetaTemplateRef(template.contentSid);
+            const spec = ref ? metaSpec(ref.key, ref.language) : undefined;
+            if (!ref || !spec || !isMetaTemplateSendable(tenantId, ref.key, ref.language)) {
+                throw new Error('Template WhatsApp non approvato sul numero Meta del locale');
+            }
+            metaTemplate = buildMetaTemplateMessage(spec, ref.language, template.contentVariables);
+        }
         const toE164 = normalizePhoneE164(String(to), (await getTenantLocale(tenantId)).dialCode);
-        console.log(`[Meta] Sending message to ${toE164} from ${sender.from}`);
-        const outcome = await metaSendMessage(sender, { to: toE164, body: text, mediaUrls });
+        console.log(`[Meta] Sending message to ${toE164} from ${sender.from}${metaTemplate ? ` (template ${metaTemplate.name})` : ''}`);
+        const outcome = await metaSendMessage(sender, { to: toE164, body: text, mediaUrls, template: metaTemplate });
         if (!outcome.ok) {
             const message = `Meta API error: ${outcome.error}`;
             console.error('[Meta] ❌ Error sending message:', outcome.error);

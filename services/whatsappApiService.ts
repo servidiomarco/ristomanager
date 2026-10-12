@@ -105,8 +105,19 @@ export const connectMetaWhatsApp = (body: { phone_number_id: string; waba_id: st
 export const disconnectMetaWhatsApp = (): Promise<{ ok: true; removed: boolean }> =>
   apiRequest(`${API_URL}/whatsapp/meta/connect`, { method: 'DELETE', headers: getHeaders() });
 
-export const getWhatsAppTemplates = (): Promise<{ templates: WhatsAppTemplateRow[] }> =>
+export interface WhatsAppTemplatesResponse {
+  templates: WhatsAppTemplateRow[];
+  /** Chi manda: 'meta' quando i template stanno nell'account del locale.
+   *  Assente da un server vecchio. */
+  provider?: 'twilio' | 'meta' | null;
+}
+
+export const getWhatsAppTemplates = (): Promise<WhatsAppTemplatesResponse> =>
   apiRequest(`${API_URL}/whatsapp/templates`, { headers: getHeaders() });
+
+/** Manda a Meta i template che mancano sul numero del locale. */
+export const provisionWhatsAppTemplates = (): Promise<WhatsAppTemplatesResponse & { created: number; existing: number; failed: number }> =>
+  apiRequest(`${API_URL}/whatsapp/templates/provision`, { method: 'POST', headers: getHeaders() });
 
 export const getWhatsAppUsage = (): Promise<WhatsAppUsage> =>
   apiRequest(`${API_URL}/whatsapp/usage`, { headers: getHeaders() });

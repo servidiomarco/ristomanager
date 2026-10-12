@@ -9,7 +9,8 @@ import { processInbound } from './inbound.js';
 import { isValidTwilioSignature, parseTwilioInbound } from './providers/twilio.js';
 import { queryWithRetry, runAsPlatform, runWithTenantContext } from '../../db.js';
 import { whatsappDeps } from './deps.js';
-import { isValidMetaSignature, parseMetaWebhook, type MetaEcho, type MetaStatus } from './providers/meta.js';
+import { isValidMetaSignature, parseMetaTemplateUpdates, parseMetaWebhook, type MetaEcho, type MetaStatus } from './providers/meta.js';
+import { applyMetaTemplateUpdates } from './templates/provision.js';
 import { logOutboundMessage } from './outbound.js';
 
 /** Firma di un webhook dell'account Twilio principale. */
@@ -115,7 +116,8 @@ async function applyMetaEcho(tenantId: number, e: MetaEcho): Promise<void> {
     }
 }
 
-/** I webhook di Meta: messaggi, stati di consegna, eco della coesistenza. */
+/** I webhook di Meta: messaggi, stati di consegna, eco della coesistenza,
+ *  e lo stato dei template (questo per account WhatsApp, non per numero). */
 export async function handleMetaWebhook(req: express.Request, res: express.Response): Promise<void> {
     const secret = metaAppSecret();
     if (!secret) {
@@ -145,5 +147,10 @@ export async function handleMetaWebhook(req: express.Request, res: express.Respo
         } catch (err: any) {
             console.error('[Meta] webhook non lavorato:', err?.message || err);
         }
+    }
+    try {
+        await applyMetaTemplateUpdates(parseMetaTemplateUpdates(req.body));
+    } catch (err: any) {
+        console.error('[Meta] stato dei template non aggiornato:', err?.message || err);
     }
 }

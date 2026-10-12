@@ -6,8 +6,8 @@
 // incollata a mano su Railway dopo l'approvazione di Meta (vedi
 // scripts/create-whatsapp-template*.mjs). Il catalogo dà un nome a quelle
 // chiavi: la scheda «Template» delle Impostazioni lo mostra con lo stato di
-// ciascuno, e dalla Fase 12 è la lista che si fa approvare per ogni numero
-// collegato da un nuovo ristorante.
+// ciascuno. Per i numeri Meta dei locali (Fase 12b) i testi stanno in
+// metaCatalog.ts, e si fanno approvare nell'account di ciascuno.
 
 export type TemplateLanguage = 'it' | 'en';
 
@@ -40,14 +40,14 @@ export const TEMPLATE_CATALOG: readonly TemplateDef[] = [
     { key: 'BOOKING_REMINDER_QR', label: 'Promemoria con i tasti «Ci saremo», «Devo modificare», «Annulla»', category: 'UTILITY', group: 'prenotazioni', languages: ['it', 'en'] },
     { key: 'BOOKING_UPDATED', label: 'Prenotazione modificata', category: 'UTILITY', group: 'prenotazioni', languages: ['it', 'en'] },
     { key: 'BOOKING_DECLINED', label: 'Prenotazione non accettata', category: 'UTILITY', group: 'prenotazioni', languages: ['it', 'en'] },
-    { key: 'BOOKING_DEPOSIT_REQUEST', label: 'Richiesta di caparra (Revolut)', category: 'UTILITY', group: 'caparre', languages: ['it'] },
-    { key: 'BOOKING_DEPOSIT_REQUEST_SUMUP', label: 'Richiesta di caparra (SumUp)', category: 'UTILITY', group: 'caparre', languages: ['it'] },
-    { key: 'BOOKING_DEPOSIT_CONFIRMED', label: 'Caparra ricevuta', category: 'UTILITY', group: 'caparre', languages: ['it'] },
-    { key: 'TABLE_BILL_LINK_CTA', label: 'Conto al tavolo, col pulsante', category: 'UTILITY', group: 'conto', languages: ['it'] },
-    { key: 'TABLE_BILL_LINK', label: 'Conto al tavolo, con la scheda', category: 'UTILITY', group: 'conto', languages: ['it'] },
-    { key: 'TAKEAWAY_BILL_LINK_CTA', label: 'Conto dell\'asporto', category: 'UTILITY', group: 'conto', languages: ['it'] },
+    { key: 'BOOKING_DEPOSIT_REQUEST', label: 'Richiesta di caparra (Revolut)', category: 'UTILITY', group: 'caparre', languages: ['it', 'en'] },
+    { key: 'BOOKING_DEPOSIT_REQUEST_SUMUP', label: 'Richiesta di caparra (SumUp)', category: 'UTILITY', group: 'caparre', languages: ['it', 'en'] },
+    { key: 'BOOKING_DEPOSIT_CONFIRMED', label: 'Caparra ricevuta', category: 'UTILITY', group: 'caparre', languages: ['it', 'en'] },
+    { key: 'TABLE_BILL_LINK_CTA', label: 'Conto al tavolo, col pulsante', category: 'UTILITY', group: 'conto', languages: ['it', 'en'] },
+    { key: 'TABLE_BILL_LINK', label: 'Conto al tavolo, con la scheda', category: 'UTILITY', group: 'conto', languages: ['it', 'en'] },
+    { key: 'TAKEAWAY_BILL_LINK_CTA', label: 'Conto dell\'asporto', category: 'UTILITY', group: 'conto', languages: ['it', 'en'] },
     { key: 'REVIEW_REQUEST', label: 'Richiesta di recensione', category: 'UTILITY', group: 'recensioni', languages: ['it', 'en'] },
-    { key: 'BANQUET_QUOTE', label: 'Preventivo del banchetto', category: 'UTILITY', group: 'banchetti', languages: ['it'] },
+    { key: 'BANQUET_QUOTE', label: 'Preventivo del banchetto', category: 'UTILITY', group: 'banchetti', languages: ['it', 'en'] },
     // scripts/create-whatsapp-template-asporto-pronto.mjs; si usa con
     // «Avvisa quando l'ordine è pronto» acceso, fuori dalla finestra di 24 ore.
     { key: 'TAKEAWAY_READY', label: 'Ordine d\'asporto pronto', category: 'UTILITY', group: 'asporto', languages: ['it', 'en'] },

@@ -51,6 +51,9 @@
     "rejected": "rejected",
     "unknown": "set",
     "hint": "Without an active template the message goes out by SMS or email.",
+    "hintMeta": "Meta approves them, usually within minutes. Without an active template the message goes by email.",
+    "send": "Send the missing ones to Meta",
+    "sendError": "Meta did not accept the templates",
     "group": {
       "prenotazioni": "Bookings",
       "caparre": "Deposits",
@@ -76,7 +79,10 @@
       "TABLE_BILL_LINK": "Table bill, with card",
       "TAKEAWAY_BILL_LINK_CTA": "Takeaway bill",
       "REVIEW_REQUEST": "Review request",
-      "BANQUET_QUOTE": "Banquet quote"
+      "BANQUET_QUOTE": "Banquet quote",
+      "BOOKING_REMINDER_QR": "Reminder with buttons",
+      "TAKEAWAY_READY": "Takeaway order ready",
+      "CAMPAIGN": "Campaign"
     }
   },
   "usage": {
