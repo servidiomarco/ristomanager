@@ -960,6 +960,7 @@ La **ricerca** sta accanto alle schede (sopra, sul telefono) e resta visibile me
 
 | Data | Sezione | Modifica |
 |---|---|---|
+| 2026-10-12 | Prenotazione online | **Logo pulito sulla pagina di prenotazione.** Sulla testata scura compare la versione chiara del logo, senza il riquadro bianco, ed è quasi il doppio più grande. La scritta «Scegli una data» ora è tradotta anche per chi apre la pagina in inglese. |
 | 2026-10-11 | Prenotazione online | **Mai più un vicolo cieco sulla pagina di prenotazione.** Con «Solo prenotazioni confermabili subito» gli orari tengono conto di quante persone si è, un turno pieno dice «al completo» e, se il giorno non ha posto, la pagina propone gli orari liberi più vicini da toccare, più i pulsanti WhatsApp e Chiama. La pagina si può anche aprire da un link già compilato con data, persone e orario. |
 | 2026-10-11 | Prenotazione online | **Fin dove si prenota online.** In Impostazioni › Prenotazioni › Prenotazioni web si sceglie se dal sito si prenota fino a 7 giorni, fino a 14 giorni o senza limiti. Con un limite il calendario si ferma lì e chi chiede una data più avanti viene invitato a chiamare; lo stesso limite vale per chi sposta la prenotazione dal link. |
 | 2026-10-11 | Asporto, Impostazioni | Il template WhatsApp «Ordine d'asporto pronto» ha un testo nuovo che finisce con «A presto!» («Thank you!» in inglese): Meta rifiutava la prima versione perché finiva col nome del locale. |
