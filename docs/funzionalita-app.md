@@ -960,6 +960,7 @@ La **ricerca** sta accanto alle schede (sopra, sul telefono) e resta visibile me
 
 | Data | Sezione | Modifica |
 |---|---|---|
+| 2026-10-12 | Messaggi: WhatsApp e SMS, Impostazioni | Sul numero Meta del locale il promemoria con i tasti in italiano ha un testo un po' più lungo, che Meta accetta: la prima versione era troppo corta per le sue regole. Se nella scheda Template risulta «da inviare a Meta», premi «Manda a Meta quelli mancanti». |
 | 2026-10-12 | Messaggi: WhatsApp e SMS, Impostazioni | **I messaggi automatici partono anche dal tuo numero su Meta.** Quando colleghi il numero del locale, Sympotia prepara conferme, promemoria (anche coi tasti «Ci saremo / Devo modificare / Annulla»), richieste di caparra, conto, preventivo, «ordine pronto» e campagne, e li manda in approvazione a Meta. Quelli attivi partono anche a chi non ti ha scritto nelle ultime 24 ore; a che punto sono lo vedi in Impostazioni › WhatsApp › Template. |
 | 2026-10-12 | Prenotazione online | **Testata più bassa sulla pagina di prenotazione.** Logo, mappa e lingua stanno sulla stessa riga: al posto dell'indirizzo scritto per esteso c'è l'icona della mappa, che apre Google Maps. Il modulo parte più in alto, anche sul telefono. |
 | 2026-10-12 | Prenotazione online | **Logo pulito sulla pagina di prenotazione.** Sulla testata scura compare la versione chiara del logo, senza il riquadro bianco, ed è quasi il doppio più grande. La scritta «Scegli una data» ora è tradotta anche per chi apre la pagina in inglese. |

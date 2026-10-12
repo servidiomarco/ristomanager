@@ -139,7 +139,9 @@ export const META_TEMPLATES: Readonly<Record<string, Partial<Record<TemplateLang
     BOOKING_REMINDER_QR: {
         it: {
             name: 'sympotia_booking_reminder_qr_v1',
-            body: 'Ciao {{1}}! Ti aspettiamo il {{2}} alle {{3}}: tavolo per {{4}} da {{5}}. Ci sarai?',
+            // Più lungo del testo Twilio del Frantoio: Meta ha rifiutato la
+            // versione corta («troppe variabili per la sua lunghezza», 12/10).
+            body: 'Ciao {{1}}! Ti aspettiamo il {{2}} alle {{3}}: tavolo per {{4}} da {{5}}. Ci sarai? Rispondi con uno dei tasti qui sotto, così teniamo pronto il tuo tavolo.',
             bodyVars: ['1', '3', '4', '2', '5'],
             examples: ['Mario', '12/10/2026', '20:30', '4 persone', 'Trattoria da Gino'],
             buttons: [
