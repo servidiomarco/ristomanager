@@ -133,7 +133,7 @@ La sezione centrale del CRM: elenco, mappa tavoli e scheda prenotazione in un'un
 
 ## Prenotazione online (pagina pubblica /prenota)
 
-Pagina di prenotazione self-service, leggerissima (un solo file statico, si apre all'istante anche su reti lente), personalizzata col **branding del ristorante** (nome, tagline, logo, colore, indirizzo con link Google Maps, telefono cliccabile). Bilingue **italiano/inglese** con cambio lingua istantaneo. Ottimizzata SEO (titolo col nome del locale, Open Graph, dati strutturati Restaurant).
+Pagina di prenotazione self-service, leggerissima (un solo file statico, si apre all'istante anche su reti lente), personalizzata col **branding del ristorante** (nome, tagline, logo, colore, icona della mappa che apre Google Maps, telefono cliccabile). Bilingue **italiano/inglese** con cambio lingua istantaneo. Ottimizzata SEO (titolo col nome del locale, Open Graph, dati strutturati Restaurant).
 
 **Percorso del cliente (2 passi)**
 1. **Tavolo** — coperti (con "di cui bambini": prepariamo seggiolone e mezze porzioni), data da striscia settimanale o calendario mensile con **semaforo di disponibilità** (libero / quasi pieno / chiuso, col motivo di chiusura), scelta della **sala preferita**, turno Pranzo/Cena e slot orario.
@@ -960,6 +960,7 @@ La **ricerca** sta accanto alle schede (sopra, sul telefono) e resta visibile me
 
 | Data | Sezione | Modifica |
 |---|---|---|
+| 2026-10-12 | Prenotazione online | **Testata più bassa sulla pagina di prenotazione.** Logo, mappa e lingua stanno sulla stessa riga: al posto dell'indirizzo scritto per esteso c'è l'icona della mappa, che apre Google Maps. Il modulo parte più in alto, anche sul telefono. |
 | 2026-10-12 | Prenotazione online | **Logo pulito sulla pagina di prenotazione.** Sulla testata scura compare la versione chiara del logo, senza il riquadro bianco, ed è quasi il doppio più grande. La scritta «Scegli una data» ora è tradotta anche per chi apre la pagina in inglese. |
 | 2026-10-11 | Prenotazione online | **Mai più un vicolo cieco sulla pagina di prenotazione.** Con «Solo prenotazioni confermabili subito» gli orari tengono conto di quante persone si è, un turno pieno dice «al completo» e, se il giorno non ha posto, la pagina propone gli orari liberi più vicini da toccare, più i pulsanti WhatsApp e Chiama. La pagina si può anche aprire da un link già compilato con data, persone e orario. |
 | 2026-10-11 | Prenotazione online | **Fin dove si prenota online.** In Impostazioni › Prenotazioni › Prenotazioni web si sceglie se dal sito si prenota fino a 7 giorni, fino a 14 giorni o senza limiti. Con un limite il calendario si ferma lì e chi chiede una data più avanti viene invitato a chiamare; lo stesso limite vale per chi sposta la prenotazione dal link. |

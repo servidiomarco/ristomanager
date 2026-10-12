@@ -148,7 +148,13 @@ button:disabled { cursor: not-allowed; }
     font-size: 13px; font-weight: 400; letter-spacing: 0.06em;
     color: var(--ds-public-header-fg-muted);
 }
-.header__links { display: flex; gap: 8px; flex-wrap: wrap; }
+.header__actions {
+    display: flex; align-items: center; justify-content: flex-end;
+    gap: 8px; flex-wrap: wrap; margin-left: auto;
+}
+/* Le pillole scorrono nella stessa fila del selettore lingua: se non ci
+   stanno vanno a capo una per una, non tutto il gruppo dei contatti. */
+.header__links { display: contents; }
 .header__pill {
     display: inline-flex; align-items: center; gap: 7px;
     min-height: 36px; padding: 0 14px;
@@ -161,6 +167,9 @@ button:disabled { cursor: not-allowed; }
 }
 .header__pill:hover { background: var(--ds-public-header-line); }
 .header__pill svg { width: 15px; height: 15px; flex-shrink: 0; }
+/* Solo icona (la mappa): tondo alto quanto il selettore lingua. */
+.header__pill--icon { width: 36px; padding: 0; justify-content: center; }
+.header__pill--icon svg { width: 17px; height: 17px; }
 /* Card #32 — selettore lingua: solo la scelta, nessuna traduzione. */
 .lang-toggle {
     display: inline-flex; gap: 2px; padding: 2px;
@@ -690,11 +699,15 @@ a { color: var(--ds-pending-text); }
                     <span class="header__tagline" id="brandTagline" hidden></span>
                 </span>
             </a>
-            <nav class="header__links" id="headerLinks"></nav>
-            <!-- Card #33 — selettore lingua: cambia davvero il testo della pagina. -->
-            <div class="lang-toggle" id="langToggle" role="group" aria-label="Lingua" data-i18n-attr="aria-label:header.langGroupAria">
-                <button type="button" class="lang-toggle__btn" data-lang="it">IT</button>
-                <button type="button" class="lang-toggle__btn" data-lang="en">EN</button>
+            <!-- Contatti e lingua in un solo gruppo: sul telefono stanno sulla
+                 riga del logo invece di impilarsi sotto. -->
+            <div class="header__actions">
+                <nav class="header__links" id="headerLinks"></nav>
+                <!-- Card #33 — selettore lingua: cambia davvero il testo della pagina. -->
+                <div class="lang-toggle" id="langToggle" role="group" aria-label="Lingua" data-i18n-attr="aria-label:header.langGroupAria">
+                    <button type="button" class="lang-toggle__btn" data-lang="it">IT</button>
+                    <button type="button" class="lang-toggle__btn" data-lang="en">EN</button>
+                </div>
             </div>
         </div>
         <h1 class="header__title" id="pageTitle" data-i18n="header.title">Prenota un tavolo</h1>
@@ -1203,16 +1216,21 @@ a { color: var(--ds-pending-text); }
     }
 
     // Pillole di contatto: si costruiscono da quello che il server ha davvero.
-    // Indirizzo e link al menù non esistono ancora in `branding` — quando
-    // arriveranno bastera aggiungerli qui.
+    // Con iconOnly l'etichetta resta per screen reader e tooltip.
     const linksHost = $('headerLinks');
-    const addPill = (href, label, path, external) => {
+    const addPill = (href, label, path, external, iconOnly) => {
         const a = document.createElement('a');
         a.className = 'header__pill';
         a.href = href;
         if (external) { a.target = '_blank'; a.rel = 'noopener'; }
         a.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' + path + '</svg>';
-        a.appendChild(document.createTextNode(label));
+        if (iconOnly) {
+            a.classList.add('header__pill--icon');
+            a.setAttribute('aria-label', label);
+            a.title = label;
+        } else {
+            a.appendChild(document.createTextNode(label));
+        }
         linksHost.appendChild(a);
     };
     if (contact?.voice?.phone) {
@@ -1225,11 +1243,11 @@ a { color: var(--ds-pending-text); }
         addPill(contact.whatsapp.url, 'WhatsApp',
             '<path d="M21 11.5a8.4 8.4 0 01-12.5 7.4L3 21l2.1-5.4A8.5 8.5 0 1121 11.5z"/>', true);
     }
-    // "Dove siamo" quando l'indirizzo non è ancora scritto in Impostazioni:
-    // il link alla mappa è la cosa che serve davvero, l'etichetta può aspettare.
+    // Mappa: solo l'icona, l'indirizzo per esteso allungava la testata di una
+    // riga. L'indirizzo (o "Dove siamo") resta come etichetta accessibile.
     if (branding.maps_url) {
         addPill(branding.maps_url, branding.address || t('rooms.whereFallback'),
-            '<path d="M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 1116 0z"/><circle cx="12" cy="10" r="3"/>', true);
+            '<path d="M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 1116 0z"/><circle cx="12" cy="10" r="3"/>', true, true);
     }
 
     // ---- Politica caparra ---------------------------------------------------
