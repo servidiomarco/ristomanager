@@ -36,3 +36,4 @@ export {
 } from './campaigns/index.js';
 export { handleMetaWebhook, handleMetaWebhookVerify } from './webhooks.js';
 export { invalidateSenderCache, metaGraphBase } from './config.js';
+export { startMetaTemplateCache } from './templates/meta.js';

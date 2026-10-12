@@ -51,6 +51,9 @@
     "rejected": "rifiutato",
     "unknown": "impostato",
     "hint": "Senza un template attivo il messaggio parte via SMS o email.",
+    "hintMeta": "Li approva Meta, di solito in pochi minuti. Senza un template attivo il messaggio parte via email.",
+    "send": "Manda a Meta quelli mancanti",
+    "sendError": "Meta non ha accettato i template",
     "group": {
       "prenotazioni": "Prenotazioni",
       "caparre": "Caparre",
@@ -76,7 +79,10 @@
       "TABLE_BILL_LINK": "Conto al tavolo, con la scheda",
       "TAKEAWAY_BILL_LINK_CTA": "Conto dell'asporto",
       "REVIEW_REQUEST": "Richiesta di recensione",
-      "BANQUET_QUOTE": "Preventivo del banchetto"
+      "BANQUET_QUOTE": "Preventivo del banchetto",
+      "BOOKING_REMINDER_QR": "Promemoria con i tasti",
+      "TAKEAWAY_READY": "Ordine d'asporto pronto",
+      "CAMPAIGN": "Campagna"
     }
   },
   "usage": {

@@ -12,6 +12,7 @@
 
 import crypto from 'crypto';
 import type { InboundMedia, InboundMessage, MetaSender } from '../types.js';
+import type { MetaTemplateMessage } from '../templates/meta.js';
 
 export const META_MEDIA_PREFIX = 'meta-media:';
 
@@ -22,7 +23,9 @@ export interface MetaSendOutcome {
 }
 
 async function graph(sender: Pick<MetaSender, 'graphBase' | 'accessToken'>, path: string, init: RequestInit = {}): Promise<{ ok: boolean; status: number; body: any }> {
-    const response = await fetch(`${sender.graphBase}/${path.replace(/^\/+/, '')}`, {
+    // Un url intero è la pagina successiva di un elenco (paging.next).
+    const url = /^https?:\/\//.test(path) ? path : `${sender.graphBase}/${path.replace(/^\/+/, '')}`;
+    const response = await fetch(url, {
         ...init,
         headers: { Authorization: `Bearer ${sender.accessToken}`, 'Content-Type': 'application/json', ...(init.headers ?? {}) },
         signal: AbortSignal.timeout(20_000),
@@ -36,15 +39,18 @@ const errorText = (status: number, body: any) => {
     return e ? `${status} - ${e.message ?? ''}${e.code ? ` (codice ${e.code})` : ''}` : String(status);
 };
 
-/** Un messaggio: testo libero, o allegati (ognuno un messaggio, il primo
- *  con la didascalia). Non lancia per un rifiuto di Meta: lo restituisce. */
+/** Un messaggio: testo libero, template approvato, o allegati (ognuno un
+ *  messaggio, il primo con la didascalia). Non lancia per un rifiuto di
+ *  Meta: lo restituisce. */
 export async function metaSendMessage(
     sender: MetaSender,
-    req: { to: string; body: string; mediaUrls?: string[]; interactive?: MetaInteractiveButtons }
+    req: { to: string; body: string; mediaUrls?: string[]; interactive?: MetaInteractiveButtons; template?: MetaTemplateMessage }
 ): Promise<MetaSendOutcome> {
     const to = req.to.replace(/\D/g, '');
     const payloads: Record<string, unknown>[] = [];
-    if (req.interactive) {
+    if (req.template) {
+        payloads.push({ type: 'template', template: req.template });
+    } else if (req.interactive) {
         payloads.push({ type: 'interactive', interactive: {
             type: 'button',
             body: { text: req.body },
@@ -107,6 +113,60 @@ export async function metaPhoneInfo(base: string, phoneNumberId: string, accessT
 export async function metaSubscribeApp(base: string, wabaId: string, accessToken: string): Promise<boolean> {
     const r = await graph({ graphBase: base, accessToken }, `${encodeURIComponent(wabaId)}/subscribed_apps`, { method: 'POST' });
     return r.ok;
+}
+
+// ---------------------------------------------------------------------------
+// Template dell'account (Fase 12b)
+// ---------------------------------------------------------------------------
+
+export interface MetaRemoteTemplate {
+    id: string;
+    name: string;
+    language: string;
+    status: string;
+    category: string | null;
+    rejectedReason: string | null;
+}
+
+/** Tutti i template dell'account WhatsApp, pagina dopo pagina. */
+export async function metaListTemplates(sender: MetaSender): Promise<{ ok: true; templates: MetaRemoteTemplate[] } | { ok: false; error: string }> {
+    const out: MetaRemoteTemplate[] = [];
+    let path: string | null = `${encodeURIComponent(sender.wabaId)}/message_templates?fields=id,name,language,status,category,rejected_reason&limit=100`;
+    for (let page = 0; path && page < 20; page++) {
+        const r = await graph(sender, path);
+        if (!r.ok) return { ok: false, error: errorText(r.status, r.body) };
+        for (const t of r.body?.data ?? []) {
+            out.push({
+                id: String(t?.id ?? ''),
+                name: String(t?.name ?? ''),
+                language: String(t?.language ?? ''),
+                status: String(t?.status ?? '').toUpperCase(),
+                category: t?.category ? String(t.category).toUpperCase() : null,
+                // Meta scrive NONE quando non c'è un motivo.
+                rejectedReason: t?.rejected_reason && t.rejected_reason !== 'NONE' ? String(t.rejected_reason) : null,
+            });
+        }
+        path = r.body?.paging?.next ?? null;
+    }
+    return { ok: true, templates: out };
+}
+
+/** Crea un template nell'account e lo manda in approvazione. */
+export async function metaCreateTemplate(sender: MetaSender, payload: Record<string, unknown>): Promise<
+    { ok: true; id: string; status: string; category: string | null } | { ok: false; error: string }
+> {
+    const r = await graph(sender, `${encodeURIComponent(sender.wabaId)}/message_templates`, { method: 'POST', body: JSON.stringify(payload) });
+    if (!r.ok) {
+        const e = r.body?.error;
+        // Il motivo leggibile, quando c'è, sta in error_user_msg.
+        return { ok: false, error: e?.error_user_msg || errorText(r.status, r.body) };
+    }
+    return {
+        ok: true,
+        id: String(r.body?.id ?? ''),
+        status: String(r.body?.status ?? 'PENDING').toUpperCase(),
+        category: r.body?.category ? String(r.body.category).toUpperCase() : null,
+    };
 }
 
 // ---------------------------------------------------------------------------
@@ -188,6 +248,36 @@ function toInbound(msg: any, value: any): InboundMessage | null {
             label: loc.name ?? null, address: loc.address ?? null,
         } : null,
     };
+}
+
+/** Un cambiamento di stato o di categoria di un template: arriva per
+ *  account WhatsApp (entry.id), non per numero. */
+export interface MetaTemplateUpdate {
+    wabaId: string;
+    name: string;
+    language: string;
+    /** APPROVED, REJECTED, PAUSED, …; null se cambia solo la categoria. */
+    event: string | null;
+    reason: string | null;
+    category: string | null;
+}
+
+export function parseMetaTemplateUpdates(payload: any): MetaTemplateUpdate[] {
+    const out: MetaTemplateUpdate[] = [];
+    for (const entry of payload?.entry ?? []) {
+        const wabaId = String(entry?.id ?? '');
+        for (const change of entry?.changes ?? []) {
+            const v = change?.value ?? {};
+            if (!wabaId || !v.message_template_name || !v.message_template_language) continue;
+            if (change.field === 'message_template_status_update') {
+                const reason = v.reason && v.reason !== 'NONE' ? String(v.reason) : (v.other_info?.description ? String(v.other_info.description) : null);
+                out.push({ wabaId, name: String(v.message_template_name), language: String(v.message_template_language), event: v.event ? String(v.event).toUpperCase() : null, reason, category: null });
+            } else if (change.field === 'template_category_update') {
+                out.push({ wabaId, name: String(v.message_template_name), language: String(v.message_template_language), event: null, reason: null, category: v.new_category ? String(v.new_category).toUpperCase() : null });
+            }
+        }
+    }
+    return out;
 }
 
 /** Il corpo di un webhook di Meta, cambiamento per cambiamento. */

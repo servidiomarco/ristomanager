@@ -57,7 +57,7 @@ import {
     configureWhatsApp, isWhatsAppReady, isSmsReady, getSender, backendBaseUrl,
     sendWhatsAppText, sendTwilioSms, logOutboundMessage, logInboundMessage,
     handleTwilioWhatsAppInbound, validateTwilioSignature, pickTemplate, twilioMediaAuthHeader,
-    handleMetaWebhook, handleMetaWebhookVerify,
+    handleMetaWebhook, handleMetaWebhookVerify, startMetaTemplateCache,
     createWhatsAppRouter, isWindowOpen, configureReservationButtons, publicWhatsAppLink, getRemindersPolicy,
     configureWhatsAppMedia, fetchInboundMedia, MediaFetchError, agentMessageBody, photosForAgent,
     notifyTakeawayReady, getTakeawayPolicy,
@@ -46602,6 +46602,9 @@ const startServer = async () => {
                     } catch (schedErr) {
                         console.error('WhatsApp campaigns scheduler failed to start:', schedErr);
                     }
+                    // I template approvati sui numeri Meta dei locali, in
+                    // memoria per i builder sincroni (services/whatsapp/templates/meta.ts).
+                    if (!isServiceNode) startMetaTemplateCache();
                     if (!isServiceNode) try {
                         startBookingReminderScheduler();
                         console.log('✅ Booking reminder scheduler started (15 min, finestra 9-21 del ristorante)');

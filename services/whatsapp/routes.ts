@@ -12,6 +12,8 @@ import { metaPhoneInfo, metaSubscribeApp } from './providers/meta.js';
 import { encryptSecret, isSecretsConfigured } from '../../utils/secrets.js';
 import { tenantWebhookToken } from './callbacks.js';
 import { templateStatus } from './templates/status.js';
+import { forgetMetaTemplates, provisionMetaTemplates, syncMetaTemplatesIfStale } from './templates/provision.js';
+import { runWithTenantContext } from '../../db.js';
 import { whatsappUsage } from './usage.js';
 import { queryWithRetry } from '../../db.js';
 import { phoneDigitsVariants, phoneMatchKey } from '../../utils/text.js';
@@ -157,6 +159,15 @@ export function createWhatsAppRouter(): express.Router {
                 ActivityAction.UPDATE, ResourceType.SETTINGS, undefined, 'WhatsApp',
                 { whatsapp_meta: 'connect', phone: info.phone, phone_number_id: phoneNumberId, waba_id: wabaId, subscribed }
             ).catch(() => {});
+            // I template del catalogo nell'account del locale, in
+            // approvazione da Meta: una trentina di chiamate, quindi dopo la
+            // risposta. La scheda Template li mostra man mano.
+            const sender = await getSender(tenantId);
+            if (sender?.provider === 'meta') {
+                void runWithTenantContext(tenantId, () => provisionMetaTemplates(tenantId, sender))
+                    .then(s => console.log(`[whatsapp] template Meta del tenant ${tenantId}: ${s.created} creati, ${s.existing} già presenti, ${s.failed} non riusciti`))
+                    .catch((err: any) => console.error(`[whatsapp] template Meta del tenant ${tenantId} non creati:`, err?.message || err));
+            }
             res.json({ ok: true, phone: info.phone, display_name: info.displayName, quality_rating: info.quality, messaging_limit: info.limit, subscribed });
         } catch (err: any) {
             console.error('POST /whatsapp/meta/connect error:', err);
@@ -171,6 +182,7 @@ export function createWhatsAppRouter(): express.Router {
                 `DELETE FROM whatsapp_senders WHERE tenant_id = $1 RETURNING phone_e164`, [tenantId]
             );
             invalidateSenderCache(tenantId);
+            await forgetMetaTemplates(tenantId);
             if (r.rowCount) {
                 LogService.logActivity(
                     tenantId, req.user?.userId ?? null, req.user?.email ?? '', req.user?.email ?? '',
@@ -188,10 +200,31 @@ export function createWhatsAppRouter(): express.Router {
     /** Il catalogo dei template con lo stato di approvazione. */
     router.get('/templates', ...read, async (req, res) => {
         try {
-            res.json({ templates: await templateStatus(req.tenantId!) });
+            const tenantId = req.tenantId!;
+            const sender = await getSender(tenantId);
+            const meta = sender?.provider === 'meta' && !writesFromEnvSender(tenantId);
+            if (meta && sender?.provider === 'meta') await syncMetaTemplatesIfStale(tenantId, sender);
+            res.json({ templates: await templateStatus(tenantId), provider: sender?.provider ?? null });
         } catch (err: any) {
             console.error('GET /whatsapp/templates error:', err);
             res.status(500).json({ error: 'Errore nel leggere i template' });
+        }
+    });
+
+    /** Manda in approvazione i template che mancano sul numero Meta del
+     *  locale (o che non erano arrivati a Meta). */
+    router.post('/templates/provision', ...manage, async (req, res) => {
+        try {
+            const tenantId = req.tenantId!;
+            const sender = await getSender(tenantId);
+            if (sender?.provider !== 'meta' || writesFromEnvSender(tenantId)) {
+                return res.status(409).json({ error: 'I template si mandano a Meta solo per un numero collegato a Meta' });
+            }
+            const summary = await provisionMetaTemplates(tenantId, sender);
+            res.json({ ok: true, ...summary, templates: await templateStatus(tenantId), provider: 'meta' });
+        } catch (err: any) {
+            console.error('POST /whatsapp/templates/provision error:', err);
+            res.status(502).json({ error: err?.message || 'Meta non ha accettato i template' });
         }
     });
 

@@ -6,9 +6,12 @@
 // solo leggendo le conversazioni. Qui ogni riga del catalogo dice se la SID
 // c'è e, chiedendolo a Twilio, se l'approvazione è arrivata.
 
-import { envTenantIds, getSender } from '../config.js';
+import { getSender } from '../config.js';
+import { queryWithRetry } from '../../../db.js';
 import type { TwilioSender } from '../types.js';
 import { TEMPLATE_CATALOG, templateEnvKey, type TemplateDef, type TemplateLanguage } from './catalog.js';
+import { META_TEMPLATES } from './metaCatalog.js';
+import { writesFromEnvTwilio } from './registry.js';
 
 export type ApprovalStatus = 'approved' | 'pending' | 'rejected' | 'unsubmitted' | 'unknown';
 
@@ -62,10 +65,48 @@ async function twilioApproval(sender: TwilioSender, sid: string): Promise<{ stat
     }
 }
 
+// Lo stato di Meta (whatsapp_templates.status) come lo mostra la scheda.
+// FLAGGED parte ancora, ma Meta lo sta guardando: lo si dice nel motivo.
+function metaApproval(status: string | undefined, reason: string | null): { approval: ApprovalStatus; reason: string | null } {
+    switch (status) {
+        case undefined: return { approval: 'unsubmitted', reason: null };
+        case 'APPROVED': return { approval: 'approved', reason: null };
+        case 'FLAGGED': return { approval: 'approved', reason: reason ?? 'Qualità bassa: Meta potrebbe metterlo in pausa' };
+        case 'PENDING': case 'IN_APPEAL': return { approval: 'pending', reason: null };
+        case 'PAUSED': return { approval: 'rejected', reason: reason ?? 'In pausa: Meta l\'ha fermato per la qualità' };
+        case 'REJECTED': case 'DISABLED': return { approval: 'rejected', reason };
+        // ERROR: non è arrivato a Meta, il tasto della scheda lo rimanda.
+        case 'ERROR': return { approval: 'unsubmitted', reason };
+        default: return { approval: 'unknown', reason };
+    }
+}
+
+async function metaTemplateStatus(tenantId: number): Promise<TemplateStatusRow[]> {
+    const rows = (await queryWithRetry(
+        `SELECT template_key, language, status, reason FROM whatsapp_templates WHERE tenant_id = $1`, [tenantId]
+    )).rows;
+    const byKey = new Map(rows.map(r => [`${r.template_key}:${r.language}`, r]));
+    // Il conto al tavolo con la scheda e la richiesta di recensione non
+    // esistono su Meta (metaCatalog.ts): mostrarli come «non impostati»
+    // inviterebbe a cercarli.
+    return TEMPLATE_CATALOG.filter(def => META_TEMPLATES[def.key]).map(def => ({
+        key: def.key,
+        label: def.label,
+        group: def.group,
+        category: def.category,
+        languages: (['it', 'en'] as const).filter(language => META_TEMPLATES[def.key]?.[language]).map(language => {
+            const row = byKey.get(`${def.key}:${language}`);
+            const { approval, reason } = metaApproval(row?.status, row?.reason ?? null);
+            return { language, configured: true, approval, rejectionReason: reason };
+        }),
+    }));
+}
+
 /** Il catalogo con lo stato di ogni template per il ristorante. */
 export async function templateStatus(tenantId: number, env: NodeJS.ProcessEnv = process.env): Promise<TemplateStatusRow[]> {
-    const usesEnv = envTenantIds(env).has(tenantId);
-    const sender = usesEnv ? await getSender(tenantId) : null;
+    const usesEnv = writesFromEnvTwilio(tenantId, env);
+    const sender = await getSender(tenantId);
+    if (!usesEnv && sender?.provider === 'meta') return metaTemplateStatus(tenantId);
     return Promise.all(TEMPLATE_CATALOG.map(async def => ({
         key: def.key,
         label: def.label,
