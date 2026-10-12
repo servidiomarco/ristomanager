@@ -960,6 +960,7 @@ La **ricerca** sta accanto alle schede (sopra, sul telefono) e resta visibile me
 
 | Data | Sezione | Modifica |
 |---|---|---|
+| 2026-10-12 | Impostazioni | In Impostazioni › AI › Minuti di Sofia il mese è scritto nella lingua dell'app («ottobre»), non in quella del browser: su un computer in inglese compariva «October». |
 | 2026-10-12 | Impostazioni | In Attività programmate e Promemoria il tasto Esc chiude la finestra aperta, come il clic fuori o «Annulla»: nella scheda nuova, nella modifica e nella richiesta di conferma prima di eliminare. |
 | 2026-10-12 | Messaggi: WhatsApp e SMS, Impostazioni | **I messaggi automatici partono anche dal tuo numero su Meta.** Quando colleghi il numero del locale, Sympotia prepara conferme, promemoria (anche coi tasti «Ci saremo / Devo modificare / Annulla»), richieste di caparra, conto, preventivo, «ordine pronto» e campagne, e li manda in approvazione a Meta. Quelli attivi partono anche a chi non ti ha scritto nelle ultime 24 ore; a che punto sono lo vedi in Impostazioni › WhatsApp › Template. |
 | 2026-10-12 | Prenotazione online | **Testata più bassa sulla pagina di prenotazione.** Logo, mappa e lingua stanno sulla stessa riga: al posto dell'indirizzo scritto per esteso c'è l'icona della mappa, che apre Google Maps. Il modulo parte più in alto, anche sul telefono. |
