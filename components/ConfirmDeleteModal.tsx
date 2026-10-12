@@ -18,6 +18,9 @@ interface ConfirmDeleteModalProps {
   iconWrapperClassName?: string;
   confirmClassName?: string;
   showIrreversibleWarning?: boolean;
+  /** Esc annulla. Spento di default: aperto sopra un modal che chiude anch'esso
+   *  con Esc, lo stesso tasto li chiuderebbe tutti e due. */
+  closeOnEscape?: boolean;
 }
 
 export const ConfirmDeleteModal: React.FC<ConfirmDeleteModalProps> = ({
@@ -35,6 +38,7 @@ export const ConfirmDeleteModal: React.FC<ConfirmDeleteModalProps> = ({
   // peso pieno — l'intenzione e' gia' stata presa.
   confirmClassName = dsButton.critical,
   showIrreversibleWarning = true,
+  closeOnEscape = false,
 }) => {
   /* I default stavano sulle prop: «Conferma Eliminazione», «Elimina»,
      «Annulla» erano italiano cablato in ogni chiamante che non le passava —
@@ -49,6 +53,7 @@ export const ConfirmDeleteModal: React.FC<ConfirmDeleteModalProps> = ({
     <ModalShell
       open={isOpen}
       onClose={onCancel}
+      closeOnEscape={closeOnEscape}
       title={titolo}
       size="sm"
       // Si apre spesso sopra un altro modal: teniamo lo z-index esplicito
