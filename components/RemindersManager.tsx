@@ -162,6 +162,19 @@ export const RemindersManager: React.FC<Props> = ({ showToast }) => {
   const openEdit = (r: Reminder) => { setSaveError(null); setEditor(reminderToEditor(r)); };
   const closeEditor = () => { if (!saving) setEditor(null); };
 
+  // Esc chiude la finestra aperta, come il clic sullo sfondo. Le due finestre
+  // non stanno mai una sopra l'altra, ma se succedesse va via solo la conferma.
+  useEffect(() => {
+    if (!editor && confirmDeleteId === null) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape') return;
+      if (confirmDeleteId !== null) setConfirmDeleteId(null);
+      else if (!saving) setEditor(null);
+    };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [editor, confirmDeleteId, saving]);
+
   const toBackendInput = (e: EditorState): ReminderInput => ({
     title: e.title.trim(),
     description: e.description.trim() || null,

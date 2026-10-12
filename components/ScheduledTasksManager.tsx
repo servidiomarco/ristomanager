@@ -435,6 +435,7 @@ export const ScheduledTasksManager: React.FC<Props> = ({ showToast }) => {
         <ModalShell
           open
           onClose={closeEditor}
+          closeOnEscape
           title={editingId ? t('attp.editTitle', 'Modifica attività programmata') : t('attp.newTitle', 'Nuova attività programmata')}
           size="lg"
           bodyClassName="p-4 sm:p-6"
@@ -728,6 +729,7 @@ export const ScheduledTasksManager: React.FC<Props> = ({ showToast }) => {
         itemName={toDelete?.title}
         onConfirm={handleDelete}
         onCancel={() => setToDelete(null)}
+        closeOnEscape
       />
     </details>
   );
