@@ -5,6 +5,7 @@ import { getVoiceUsage, updateVoiceExtraCap, updateVoiceAlertPercents, type Voic
 import { VOICE_ALERT_PERCENT_OPTIONS } from '../services/voicePlan';
 import { useAuth } from '../contexts/AuthContext';
 import { dsButton } from './ds';
+import { useDisplayLocale } from '../utils/formatLocale';
 
 /* ── Minuti di Sofia ──────────────────────────────────────────────────────
    Il ristoratore vede i minuti del mese contro quelli inclusi nell'add-on,
@@ -25,6 +26,7 @@ const eur = (cents: number): string => {
 export const VoiceUsageCard: React.FC<Props> = ({ showToast }) => {
     const { t } = useTranslation('canali', { useSuspense: false });
     const { hasPermission } = useAuth();
+    const locale = useDisplayLocale();
     const canEdit = hasPermission('settings:full');
 
     const [data, setData] = useState<VoiceUsageResponse | null>(null);
@@ -68,7 +70,8 @@ export const VoiceUsageCard: React.FC<Props> = ({ showToast }) => {
     const barClass = pct >= 100
         ? 'bg-[var(--ds-critical-solid)]'
         : pct >= 80 ? 'bg-[var(--ds-pending-solid)]' : 'bg-[var(--ds-seated-solid)]';
-    const monthName = new Date(`${month.month}T12:00:00`).toLocaleDateString(undefined, { month: 'long' });
+    // La lingua dell'app, non quella del browser: un Mac in inglese scriveva «October».
+    const monthName = new Date(`${month.month}T12:00:00`).toLocaleDateString(locale, { month: 'long' });
     const maxDaily = Math.max(1, ...month.daily.map(d => d.billable_minutes));
 
     const capCents = Math.round(Number(capDraft.replace(',', '.')) * 100);
