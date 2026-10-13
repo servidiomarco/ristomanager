@@ -135,6 +135,10 @@ export default async function globalSetup(): Promise<() => Promise<void>> {
             TWILIO_AUTH_TOKEN: 'test-twilio-auth-token',
             SOFIA_REGISTER_CALL_URL: `http://127.0.0.1:${port + 11}/register-call`,
             SOFIA_SILENT_CHECK_MS: '500',
+            // Il banner «Sofia non raggiungibile» legge la pagina di stato di
+            // ElevenLabs: nei test sullo stesso stub, mai quella vera (quando
+            // lo stub è spento la pagina «non risponde» e il banner non si muove).
+            ELEVENLABS_STATUS_URL: `http://127.0.0.1:${port + 11}/status`,
             // Softphone (Fase 3): token firmati con una API key finta. Con il
             // solo SID dell'account WhatsApp e SMS restano spenti: servono
             // anche il mittente o il messaging service.
