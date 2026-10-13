@@ -3,7 +3,7 @@ import { randomBytes } from 'node:crypto';
 import rateLimit from 'express-rate-limit';
 import { AuthService, isPlatformScopedSession } from './authService.js';
 import { authenticate, authorize } from './authMiddleware.js';
-import { UserRole, ViewState } from '../types.js';
+import { UserRole, ViewState, MOBILE_CREATE_ACTIONS } from '../types.js';
 import { RolePermissionService, ALL_PERMISSIONS, ALL_PERMISSION_KEYS, Permission, isReportsAdmin } from './permissionService.js';
 import { LogService, ActivityAction, ResourceType } from '../activityLogs/logService.js';
 import { getTenantFeatures } from '../services/entitlements.js';
@@ -215,18 +215,19 @@ router.get('/me', authenticate, async (req: Request, res: Response) => {
 // PUT /auth/me/preferences - Update current user's own preferences
 // Self-service: any authenticated user can update *their own* preferences only.
 // Exposes preferred_landing_view, preferred_orderpad_layout,
-// preferred_design_style and language; a field left out of the body stays as
-// it is, null clears it.
+// preferred_design_style, preferred_mobile_actions and language; a field left
+// out of the body stays as it is, null clears it.
 router.put('/me/preferences', authenticate, async (req: Request, res: Response) => {
   try {
     if (!req.user) {
       return res.status(401).json({ error: 'Not authenticated' });
     }
 
-    const { preferred_landing_view, preferred_orderpad_layout, preferred_design_style, language } = req.body as {
+    const { preferred_landing_view, preferred_orderpad_layout, preferred_design_style, preferred_mobile_actions, language } = req.body as {
       preferred_landing_view?: string | null;
       preferred_orderpad_layout?: string | null;
       preferred_design_style?: string | null;
+      preferred_mobile_actions?: unknown;
       language?: string | null;
     };
 
@@ -249,6 +250,26 @@ router.put('/me/preferences', authenticate, async (req: Request, res: Response) 
       return res.status(400).json({ error: 'Invalid preferred_design_style' });
     }
 
+    // Azioni del «+» del telefono: elenco ordinato di chiavi del catalogo
+    // condiviso (types.ts), senza doppioni e almeno una — il pannello vuoto
+    // si fa togliendo il «+», non salvando []. null = le predefinite.
+    let mobileActions: string[] | null | undefined;
+    if (preferred_mobile_actions === undefined) {
+      mobileActions = undefined;
+    } else if (preferred_mobile_actions === null) {
+      mobileActions = null;
+    } else if (
+      Array.isArray(preferred_mobile_actions)
+      && preferred_mobile_actions.length > 0
+      && preferred_mobile_actions.length <= MOBILE_CREATE_ACTIONS.length
+      && preferred_mobile_actions.every(k => typeof k === 'string' && (MOBILE_CREATE_ACTIONS as readonly string[]).includes(k))
+      && new Set(preferred_mobile_actions).size === preferred_mobile_actions.length
+    ) {
+      mobileActions = preferred_mobile_actions as string[];
+    } else {
+      return res.status(400).json({ error: 'Invalid preferred_mobile_actions' });
+    }
+
     // Lingua dell'interfaccia: catalogo chiuso alle lingue che la SPA ha
     // davvero (SUPPORTED_LANGUAGES di i18n/config.ts). null = si eredita il
     // default del ristorante.
@@ -260,6 +281,7 @@ router.put('/me/preferences', authenticate, async (req: Request, res: Response) 
       ...(preferred_landing_view !== undefined ? { preferred_landing_view } : {}),
       ...(preferred_orderpad_layout !== undefined ? { preferred_orderpad_layout } : {}),
       ...(preferred_design_style !== undefined ? { preferred_design_style } : {}),
+      ...(mobileActions !== undefined ? { preferred_mobile_actions: mobileActions } : {}),
       ...(language !== undefined ? { language } : {}),
     });
 

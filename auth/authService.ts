@@ -310,7 +310,7 @@ export class AuthService {
     const result = await queryWithRetry(
       `SELECT u.id, u.email, u.password_hash, u.full_name, u.phone, u.role, u.is_active,
               u.created_at, u.updated_at, u.last_login, u.preferred_landing_view, u.preferred_orderpad_layout,
-              u.preferred_design_style, u.language,
+              u.preferred_design_style, u.preferred_mobile_actions, u.language,
               u.tenant_id, t.status AS tenant_status, t.slug AS tenant_slug, t.name AS tenant_name,
               t.default_language AS tenant_default_language,
               t.currency AS tenant_currency, t.timezone AS tenant_timezone,
@@ -375,6 +375,7 @@ export class AuthService {
       preferred_landing_view: userRow.preferred_landing_view ?? null,
       preferred_orderpad_layout: userRow.preferred_orderpad_layout ?? null,
       preferred_design_style: userRow.preferred_design_style ?? null,
+      preferred_mobile_actions: userRow.preferred_mobile_actions ?? null,
       // Lingua dell'interfaccia scelta dall'operatore; null = si eredita il
       // default del ristorante (tenant.default_language), a sua volta 'it'.
       language: userRow.language ?? null,
@@ -532,7 +533,7 @@ export class AuthService {
     const result = await queryWithRetry(
       `SELECT u.id, u.email, u.full_name, u.phone, u.role, u.is_active, u.created_at,
               u.updated_at, u.last_login, u.preferred_landing_view, u.preferred_orderpad_layout,
-              u.preferred_design_style, u.language,
+              u.preferred_design_style, u.preferred_mobile_actions, u.language,
               u.service_pin_hash IS NOT NULL AS has_service_pin,
               u.tenant_id, t.slug AS tenant_slug, t.name AS tenant_name,
               t.default_language AS tenant_default_language,
@@ -563,6 +564,7 @@ export class AuthService {
       preferred_landing_view: row.preferred_landing_view ?? null,
       preferred_orderpad_layout: row.preferred_orderpad_layout ?? null,
       preferred_design_style: row.preferred_design_style ?? null,
+      preferred_mobile_actions: row.preferred_mobile_actions ?? null,
       language: row.language ?? null,
       has_service_pin: row.has_service_pin === true,
       tenant: {
@@ -627,7 +629,7 @@ export class AuthService {
   // a field as it is; `null` clears it.
   static async updatePreferences(
     userId: number,
-    prefs: { preferred_landing_view?: string | null; preferred_orderpad_layout?: string | null; preferred_design_style?: string | null; language?: string | null }
+    prefs: { preferred_landing_view?: string | null; preferred_orderpad_layout?: string | null; preferred_design_style?: string | null; preferred_mobile_actions?: string[] | null; language?: string | null }
   ): Promise<User | null> {
     const fields: string[] = [];
     const values: unknown[] = [];
@@ -643,6 +645,10 @@ export class AuthService {
       fields.push(`preferred_design_style = $${values.length + 1}`);
       values.push(prefs.preferred_design_style);
     }
+    if (prefs.preferred_mobile_actions !== undefined) {
+      fields.push(`preferred_mobile_actions = $${values.length + 1}`);
+      values.push(prefs.preferred_mobile_actions);
+    }
     if (prefs.language !== undefined) {
       fields.push(`language = $${values.length + 1}`);
       values.push(prefs.language);
@@ -656,7 +662,7 @@ export class AuthService {
       `UPDATE users
        SET ${fields.join(', ')}, updated_at = CURRENT_TIMESTAMP
        WHERE id = $${values.length}
-       RETURNING id, email, full_name, phone, role, is_active, created_at, updated_at, last_login, preferred_landing_view, preferred_orderpad_layout, preferred_design_style, language`,
+       RETURNING id, email, full_name, phone, role, is_active, created_at, updated_at, last_login, preferred_landing_view, preferred_orderpad_layout, preferred_design_style, preferred_mobile_actions, language`,
       values
     );
 
@@ -681,6 +687,7 @@ export class AuthService {
       preferred_landing_view: row.preferred_landing_view ?? null,
       preferred_orderpad_layout: row.preferred_orderpad_layout ?? null,
       preferred_design_style: row.preferred_design_style ?? null,
+      preferred_mobile_actions: row.preferred_mobile_actions ?? null,
       language: row.language ?? null
     };
   }

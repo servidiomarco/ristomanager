@@ -1094,6 +1094,18 @@ export enum UserRole {
   CASSA = 'CASSA'
 }
 
+// Azioni del «+» sulla barra del telefono (Impostazioni → Menu). Catalogo
+// chiuso condiviso: il server valida users.preferred_mobile_actions contro
+// questo elenco, App.tsx gli dà icona, etichetta e flusso. Un'azione nuova
+// va aggiunta qui e nel menu «+» di App.tsx.
+export const MOBILE_CREATE_ACTIONS = [
+  'reservation', 'walkin', 'takeaway', 'banquet', 'dish',
+  'shopping', 'task', 'product', 'customer', 'staff', 'user',
+] as const;
+export type MobileCreateAction = typeof MOBILE_CREATE_ACTIONS[number];
+// Le cinque che il pannello mostrava prima che si potesse scegliere.
+export const DEFAULT_MOBILE_CREATE_ACTIONS: MobileCreateAction[] = ['reservation', 'walkin', 'dish', 'shopping', 'customer'];
+
 export interface User {
   id: number;
   email: string;
@@ -1115,6 +1127,9 @@ export interface User {
   // null = classico (scatole morbide, controlli a pillola). Stessa natura
   // del layout comande: per utente, segue l'operatore su ogni dispositivo.
   preferred_design_style?: string | null;
+  // Azioni del «+» del telefono, nell'ordine scelto; null = le predefinite
+  // (DEFAULT_MOBILE_CREATE_ACTIONS). Per utente, come lo stile.
+  preferred_mobile_actions?: string[] | null;
   // Lingua dell'interfaccia per questo operatore ('it' | 'en'). null = si
   // eredita tenant.default_language (a sua volta 'it'): così cambiare il
   // default del ristorante raggiunge anche chi non ha mai scelto. Stessa
