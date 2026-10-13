@@ -1,12 +1,13 @@
 import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { LayoutDashboard, Grid, Settings, ChevronRight, ChevronDown, ChevronUp, ChefHat, PanelLeft, Calendar, CalendarDays, Bell, X, AlertTriangle, LogOut, Users, UserCheck, FileText, UsersRound, Sun, Moon, Sunset, MoreHorizontal, Search, UtensilsCrossed, Plus, BookUser, Boxes, Clock, ShoppingCart, ListChecks, ShieldCheck, Phone, ConciergeBell, Zap, PartyPopper, DoorClosed, StickyNote, CreditCard, MessageCircle, Mail, Kanban, ClipboardList, CookingPot, BellRing, MessagesSquare, Gauge, Building2, Milestone, Ban, Landmark, Percent, Calculator, BarChart3, Star, ShoppingBag, LifeBuoy, Radio, Thermometer, SlidersHorizontal, Tag, Scale, CalendarCheck, Wand2, QrCode, AudioLines, Megaphone } from 'lucide-react';
-import { ViewState, Room, Table, Dish, RestaurantMenu, Reservation, TableStatus, TableShape, BanquetMenu, PaymentStatus, Shift, UserRole, ReservationStatus } from './types';
+import { ViewState, Room, Table, Dish, RestaurantMenu, Reservation, TableStatus, TableShape, BanquetMenu, PaymentStatus, Shift, UserRole, ReservationStatus, DEFAULT_MOBILE_CREATE_ACTIONS, type MobileCreateAction } from './types';
 import { Dashboard } from './components/Dashboard';
 import { FloorPlan } from './components/FloorPlan';
 import { MenuManager } from './components/MenuManager';
 import { ReservationList, type NewReservationPrefill } from './components/ReservationList';
 import { LoginPage } from './components/LoginPage';
 import { ProfiloSheet } from './components/ProfiloSheet';
+import MobileActionsPicker from './components/MobileActionsPicker';
 import { OnboardingWizard } from './components/OnboardingWizard';
 import { BookingChannelsManager } from './components/BookingChannelsManager';
 import { PlatformPanel, ImpersonationBanner, decodeJwtPayload } from './components/PlatformPanel';
@@ -370,10 +371,11 @@ const SALA_VIEWS: ViewState[] = [ViewState.COMANDE, ViewState.CASSA, ViewState.C
    suoi blocchi uno sotto l'altro; la ricerca invece guarda in tutte.
    `guard` nasconde il blocco a chi non ha i permessi delle sue card, e una
    scheda senza blocchi visibili sparisce. */
-type SettingsTabId = 'profilo' | 'locale' | 'prenotazioni' | 'cassa' | 'comunicazioni' | 'ai' | 'amministrazione';
+type SettingsTabId = 'profilo' | 'menu' | 'locale' | 'prenotazioni' | 'cassa' | 'comunicazioni' | 'ai' | 'amministrazione';
 
 const SETTINGS_TABS: { id: SettingsTabId; labelKey: string; label: string }[] = [
   { id: 'profilo', labelKey: 'settings.tabProfile', label: 'Profilo' },
+  { id: 'menu', labelKey: 'settings.tabMenu', label: 'Menu' },
   { id: 'locale', labelKey: 'settings.tabVenue', label: 'Locale' },
   { id: 'prenotazioni', labelKey: 'nav.items.reservations', label: 'Prenotazioni' },
   { id: 'cassa', labelKey: 'settings.tabTill', label: 'Cassa' },
@@ -388,6 +390,7 @@ const SETTINGS_GROUPS: {
   guard?: 'admin' | 'pay_at_table' | 'reviews' | 'takeaway' | 'passepartout' | 'haccp' | 'whatsapp';
 }[] = [
   { id: 'imp-profilo', tab: 'profilo' },
+  { id: 'imp-menu', tab: 'menu' },
   { id: 'imp-ristorante', tab: 'locale' },
   { id: 'imp-attivita', tab: 'locale' },
   { id: 'imp-haccp', tab: 'locale', guard: 'haccp' },
@@ -2202,6 +2205,44 @@ const App: React.FC = () => {
   }
 
   // Show loading spinner while checking auth
+  // Azioni del «+» del telefono scelte dall'utente (Impostazioni → Menu). Il
+  // valore vero sta su users.preferred_mobile_actions; la copia in
+  // localStorage (per utente) copre la finestra in cui questo frontend parla
+  // con un backend che il campo non lo conosce ancora — l'anteprima Vercel
+  // della PR, i minuti fra i due deploy: lì il salvataggio risponde senza il
+  // campo e la scelta sembrerebbe non restare. La bozza tiene la scelta a
+  // schermo mentre il salvataggio è in viaggio, senza farla rimbalzare.
+  // Sono hook: stanno sopra i return di caricamento, login e onboarding.
+  const serverMobileActions = Array.isArray(user?.preferred_mobile_actions) ? user.preferred_mobile_actions : null;
+  const mobileActionsStorageKey = user ? `ristocrm_mobile_actions:${user.id}` : null;
+  const [localMobileActions, setLocalMobileActions] = useState<string[] | null>(null);
+  const [mobileActionsDraft, setMobileActionsDraft] = useState<string[] | null>(null);
+  const mobileActionsSaveSeq = useRef(0);
+  useEffect(() => {
+    if (!mobileActionsStorageKey) { setLocalMobileActions(null); return; }
+    try {
+      const stored = JSON.parse(localStorage.getItem(mobileActionsStorageKey) || 'null');
+      setLocalMobileActions(Array.isArray(stored) ? stored : null);
+    } catch {
+      setLocalMobileActions(null);
+    }
+  }, [mobileActionsStorageKey]);
+  const saveMobileActions = async (keys: string[]) => {
+    const seq = ++mobileActionsSaveSeq.current;
+    setMobileActionsDraft(keys);
+    setLocalMobileActions(keys);
+    if (mobileActionsStorageKey) {
+      try { localStorage.setItem(mobileActionsStorageKey, JSON.stringify(keys)); } catch { /* storage pieno o bloccato: resta il server */ }
+    }
+    try {
+      await updatePreferences({ preferred_mobile_actions: keys });
+    } catch (err: any) {
+      addToast(err?.message || t('profile.prefsError'), 'error');
+    } finally {
+      if (seq === mobileActionsSaveSeq.current) setMobileActionsDraft(null);
+    }
+  };
+
   if (authLoading) {
     return (
       <div className="min-h-screen bg-[var(--ds-canvas)] flex items-center justify-center">
@@ -2327,31 +2368,65 @@ const App: React.FC = () => {
   // Two clusters (service actions, then records) rendered with an unlabeled divider.
   // Closing the menu, then running the action, keeps the panel from lingering over the modal.
   const runCreateAction = (run: () => void) => { setShowCreateMenu(false); run(); };
-  const createMenuClusters: { label: string; Icon: React.ComponentType<{ size?: number; className?: string }>; show: boolean; run: () => void }[][] = [
+  const createMenuClusters: { key: MobileCreateAction; label: string; Icon: React.ComponentType<{ size?: number; className?: string }>; show: boolean; run: () => void }[][] = [
     [
-      { label: t('entity.booking'), Icon: Calendar, show: hasPermission('reservations:full'), run: () => { setNewReservationKind('standard'); setAutoOpenNewReservation(true); } },
-      { label: 'Walk-in', Icon: Zap, show: canAccessView(ViewState.RECEPTION), run: () => { setView(ViewState.RECEPTION); setAutoOpenWalkIn(true); } },
-      { label: t('entity.takeawayOrder'), Icon: ShoppingBag, show: canAccessView(ViewState.ASPORTO) && hasPermission('takeaway:manage'), run: () => { setView(ViewState.ASPORTO); setAutoOpenNewTakeaway(true); } },
-      { label: t('entity.banquet'), Icon: PartyPopper, show: hasPermission('menu:full'), run: () => { setView(ViewState.BANCHETTI); setAutoOpenNewBanquet(true); } },
-      { label: t('entity.dish'), Icon: UtensilsCrossed, show: hasPermission('menu:full'), run: () => { setView(ViewState.MENU); setAutoOpenNewDish(true); } },
+      { key: 'reservation', label: t('entity.booking'), Icon: Calendar, show: hasPermission('reservations:full'), run: () => { setNewReservationKind('standard'); setAutoOpenNewReservation(true); } },
+      { key: 'walkin', label: 'Walk-in', Icon: Zap, show: canAccessView(ViewState.RECEPTION), run: () => { setView(ViewState.RECEPTION); setAutoOpenWalkIn(true); } },
+      { key: 'takeaway', label: t('entity.takeawayOrder'), Icon: ShoppingBag, show: canAccessView(ViewState.ASPORTO) && hasPermission('takeaway:manage'), run: () => { setView(ViewState.ASPORTO); setAutoOpenNewTakeaway(true); } },
+      { key: 'banquet', label: t('entity.banquet'), Icon: PartyPopper, show: hasPermission('menu:full'), run: () => { setView(ViewState.BANCHETTI); setAutoOpenNewBanquet(true); } },
+      { key: 'dish', label: t('entity.dish'), Icon: UtensilsCrossed, show: hasPermission('menu:full'), run: () => { setView(ViewState.MENU); setAutoOpenNewDish(true); } },
     ],
     [
-      { label: t('entity.shopping'), Icon: ShoppingCart, show: canAccessView(ViewState.LISTA_DELLA_SPESA), run: () => { setView(ViewState.LISTA_DELLA_SPESA); setAutoOpenNewShoppingItem(true); } },
-      { label: t('entity.task'), Icon: ListChecks, show: canAccessView(ViewState.ATTIVITA), run: () => { setView(ViewState.ATTIVITA); setAutoOpenNewAttivita(true); } },
+      { key: 'shopping', label: t('entity.shopping'), Icon: ShoppingCart, show: canAccessView(ViewState.LISTA_DELLA_SPESA), run: () => { setView(ViewState.LISTA_DELLA_SPESA); setAutoOpenNewShoppingItem(true); } },
+      { key: 'task', label: t('entity.task'), Icon: ListChecks, show: canAccessView(ViewState.ATTIVITA), run: () => { setView(ViewState.ATTIVITA); setAutoOpenNewAttivita(true); } },
       // Prodotto sta con la spesa e le attività, non con le anagrafiche: è
       // roba di magazzino, la si crea nella stessa mezz'ora in cui si segna
       // cosa manca. In fondo all'elenco era l'unica voce di quel gruppo.
-      { label: t('entity.product'), Icon: Boxes, show: hasPermission('inventory:full'), run: () => { setView(ViewState.INVENTARIO); setAutoOpenNewProduct(true); } },
+      { key: 'product', label: t('entity.product'), Icon: Boxes, show: hasPermission('inventory:full'), run: () => { setView(ViewState.INVENTARIO); setAutoOpenNewProduct(true); } },
     ],
     [
-      { label: t('entity.customer'), Icon: BookUser, show: hasPermission('customers:full'), run: () => { setView(ViewState.CLIENTI); setAutoOpenNewCustomer(true); } },
-      { label: t('entity.staff'), Icon: UsersRound, show: hasPermission('staff:full'), run: () => { setView(ViewState.STAFF); setAutoOpenNewStaff(true); } },
-      { label: t('entity.user'), Icon: Users, show: canManageUsers(), run: () => { setView(ViewState.USERS); setAutoOpenNewUser(true); } },
+      { key: 'customer', label: t('entity.customer'), Icon: BookUser, show: hasPermission('customers:full'), run: () => { setView(ViewState.CLIENTI); setAutoOpenNewCustomer(true); } },
+      { key: 'staff', label: t('entity.staff'), Icon: UsersRound, show: hasPermission('staff:full'), run: () => { setView(ViewState.STAFF); setAutoOpenNewStaff(true); } },
+      { key: 'user', label: t('entity.user'), Icon: Users, show: canManageUsers(), run: () => { setView(ViewState.USERS); setAutoOpenNewUser(true); } },
     ],
   ];
   const visibleCreateClusters = createMenuClusters
     .map(cluster => cluster.filter(item => item.show))
     .filter(cluster => cluster.length > 0);
+
+  // ── Azioni del «+» del telefono ──────────────────────────────────────────
+  // Stesso catalogo del menu «+» del desktop, filtrato dai permessi, nelle
+  // voci scelte in Impostazioni → Menu (finché non si sceglie, le cinque che
+  // il foglio ha sempre avuto). Il Walk-in del telefono apre la prenotazione
+  // walk-in sul posto invece di portare in Reception, come ha sempre fatto.
+  const visibleCreateItems = visibleCreateClusters.flat();
+  const chosenMobileKeys = mobileActionsDraft ?? serverMobileActions ?? localMobileActions ?? DEFAULT_MOBILE_CREATE_ACTIONS;
+  const pickMobileItems = (keys: readonly string[]) =>
+    keys.map(k => visibleCreateItems.find(item => item.key === k)).filter((item): item is typeof visibleCreateItems[number] => !!item);
+  // Se nessuna delle scelte è più permessa (ruolo cambiato), le predefinite:
+  // un «+» che apre un foglio vuoto sembrerebbe rotto.
+  const mobileCreateItems = pickMobileItems(chosenMobileKeys).length > 0
+    ? pickMobileItems(chosenMobileKeys)
+    : pickMobileItems(DEFAULT_MOBILE_CREATE_ACTIONS);
+  const mobileCreateActions = mobileCreateItems.map(item => ({
+    key: item.key,
+    icon: <item.Icon className="h-7 w-7" />,
+    label: item.label,
+    action: () => {
+      setShowCreateSheet(false);
+      if (item.key === 'walkin') { setNewReservationKind('walkin'); setAutoOpenNewReservation(true); return; }
+      item.run();
+    },
+  }));
+  // Accende o spegne un'azione e salva l'elenco nell'ordine del catalogo.
+  // Le chiavi che questo utente non vede (permessi) restano com'erano.
+  const toggleMobileAction = (key: MobileCreateAction) => {
+    const current = new Set(chosenMobileKeys);
+    if (current.has(key)) current.delete(key); else current.add(key);
+    const next = createMenuClusters.flat().map(item => item.key).filter(k => current.has(k));
+    if (next.length === 0) return;
+    void saveMobileActions(next);
+  };
 
   return (
     <div className="flex h-[100dvh] overflow-hidden bg-[var(--ds-canvas)] font-sans text-[var(--ds-text-primary)]">
@@ -3619,6 +3694,22 @@ const App: React.FC = () => {
               </div>
             </SettingsSection>
 
+            {/* Menu del telefono: quali azioni apre il «+» della barra in
+                basso. Personale come il Profilo (users.preferred_mobile_actions),
+                ma in una scheda sua perché si cerca come «menu», non come
+                preferenza. Si regola anche dal desktop: segue l'utente. */}
+            <SettingsSection id="imp-menu" label={t('settings.sectionMobileMenu', 'Menu mobile')} description={t('settings.sectionMobileMenuHint', 'Il «+» della barra del telefono. Vale per te, su ogni dispositivo.')}>
+              <div className={settingsGridClass} data-imp-lista="">
+                <div className={settingsWideClass}>
+                  <MobileActionsPicker
+                    options={visibleCreateItems.map(item => ({ key: item.key, label: item.label, Icon: item.Icon }))}
+                    selected={mobileCreateItems.map(item => item.key)}
+                    onToggle={key => toggleMobileAction(key as MobileCreateAction)}
+                  />
+                </div>
+              </div>
+            </SettingsSection>
+
             {/* Il ristorante in quanto luogo: quando è aperto, cosa è chiuso,
                 le routine di servizio, sala e cucina, l'identità legale. */}
             <SettingsSection id="imp-ristorante" label={t('settings.tabRestaurant')} description={t('settings.sectionRestaurantHint', 'Orari, chiusure, sala e cucina, dati del locale.')}>
@@ -4146,8 +4237,9 @@ const App: React.FC = () => {
             )}
             {/* Center "+" — circular, raised above the nav — opens context-aware action sheet.
                 Nascosto sulla vista Piattaforma: le azioni rapide creano dati
-                del tenant dell'admin, non dei clienti del SaaS. */}
-            {view !== ViewState.PLATFORM && <div className="flex-1 flex justify-center items-end">
+                del tenant dell'admin, non dei clienti del SaaS. Nascosto
+                anche a chi non può creare nessuna delle azioni. */}
+            {view !== ViewState.PLATFORM && mobileCreateActions.length > 0 && <div className="flex-1 flex justify-center items-end">
               <button
                 type="button"
                 onClick={() => setShowCreateSheet(v => !v)}
@@ -4191,23 +4283,18 @@ const App: React.FC = () => {
                 it — anchored to the same --ds-bottom-nav-clear the scroll
                 region uses, so it always clears the bar and the raised "+". */}
             <div
-              className="fixed left-4 right-4 z-[29] lg:hidden bg-[var(--ds-surface)] rounded-[var(--ds-radius)] shadow-[var(--ds-shadow-raised)]"
-              style={{ bottom: 'var(--ds-bottom-nav-clear)', animation: 'slideUpBehindNav 280ms ease-out both' }}
+              className="fixed left-4 right-4 z-[29] lg:hidden overflow-y-auto overscroll-contain bg-[var(--ds-surface)] rounded-[var(--ds-radius)] shadow-[var(--ds-shadow-raised)]"
+              style={{
+                bottom: 'var(--ds-bottom-nav-clear)',
+                maxHeight: 'calc(100dvh - var(--ds-bottom-nav-clear) - env(safe-area-inset-top, 0px) - 16px)',
+                animation: 'slideUpBehindNav 280ms ease-out both',
+              }}
             >
-              <div className="p-5 grid grid-cols-2 gap-4 justify-items-center">
-                {[
-                  { key: 'reservation', icon: <Calendar className="h-7 w-7" />, label: t('entity.booking'), action: () => { setNewReservationKind('standard'); setAutoOpenNewReservation(true); setShowCreateSheet(false); } },
-                  { key: 'walkin', icon: <UserCheck className="h-7 w-7" />, label: 'Walk-in', action: () => { setNewReservationKind('walkin'); setAutoOpenNewReservation(true); setShowCreateSheet(false); } },
-                  // «Piatto» mancava, e il menu "+" del desktop ce l'ha sempre
-                  // avuto: finché la pagina Menu teneva il suo bottone in testata
-                  // la lacuna non si vedeva: tolto quello, sul telefono non
-                  // restava NESSUNA strada per creare un piatto.
-                  ...(hasPermission('menu:full')
-                    ? [{ key: 'dish', icon: <UtensilsCrossed className="h-7 w-7" />, label: 'Piatto', action: () => { setView(ViewState.MENU); setAutoOpenNewDish(true); setShowCreateSheet(false); } }]
-                    : []),
-                  { key: 'shopping', icon: <ShoppingCart className="h-7 w-7" />, label: 'Spesa', action: () => { setView(ViewState.LISTA_DELLA_SPESA); setAutoOpenNewShoppingItem(true); setShowCreateSheet(false); } },
-                  { key: 'customer', icon: <BookUser className="h-7 w-7" />, label: t('entity.customer'), action: () => { setView(ViewState.CLIENTI); setAutoOpenNewCustomer(true); setShowCreateSheet(false); } },
-                ].map((tile, i) => (
+              {/* Le voci le sceglie l'utente in Impostazioni → Menu, fino a
+                  undici: oltre le sei si va su tre colonne, e il foglio scorre
+                  invece di uscire dallo schermo sui telefoni bassi. */}
+              <div className={`p-5 grid ${mobileCreateActions.length > 6 ? 'grid-cols-3' : 'grid-cols-2'} gap-4 justify-items-center`}>
+                {mobileCreateActions.map((tile, i) => (
                   <button
                     key={tile.key}
                     type="button"
