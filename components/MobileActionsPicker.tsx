@@ -1,0 +1,70 @@
+import React from 'react';
+import { useTranslation } from 'react-i18next';
+
+// Impostazioni → Menu: quali azioni compaiono nel pannello «+» del telefono.
+// I riquadri sono gli stessi del pannello (icona nella scatola, nome sotto),
+// così la scelta si fa guardando quello che poi si vedrà; acceso = pieno nel
+// colore delle azioni, spento = la scatola di sempre con l'icona spenta.
+// L'ultimo acceso non si spegne: un «+» con il pannello vuoto non serve a
+// niente, e il server rifiuta comunque l'elenco vuoto.
+
+export interface MobileActionOption {
+  key: string;
+  label: string;
+  Icon: React.ComponentType<{ className?: string }>;
+}
+
+interface MobileActionsPickerProps {
+  options: MobileActionOption[];
+  selected: string[];
+  onToggle: (key: string) => void;
+}
+
+const MobileActionsPicker: React.FC<MobileActionsPickerProps> = ({ options, selected, onToggle }) => {
+  const { t } = useTranslation('common', { useSuspense: false });
+  const selectedVisible = options.filter(o => selected.includes(o.key)).length;
+  return (
+    <div
+      className="rounded-[var(--ds-radius)] bg-[var(--ds-surface)] p-4 shadow-[var(--ds-shadow-card)]"
+      data-imp-parole="barra telefono piu crea azioni rapide pannello icone"
+    >
+      <p className="mb-1 text-[15px] font-semibold text-[var(--ds-text-primary)]">
+        {t('settings.mobileActions', 'Azioni del «+»')}
+      </p>
+      <p className="mb-4 text-[13px] text-[var(--ds-text-muted)]">
+        {t('settings.mobileActionsHint', 'Tocca per mostrarle o toglierle dal pannello. Almeno una resta.')}
+      </p>
+      <div className="grid grid-cols-3 gap-x-2 gap-y-3 sm:grid-cols-4 @2xl:grid-cols-6">
+        {options.map(({ key, label, Icon }) => {
+          const on = selected.includes(key);
+          const last = on && selectedVisible <= 1;
+          return (
+            <button
+              key={key}
+              type="button"
+              aria-pressed={on}
+              disabled={last}
+              onClick={() => onToggle(key)}
+              className="pressable flex min-w-0 flex-col items-center gap-1.5 rounded-[var(--ds-radius-sm)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] disabled:cursor-not-allowed"
+            >
+              <span
+                className={`flex h-14 w-full max-w-[64px] items-center justify-center rounded-[var(--ds-radius)] transition-colors ${
+                  on
+                    ? 'bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)]'
+                    : 'bg-[var(--ds-surface-row)] text-[var(--ds-text-muted)]'
+                }`}
+              >
+                <Icon className="h-6 w-6" />
+              </span>
+              <span className={`line-clamp-2 max-w-full text-center text-[12px] leading-tight ${on ? 'font-semibold text-[var(--ds-text-primary)]' : 'font-medium text-[var(--ds-text-muted)]'}`}>
+                {label}
+              </span>
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+};
+
+export default MobileActionsPicker;

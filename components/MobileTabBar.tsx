@@ -175,7 +175,7 @@ const MobileTabBar: React.FC<MobileTabBarProps> = ({
                     <span className="ds-tabbar-tile-face flex h-14 w-full max-w-[64px] items-center justify-center rounded-[var(--ds-radius)] text-[var(--ds-text-primary)] [&>svg]:size-6">
                       {action.icon}
                     </span>
-                    <span className="max-w-full truncate text-[12px] font-medium text-[var(--ds-text-secondary)]">
+                    <span className="line-clamp-2 max-w-full text-center text-[12px] font-medium leading-tight text-[var(--ds-text-secondary)]">
                       {action.label}
                     </span>
                   </button>
