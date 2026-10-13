@@ -210,6 +210,7 @@ Agente conversazionale AI (ElevenLabs) che **risponde al telefono del ristorante
 - Ogni chiamata al numero di Sofia passa prima da Sympotia, che la registra e apre la card «chi chiama», poi la passa a Sofia. Per chi chiama non cambia niente.
 - Se Sofia non è raggiungibile, squillano i dispositivi del CRM accesi, i cordless e i cellulari indicati in «Chi risponde al telefono», anche con «Solo Sofia». Se nessuno risponde in tempo, o non c'è niente da far squillare, il cliente sente un messaggio di cortesia («la richiameremo al più presto») invece del silenzio. La chiamata compare in Chiamate › Da ricontattare con la nota del perché, e titolare, direzione e manager ricevono la push «Chiamata persa».
 - Lo stesso vale se Sofia aggancia la chiamata ma non parla con il cliente (per esempio crediti voce finiti): dopo qualche minuto la chiamata diventa «persa» e da richiamare.
+- **Avviso di disservizio:** quando il fornitore della voce di Sofia (ElevenLabs) ha un disservizio, o le chiamate non riescono ad agganciarla, in cima a ogni schermata compare un avviso rosso: «Sofia può non rispondere», e le chiamate perse sono in Chiamate › Da ricontattare. Lo vedono i locali con Sofia attiva. Sparisce da solo quando il servizio torna normale; si può chiudere a mano su ogni dispositivo.
 
 **Chi risponde al telefono** (Impostazioni › AI)
 - Si sceglie se le chiamate al numero di Sofia le prende subito Sofia o se prima squilla il locale, per un numero di secondi a scelta (di serie 15). Se nessuno risponde in tempo, risponde Sofia.
@@ -960,6 +961,7 @@ La **ricerca** sta accanto alle schede (sopra, sul telefono) e resta visibile me
 
 | Data | Sezione | Modifica |
 |---|---|---|
+| 2026-10-13 | Agente vocale "Sofia" | Quando ElevenLabs, il fornitore della voce di Sofia, ha un disservizio, in cima al CRM compare un avviso: Sofia può non rispondere, le chiamate perse sono in Chiamate › Da ricontattare. L'avviso sparisce da solo quando il servizio torna normale. |
 | 2026-10-13 | Agente vocale "Sofia", Impostazioni | Se Sofia non è raggiungibile, la chiamata non si chiude più subito col messaggio di cortesia: squillano i dispositivi del CRM accesi, i cordless e i cellulari di «Chi risponde al telefono», anche con «Solo Sofia». Per questo in Impostazioni › AI i cellulari si vedono sempre. |
 | 2026-10-12 | Impostazioni | In Impostazioni › AI › Minuti di Sofia il mese è scritto nella lingua dell'app («ottobre»), non in quella del browser: su un computer in inglese compariva «October». |
 | 2026-10-12 | Impostazioni | In Attività programmate e Promemoria il tasto Esc chiude la finestra aperta, come il clic fuori o «Annulla»: nella scheda nuova, nella modifica e nella richiesta di conferma prima di eliminare. |

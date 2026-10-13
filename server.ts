@@ -26676,17 +26676,20 @@ app.post('/client-errors', authenticate, clientErrorLimiter, async (req: any, re
 });
 
 // Il banner «problema noto»: lo legge ogni utente, il WHERE sceglie quelli
-// che riguardano il suo ristorante (lista vuota = tutti).
+// che riguardano il suo ristorante (lista vuota = tutti). Quello automatico
+// di Sofia solo dove Sofia è attiva.
 app.get('/incidents/active', authenticate, async (req: any, res) => {
     try {
+        const voiceOn = await isFeatureEnabledForTenant(req.tenantId!, 'voice');
         // rls-bypass: gli avvisi vivono nel tenant di chi li scrive e si leggono da ogni ristorante; il WHERE filtra per destinatario
         const r = await runAsPlatform(() => queryWithRetry(
             `SELECT id, message, level, created_at FROM platform_incidents
               WHERE resolved_at IS NULL
                 AND (cardinality(target_tenant_ids) = 0 OR $1::bigint = ANY(target_tenant_ids))
+                AND (auto_kind IS NULL OR (auto_kind = 'sofia' AND $2::boolean))
               ORDER BY (level = 'critico') DESC, created_at DESC
               LIMIT 3`,
-            [req.tenantId!]
+            [req.tenantId!, voiceOn]
         ));
         res.json({ incidents: r.rows });
     } catch (err) {
@@ -26870,7 +26873,79 @@ const runPlatformHealthTick = async (): Promise<void> => {
         await notifyPlatformAlert(c.kind, c.tenantId, String(t.rows[0]?.name ?? `tenant ${c.tenantId}`), c.detail);
     }
     if (changed) emitHealthToPlatform();
+    // Il banner di Sofia ha la sua strada: un errore lì non ferma gli avvisi.
+    await syncSofiaOutageIncident().catch((err: any) => console.warn('[health] controllo di Sofia fallito:', err?.message || err));
 };
+
+/* ── Sofia non raggiungibile: il banner si apre e si chiude da solo ───────
+   13/10/2026: ElevenLabs in timeout per ore, e in sala nessuno sapeva
+   perché il telefono finiva nel messaggio di cortesia. Due segnali:
+   - la pagina di stato di ElevenLabs, con Conversations o Telephony in
+     disservizio;
+   - i nostri register-call: almeno due falliti nell'ultima mezz'ora, e
+     nessuna chiamata agganciata a Sofia dopo l'ultimo.
+   Uno dei due acceso apre il banner per i locali con Sofia attiva; spenti
+   tutti e due, si chiude. Una pagina di stato che non risponde non dice
+   niente su Sofia: in quel giro il banner resta com'è, salvo i nostri
+   errori. */
+
+const ELEVENLABS_STATUS_URL = process.env.ELEVENLABS_STATUS_URL || 'https://status.elevenlabs.io/api/v2/summary.json';
+const SOFIA_STATUS_COMPONENTS = /conversation|telephony/i;
+const SOFIA_OUTAGE_MESSAGE = 'Disservizio di ElevenLabs, il fornitore della voce: Sofia può non rispondere. Le chiamate perse finiscono in Chiamate › Da ricontattare.';
+
+/** I componenti di Sofia in disservizio secondo ElevenLabs ([] = tutto ok),
+ *  o null se la pagina di stato non ha risposto come ci si aspetta. */
+async function elevenLabsOutageComponents(): Promise<string[] | null> {
+    try {
+        const res = await fetch(ELEVENLABS_STATUS_URL, { signal: AbortSignal.timeout(8000) });
+        if (!res.ok) return null;
+        const body: any = await res.json();
+        if (!Array.isArray(body?.components)) return null;
+        return body.components
+            .filter((c: any) => SOFIA_STATUS_COMPONENTS.test(String(c?.name ?? '')) && ['partial_outage', 'major_outage'].includes(c?.status))
+            .map((c: any) => String(c.name));
+    } catch {
+        return null;
+    }
+}
+
+async function sofiaRegisterCallFailing(): Promise<boolean> {
+    const r = await queryWithRetry(
+        `SELECT COUNT(*)::int AS failures, MAX(e.created_at) AS last_failure,
+                (SELECT MAX(pc.answered_at) FROM phone_calls pc
+                  WHERE pc.status = 'sofia' AND pc.answered_at > now() - interval '30 minutes') AS last_ok
+           FROM app_errors e
+          WHERE e.origin = 'sofia' AND e.source = 'register-call' AND e.created_at > now() - interval '30 minutes'`
+    );
+    const row = r.rows[0];
+    if (!row || row.failures < 2) return false;
+    return !row.last_ok || new Date(row.last_ok) < new Date(row.last_failure);
+}
+
+async function syncSofiaOutageIncident(): Promise<void> {
+    const [components, failing] = await Promise.all([elevenLabsOutageComponents(), sofiaRegisterCallFailing()]);
+    const open = await queryWithRetry(`SELECT id FROM platform_incidents WHERE auto_kind = 'sofia' AND resolved_at IS NULL`);
+    const outage = failing || (components?.length ?? 0) > 0;
+    if (outage && open.rows.length === 0) {
+        // Nel ristorante di casa della piattaforma, come i banner del pannello.
+        const ins = await queryWithRetry(
+            `INSERT INTO platform_incidents (tenant_id, message, level, auto_kind)
+             VALUES ($1, $2, 'critico', 'sofia')
+             ON CONFLICT (auto_kind) WHERE resolved_at IS NULL AND auto_kind IS NOT NULL DO NOTHING
+             RETURNING id`,
+            [PUBLIC_TENANT_ID, SOFIA_OUTAGE_MESSAGE]
+        );
+        if (ins.rows.length === 0) return;
+        console.warn('[health] Sofia non raggiungibile: banner acceso', { components, register_call_failing: failing });
+    } else if (!outage && open.rows.length > 0 && components !== null) {
+        await queryWithRetry(`UPDATE platform_incidents SET resolved_at = now() WHERE auto_kind = 'sofia' AND resolved_at IS NULL`);
+        console.log('[health] Sofia di nuovo raggiungibile: banner spento');
+    } else {
+        return;
+    }
+    void broadcastIncidentChange([]);
+    emitHealthToPlatform();
+}
 
 const startPlatformHealthWatchdog = () => {
     const lockedTick = () => runSchedulerTickWithLock(SCHEDULER_LOCK_PLATFORM_HEALTH, 'platform-health', runPlatformHealthTick)
