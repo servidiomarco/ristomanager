@@ -989,6 +989,13 @@ Prefer "load more" or virtualised scroll on mobile.
 inset from the viewport by `chrome-inset`, sitting on the canvas. Not edge-to-edge rails. At
 `<md` the sidebar becomes a bottom tab bar.
 
+**The bottom tab bar** (`MobileTabBar.tsx`) is a glass stadium of icons only — the name rides
+on `aria-label` — with one pill that slides under the active tab, and the "+" as a separate
+circle beside it. The "+" does not open a sheet: it turns the bar itself into the «Crea» panel,
+so the actions appear where the thumb already is, and turns back with the "×" or Esc. The
+motion (pinch, blur, spring, the press that lights up) lives in the «Barra mobile» block of
+`index.css`.
+
 Because it floats, the bar overlaps the page rather than pushing it — every screen has to
 reserve the height itself, and the screen must own the box that reservation applies to. See
 §8.14; it is the rule most often missing.
@@ -1091,7 +1098,7 @@ carry the close circle** (`h-9 w-9`, `action-fg`, hover `white/10`). Announced v
 
 **It stays at the bottom on a phone**, centred and inset, anchored to
 `--ds-bottom-nav-clear` — the same clearance the scroll regions use, so it clears the tab bar
-and the raised "+" instead of covering them. Bottom-right at `≥md`. A toast reports on the
+and the "+" beside it instead of covering them. Bottom-right at `≥md`. A toast reports on the
 action just taken, with the thumb still where it took it; the top of a phone is the far corner
 from there, and an undo with five seconds on it cannot ask for a trip across the screen.
 

@@ -1005,14 +1005,149 @@ body {
   --ds-print-positive: #059669;       /* "✓ arrivato" */
 }
 
-/* Clearance for the floating mobile bottom bar: bar height (68px) + its 16px
-   offset + the raised "+" overhang + the iOS safe-area inset. Exposed as a
+/* Clearance for the floating mobile bottom bar: bar height (60px) + its 16px
+   offset + 16px of air + the iOS safe-area inset. The "+" sits beside the bar
+   now, not raised above it, so there is no overhang to clear. Exposed as a
    variable so the bar, the scroll region and any sheet anchored above the bar
    all derive from ONE number instead of drifting apart. Track this against the
-   bar's own bottom offset in App.tsx — they move together. */
-:root { --ds-bottom-nav-clear: calc(env(safe-area-inset-bottom, 0px) + 108px); }
+   bar's own bottom offset in MobileTabBar.tsx — they move together. */
+:root { --ds-bottom-nav-clear: calc(env(safe-area-inset-bottom, 0px) + 92px); }
 .pb-mobile-nav { padding-bottom: var(--ds-bottom-nav-clear); }
 @media (min-width: 1024px) { .pb-mobile-nav { padding-bottom: 0; } }
+
+/* ── Barra mobile (MobileTabBar.tsx) ───────────────────────────────────────
+   Pillola di vetro con le schede + pulsante tondo che la trasforma nel
+   pannello «Crea». Il contenitore cambia altezza e raggio, e intanto si
+   stringe ai lati e torna largo (il «pizzico»): è quello che fa leggere il
+   pannello come la barra che si allarga, non come un foglio che arriva.
+   Gli strati interni restano larghi quanto la barra (--ds-tabbar-w), così il
+   contenitore li ritaglia invece di schiacciarli. Le animazioni una tantum
+   alternano due keyframe identici (-a/-b) per ripartire senza rimontare
+   l'elemento. Il reduce-motion globale le azzera tutte. */
+.ds-tabbar {
+  --tb-spring: cubic-bezier(0.3, 1.3, 0.5, 1);
+  --tb-out: cubic-bezier(0.4, 0, 0.2, 1);
+  --tb-pill: color-mix(in srgb, var(--ds-text-primary) 8%, transparent);
+  --tb-tile: color-mix(in srgb, var(--ds-text-primary) 6%, transparent);
+  --tb-glow: color-mix(in srgb, var(--ds-text-primary) 16%, transparent);
+  --tb-flash: color-mix(in srgb, var(--ds-text-primary) 14%, transparent);
+}
+/* Nel buio il tocco è una luce, come nel vetro: il riquadro premuto e il «+»
+   si accendono quasi di bianco invece di scurirsi appena. */
+.dark .ds-tabbar {
+  --tb-pill: color-mix(in srgb, var(--ds-text-primary) 12%, transparent);
+  --tb-tile: color-mix(in srgb, var(--ds-text-primary) 9%, transparent);
+  --tb-glow: color-mix(in srgb, var(--ds-text-primary) 55%, transparent);
+  --tb-flash: color-mix(in srgb, var(--ds-text-primary) 80%, transparent);
+}
+.ds-tabbar-glass {
+  background: color-mix(in srgb, var(--ds-surface) 80%, transparent);
+  -webkit-backdrop-filter: blur(20px) saturate(1.6);
+  backdrop-filter: blur(20px) saturate(1.6);
+  box-shadow: var(--ds-shadow-raised), inset 0 0 0 1px color-mix(in srgb, var(--ds-border-strong) 55%, transparent);
+}
+
+.ds-tabbar-morph {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 60px;
+  border-radius: 30px;
+  overflow: hidden;
+  transition: height 380ms var(--tb-out), border-radius 320ms var(--tb-out);
+}
+.ds-tabbar-morph[data-open='true'] {
+  height: var(--ds-tabbar-h);
+  border-radius: calc(var(--ds-radius) + var(--ds-radius-sm));
+  transition: height 560ms var(--tb-spring), border-radius 300ms var(--tb-out);
+}
+.ds-tabbar-morph[data-toggle='a'] { animation: ds-tabbar-pinch-a 520ms var(--tb-out); }
+.ds-tabbar-morph[data-toggle='b'] { animation: ds-tabbar-pinch-b 520ms var(--tb-out); }
+@keyframes ds-tabbar-pinch-a { 0%, 100% { left: 0; right: 0; } 35% { left: 14%; right: 14%; } }
+@keyframes ds-tabbar-pinch-b { 0%, 100% { left: 0; right: 0; } 35% { left: 14%; right: 14%; } }
+
+.ds-tabbar-layer {
+  position: absolute;
+  bottom: 0;
+  left: 50%;
+  width: var(--ds-tabbar-w);
+  translate: -50% 0;
+}
+.ds-tabbar-tabs {
+  display: flex;
+  height: 60px;
+  padding: 6px;
+  transition: opacity 220ms ease 140ms, filter 260ms ease 140ms, transform 420ms var(--tb-spring) 140ms;
+}
+.ds-tabbar-morph[data-open='true'] .ds-tabbar-tabs {
+  opacity: 0;
+  filter: blur(6px);
+  transform: scale(0.9);
+  transition: opacity 140ms ease, filter 160ms ease, transform 200ms var(--tb-out);
+}
+.ds-tabbar-grid {
+  opacity: 0;
+  filter: blur(10px);
+  transform: translateY(10px) scale(0.92);
+  transform-origin: 50% 100%;
+  transition: opacity 120ms ease, filter 160ms ease, transform 200ms var(--tb-out);
+}
+.ds-tabbar-morph[data-open='true'] .ds-tabbar-grid {
+  opacity: 1;
+  filter: none;
+  transform: none;
+  transition: opacity 220ms ease 110ms, filter 320ms ease 110ms, transform 520ms var(--tb-spring) 70ms;
+}
+
+/* L'indicatore scivola con una molla e intanto si allunga e si schiaccia,
+   come una goccia che corre sotto le icone. */
+.ds-tabbar-indicator {
+  position: absolute;
+  top: 6px;
+  bottom: 6px;
+  left: 6px;
+  transition: transform 460ms var(--tb-spring), opacity 200ms ease;
+}
+.ds-tabbar-indicator-blob {
+  display: block;
+  width: 100%;
+  height: 100%;
+  border-radius: 9999px;
+  background: var(--tb-pill);
+}
+.ds-tabbar-indicator[data-move='a'] .ds-tabbar-indicator-blob { animation: ds-tabbar-stretch-a 460ms var(--tb-out); }
+.ds-tabbar-indicator[data-move='b'] .ds-tabbar-indicator-blob { animation: ds-tabbar-stretch-b 460ms var(--tb-out); }
+@keyframes ds-tabbar-stretch-a { 0%, 100% { transform: scale(1, 1); } 40% { transform: scale(1.22, 0.88); } }
+@keyframes ds-tabbar-stretch-b { 0%, 100% { transform: scale(1, 1); } 40% { transform: scale(1.22, 0.88); } }
+
+.ds-tabbar-tab { transition: color 200ms ease; }
+.ds-tabbar-tab > span { transition: transform 300ms var(--tb-spring); }
+.ds-tabbar-tab:active > span { transform: scale(0.86); transition-duration: 120ms; }
+
+/* Il riquadro premuto cresce e si illumina, poi torna giù con la molla. */
+.ds-tabbar-tile-face {
+  background: var(--tb-tile);
+  transition: transform 380ms var(--tb-spring), background-color 220ms ease;
+}
+.ds-tabbar-tile:active .ds-tabbar-tile-face {
+  transform: scale(1.12);
+  background: var(--tb-glow);
+  transition-duration: 160ms, 120ms;
+}
+
+.ds-tabbar-fab-face { transition: transform 300ms var(--tb-spring); }
+.ds-tabbar-fab:active .ds-tabbar-fab-face { transform: scale(0.92); transition-duration: 120ms; }
+.ds-tabbar-fab[data-press='a'] .ds-tabbar-fab-face { animation: ds-tabbar-bump-a 460ms var(--tb-out); }
+.ds-tabbar-fab[data-press='b'] .ds-tabbar-fab-face { animation: ds-tabbar-bump-b 460ms var(--tb-out); }
+@keyframes ds-tabbar-bump-a { 0% { transform: scale(0.92); } 35% { transform: scale(1.12); } 100% { transform: scale(1); } }
+@keyframes ds-tabbar-bump-b { 0% { transform: scale(0.92); } 35% { transform: scale(1.12); } 100% { transform: scale(1); } }
+.ds-tabbar-fab-flash { background: var(--tb-flash); opacity: 0; }
+.ds-tabbar-fab[data-press='a'] .ds-tabbar-fab-flash { animation: ds-tabbar-flash-a 460ms ease-out; }
+.ds-tabbar-fab[data-press='b'] .ds-tabbar-fab-flash { animation: ds-tabbar-flash-b 460ms ease-out; }
+@keyframes ds-tabbar-flash-a { 0%, 100% { opacity: 0; } 25% { opacity: 1; } }
+@keyframes ds-tabbar-flash-b { 0%, 100% { opacity: 0; } 25% { opacity: 1; } }
+.ds-tabbar-fab-icon { transition: transform 480ms var(--tb-spring); }
 
 /* ── Toast (§Toast) ────────────────────────────────────────────────────────
    Un solo ancoraggio per tutte le notifiche: centrato sopra la bottom nav su

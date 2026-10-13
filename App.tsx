@@ -7,6 +7,7 @@ import { MenuManager } from './components/MenuManager';
 import { ReservationList, type NewReservationPrefill } from './components/ReservationList';
 import { LoginPage } from './components/LoginPage';
 import { ProfiloSheet } from './components/ProfiloSheet';
+import MobileTabBar from './components/MobileTabBar';
 import { OnboardingWizard } from './components/OnboardingWizard';
 import { BookingChannelsManager } from './components/BookingChannelsManager';
 import { PlatformPanel, ImpersonationBanner, decodeJwtPayload } from './components/PlatformPanel';
@@ -4102,129 +4103,77 @@ const App: React.FC = () => {
         {/* Bottom Navigation - Visible only on mobile */}
         {/* Floating bottom bar — a card on the canvas, matching the desktop
             chrome. Offset by the safe-area inset so it clears the iOS home
-            indicator instead of sitting under it. */}
+            indicator instead of sitting under it. Il «+» accanto alla barra la
+            trasforma nel pannello «Crea» (MobileTabBar.tsx). */}
         {/* Sparisce quando una schermata chiede tutto lo schermo: dentro una
             comanda il pollice lavora sul piatto e sull'Invia, e la barra di
             navigazione sotto sarebbe solo un bersaglio per uscire per sbaglio
             dal tavolo aperto. Si torna indietro con la freccia in testata. */}
-        <nav
-          // Stadio pieno, non il raggio delle scatole: questa barra GALLEGGIA
-          // sopra il contenuto invece di appoggiarsi a un bordo, e una forma
-          // chiusa si stacca da ciò che le scorre sotto. A sei pixel sembrava
-          // una scheda ritagliata male.
-          className={`fixed left-4 right-4 rounded-full bg-[var(--ds-surface)] shadow-[var(--ds-shadow-raised)] lg:hidden z-30 ${
-            immersive ? 'hidden' : ''
-          }`}
-          style={{ bottom: 'calc(env(safe-area-inset-bottom, 0px) + 16px)' }}
-          aria-label={t('aria.mobileNav')}
-        >
-          <div className="flex items-stretch py-2 px-2 gap-1">
-            {view !== ViewState.PLATFORM && canAccessView(ViewState.DASHBOARD) && (
-              <BottomNavItem
-                icon={<LayoutDashboard size={20} />}
-                label="Dashboard"
-                active={view === ViewState.DASHBOARD}
-                onClick={() => {
-                  // Mirror the desktop sidebar behaviour: snap globalDate to
-                  // today when arriving on Dashboard from another view so the
-                  // live-service hero, KPIs and Stato Tavoli describe now.
-                  if (view !== ViewState.DASHBOARD) {
-                    const today = new Date();
-                    if (globalDate.toDateString() !== today.toDateString()) setGlobalDate(today);
-                  }
-                  setView(ViewState.DASHBOARD);
-                }}
-              />
-            )}
-            {view !== ViewState.PLATFORM && canAccessView(ViewState.RESERVATIONS) && (
-              <BottomNavItem
-                icon={<Calendar size={20} />}
-                label={t('nav.items.reservations', 'Prenotazioni')}
-                active={view === ViewState.RESERVATIONS}
-                onClick={() => setView(ViewState.RESERVATIONS)}
-              />
-            )}
-            {/* Center "+" — circular, raised above the nav — opens context-aware action sheet.
-                Nascosto sulla vista Piattaforma: le azioni rapide creano dati
-                del tenant dell'admin, non dei clienti del SaaS. */}
-            {view !== ViewState.PLATFORM && <div className="flex-1 flex justify-center items-end">
-              <button
-                type="button"
-                onClick={() => setShowCreateSheet(v => !v)}
-                aria-label={t('nav.createNew', 'Crea nuovo')}
-                className="h-14 w-14 -translate-y-4 rounded-full bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] shadow-[var(--ds-shadow-raised)] flex items-center justify-center active:scale-95 transition-all ring-4 ring-[var(--ds-canvas)]"
-              >
-                <Plus className="h-6 w-6 transition-transform duration-200" style={{ transform: showCreateSheet ? 'rotate(45deg)' : 'rotate(0deg)' }} />
-              </button>
-            </div>}
-            {/* Comunicazioni replaces the old Notifiche tab, which duplicated
-                the top-bar bell. The badge rolls up all three channels. */}
-            {view !== ViewState.PLATFORM && commsTargetView !== undefined && (
-              <BottomNavItem
-                icon={<MessagesSquare size={20} />}
-                label={t('nav.groups.communications', 'Comunicazioni')}
-                active={isCommsView}
-                badge={commsBadgeTotal}
-                onClick={() => setView(commsTargetView)}
-              />
-            )}
-            {altroNavItems.length > 0 && (
-              <BottomNavItem
-                icon={<MoreHorizontal size={20} />}
-                label={t('nav.more', 'Altro')}
-                active={showMoreMenu || altroNavItems.some(item => view === item.view)}
-                onClick={() => setShowMoreMenu(true)}
-              />
-            )}
-          </div>
-        </nav>
-
-        {/* "Create" action sheet — slides up from behind the bottom nav */}
-        {showCreateSheet && (
-          <>
-            <div
-              className="fixed inset-0 z-[29] lg:hidden bg-[var(--ds-backdrop)]"
-              style={{ animation: 'fadeIn 280ms ease-out both' }}
-              onClick={() => setShowCreateSheet(false)}
-            />
-            {/* Floating card that sits ABOVE the bottom bar rather than behind
-                it — anchored to the same --ds-bottom-nav-clear the scroll
-                region uses, so it always clears the bar and the raised "+". */}
-            <div
-              className="fixed left-4 right-4 z-[29] lg:hidden bg-[var(--ds-surface)] rounded-[var(--ds-radius)] shadow-[var(--ds-shadow-raised)]"
-              style={{ bottom: 'var(--ds-bottom-nav-clear)', animation: 'slideUpBehindNav 280ms ease-out both' }}
-            >
-              <div className="p-5 grid grid-cols-2 gap-4 justify-items-center">
-                {[
-                  { key: 'reservation', icon: <Calendar className="h-7 w-7" />, label: t('entity.booking'), action: () => { setNewReservationKind('standard'); setAutoOpenNewReservation(true); setShowCreateSheet(false); } },
-                  { key: 'walkin', icon: <UserCheck className="h-7 w-7" />, label: 'Walk-in', action: () => { setNewReservationKind('walkin'); setAutoOpenNewReservation(true); setShowCreateSheet(false); } },
-                  // «Piatto» mancava, e il menu "+" del desktop ce l'ha sempre
-                  // avuto: finché la pagina Menu teneva il suo bottone in testata
-                  // la lacuna non si vedeva: tolto quello, sul telefono non
-                  // restava NESSUNA strada per creare un piatto.
-                  ...(hasPermission('menu:full')
-                    ? [{ key: 'dish', icon: <UtensilsCrossed className="h-7 w-7" />, label: 'Piatto', action: () => { setView(ViewState.MENU); setAutoOpenNewDish(true); setShowCreateSheet(false); } }]
-                    : []),
-                  { key: 'shopping', icon: <ShoppingCart className="h-7 w-7" />, label: 'Spesa', action: () => { setView(ViewState.LISTA_DELLA_SPESA); setAutoOpenNewShoppingItem(true); setShowCreateSheet(false); } },
-                  { key: 'customer', icon: <BookUser className="h-7 w-7" />, label: t('entity.customer'), action: () => { setView(ViewState.CLIENTI); setAutoOpenNewCustomer(true); setShowCreateSheet(false); } },
-                ].map((tile, i) => (
-                  <button
-                    key={tile.key}
-                    type="button"
-                    onClick={tile.action}
-                    className="flex flex-col items-center gap-2 focus:outline-none active:scale-95 transition-transform"
-                    style={{ animation: `tileIn 150ms ease-out ${i * 40}ms both` }}
-                  >
-                    <div className="w-20 h-20 rounded-[var(--ds-radius)] bg-[var(--ds-surface-row)] flex items-center justify-center text-[var(--ds-text-primary)]">
-                      {tile.icon}
-                    </div>
-                    <span className="text-[13px] font-semibold text-[var(--ds-text-primary)]">{tile.label}</span>
-                  </button>
-                ))}
-              </div>
-            </div>
-          </>
-        )}
+        <MobileTabBar
+          hidden={immersive}
+          open={showCreateSheet}
+          onOpenChange={setShowCreateSheet}
+          ariaLabel={t('aria.mobileNav')}
+          createLabel={t('nav.createNew', 'Crea nuovo')}
+          closeLabel={t('actions.close', 'Chiudi')}
+          tabs={[
+            ...(view !== ViewState.PLATFORM && canAccessView(ViewState.DASHBOARD) ? [{
+              key: 'dashboard',
+              icon: <LayoutDashboard />,
+              label: 'Dashboard',
+              active: view === ViewState.DASHBOARD,
+              onClick: () => {
+                // Mirror the desktop sidebar behaviour: snap globalDate to
+                // today when arriving on Dashboard from another view so the
+                // live-service hero, KPIs and Stato Tavoli describe now.
+                if (view !== ViewState.DASHBOARD) {
+                  const today = new Date();
+                  if (globalDate.toDateString() !== today.toDateString()) setGlobalDate(today);
+                }
+                setView(ViewState.DASHBOARD);
+              },
+            }] : []),
+            ...(view !== ViewState.PLATFORM && canAccessView(ViewState.RESERVATIONS) ? [{
+              key: 'reservations',
+              icon: <Calendar />,
+              label: t('nav.items.reservations', 'Prenotazioni'),
+              active: view === ViewState.RESERVATIONS,
+              onClick: () => setView(ViewState.RESERVATIONS),
+            }] : []),
+            // Comunicazioni replaces the old Notifiche tab, which duplicated
+            // the top-bar bell. The badge rolls up all three channels.
+            ...(view !== ViewState.PLATFORM && commsTargetView !== undefined ? [{
+              key: 'comms',
+              icon: <MessagesSquare />,
+              label: t('nav.groups.communications', 'Comunicazioni'),
+              active: isCommsView,
+              badge: commsBadgeTotal,
+              onClick: () => setView(commsTargetView),
+            }] : []),
+            ...(altroNavItems.length > 0 ? [{
+              key: 'more',
+              icon: <MoreHorizontal />,
+              label: t('nav.more', 'Altro'),
+              active: showMoreMenu || altroNavItems.some(item => view === item.view),
+              onClick: () => setShowMoreMenu(true),
+            }] : []),
+          ]}
+          // Nessuna azione sulla vista Piattaforma: le azioni rapide creano
+          // dati del tenant dell'admin, non dei clienti del SaaS.
+          actions={view === ViewState.PLATFORM ? [] : [
+            { key: 'reservation', icon: <Calendar />, label: t('entity.booking'), onClick: () => { setNewReservationKind('standard'); setAutoOpenNewReservation(true); setShowCreateSheet(false); } },
+            { key: 'walkin', icon: <UserCheck />, label: 'Walk-in', onClick: () => { setNewReservationKind('walkin'); setAutoOpenNewReservation(true); setShowCreateSheet(false); } },
+            // «Piatto» mancava, e il menu "+" del desktop ce l'ha sempre
+            // avuto: finché la pagina Menu teneva il suo bottone in testata
+            // la lacuna non si vedeva: tolto quello, sul telefono non
+            // restava NESSUNA strada per creare un piatto.
+            ...(hasPermission('menu:full')
+              ? [{ key: 'dish', icon: <UtensilsCrossed />, label: 'Piatto', onClick: () => { setView(ViewState.MENU); setAutoOpenNewDish(true); setShowCreateSheet(false); } }]
+              : []),
+            { key: 'shopping', icon: <ShoppingCart />, label: 'Spesa', onClick: () => { setView(ViewState.LISTA_DELLA_SPESA); setAutoOpenNewShoppingItem(true); setShowCreateSheet(false); } },
+            { key: 'customer', icon: <BookUser />, label: t('entity.customer'), onClick: () => { setView(ViewState.CLIENTI); setAutoOpenNewCustomer(true); setShowCreateSheet(false); } },
+          ]}
+        />
 
         {/* "Altro" bottom sheet — mobile */}
         {showMoreMenu && (
@@ -4413,39 +4362,6 @@ const SidebarItem = ({ icon, label, active, onClick, collapsed = false, badge }:
         )}
       </>
     )}
-  </button>
-);
-
-// Helper Component for Bottom Navigation (mobile)
-const BottomNavItem = ({ icon, label, active, onClick, badge }: { icon: React.ReactNode, label: string, active: boolean, onClick: () => void, badge?: number }) => (
-  <button
-    onClick={onClick}
-    aria-current={active ? 'page' : undefined}
-    aria-label={label}
-    // Pastiglia dentro lo stadio: la barra è tonda piena, e un rettangolo
-    // smussato appoggiato alla sua curva litiga col bordo. Gli angoli
-    // concentrici si seguono — tondo dentro tondo.
-    className={`pressable flex flex-1 flex-col items-center justify-center gap-1 px-1 py-1.5 max-[420px]:py-[13px] rounded-full transition-colors ${
-      active
-        ? 'bg-[var(--ds-surface-row)] text-[var(--ds-text-primary)]'
-        : 'text-[var(--ds-text-muted)]'
-    }`}
-  >
-    {/* Icon-only mode trades labels for a bit more icon: 20 → 24px. */}
-    <span className="relative max-[420px]:[&>svg]:size-6">
-      {icon}
-      {badge !== undefined && badge > 0 && (
-        <span className="absolute -top-1.5 -right-2 min-w-[16px] h-4 px-1 rounded-[var(--ds-radius-control)] bg-[var(--ds-critical-solid)] text-[var(--ds-critical-fg)] text-[9px] font-semibold tabular-nums flex items-center justify-center ring-2 ring-[var(--ds-surface)]">
-          {badge > 99 ? '99+' : badge}
-        </span>
-      )}
-    </span>
-    {/* On narrow phones (iPhone SE, ~Pixel/Xiaomi widths) four labels plus
-        the raised "+" don't fit and the last one clips past the card edge —
-        below 420px the bar goes icon-only (aria-label keeps the name). */}
-    <span className={`text-[11px] whitespace-nowrap max-[420px]:hidden ${active ? 'font-semibold' : 'font-medium'}`}>
-      {label}
-    </span>
   </button>
 );
 
