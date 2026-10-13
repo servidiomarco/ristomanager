@@ -2323,10 +2323,12 @@ app.post('/webhook/t/:tenantToken/elevenlabs/post-call', async (req, res) => {
 // Il numero Twilio di Sofia punta qui invece che all'integrazione nativa di
 // ElevenLabs: ogni chiamata lascia una riga in phone_calls e apre il banner
 // «chi chiama» prima ancora che risponda qualcuno, poi Sofia la prende con
-// register-call. Se Sofia non c'è, il cliente sente un messaggio di cortesia
-// e lo staff trova la chiamata in Chiamate › Da ricontattare, con la push:
-// ad agosto 2026 175 chiamate erano cadute nel silenzio senza che nessuno lo
-// sapesse. Il path va col token del tenant: Twilio firma l'URL completo.
+// register-call. Se Sofia non c'è, squilla il locale (quando c'è qualcuno da
+// far squillare); se nessuno risponde, il cliente sente un messaggio di
+// cortesia e lo staff trova la chiamata in Chiamate › Da ricontattare, con
+// la push: ad agosto 2026 175 chiamate erano cadute nel silenzio senza che
+// nessuno lo sapesse. Il path va col token del tenant: Twilio firma l'URL
+// completo.
 
 // Solo i numeri veri vanno a register-call e in rubrica: Twilio manda
 // «anonymous» o simili per i numeri nascosti, «client:…» per il browser.
@@ -2462,12 +2464,47 @@ const voiceStepUrl = (req: express.Request, step: string, parentSid?: string): s
     `${req.protocol}://${req.get('host')}/webhook/t/${req.params.tenantToken}/voice/${step}`
     + (parentSid ? `?p=${encodeURIComponent(parentSid)}` : '');
 
-/** Passa la chiamata a Sofia con register-call. Se non si aggancia, il
- *  chiamante sente il messaggio di cortesia e la chiamata risulta persa. */
+interface LocaleRingTargets { clients: string[]; sips: string[]; mobiles: string[] }
+
+/** Chi squilla in sala. I dispositivi del CRM solo se il softphone è
+ *  configurato e se si sono fatti vivi di recente: uno spento da giorni non
+ *  serve. */
+async function localeRingTargets(tenantId: number, routing: PhoneRouting, caller: string): Promise<LocaleRingTargets> {
+    return {
+        clients: softphoneConfig() ? await ringingDeviceIdentities(tenantId) : [],
+        sips: await ringingSipUris(tenantId, caller),
+        mobiles: routing.mobiles,
+    };
+}
+
+const hasRingTargets = (t: LocaleRingTargets): boolean =>
+    t.clients.length > 0 || t.sips.length > 0 || t.mobiles.length > 0;
+
+/** Lo squillo in sala; finito il tempo Twilio chiede after-dial. */
+const ringLocaleTwiml = (
+    req: express.Request, targets: LocaleRingTargets, ringSeconds: number,
+    call: { callSid: string; caller: string; to: string },
+): string =>
+    dialLocaleTwiml({
+        ...targets,
+        ringSeconds,
+        callerId: call.to,
+        parentCallSid: call.callSid,
+        caller: call.caller,
+        afterDialUrl: voiceStepUrl(req, 'after-dial'),
+        whisperUrl: voiceStepUrl(req, 'whisper', call.callSid),
+        clientAnsweredUrl: voiceStepUrl(req, 'client-answered', call.callSid),
+    });
+
+/** Passa la chiamata a Sofia con register-call. Se non si aggancia squilla
+ *  il locale, quando `ringLocaleInstead` trova qualcuno da far squillare;
+ *  altrimenti il chiamante sente il messaggio di cortesia e la chiamata
+ *  risulta persa. */
 async function connectPhoneCallToSofia(
     tenantId: number, res: express.Response,
     call: { callSid: string; caller: string; fromRaw: string; to: string },
     announced: Promise<unknown>,
+    ringLocaleInstead?: () => Promise<string | null>,
 ): Promise<void> {
     const businessName = businessIdentity(tenantId).voiceName;
     try {
@@ -2487,6 +2524,25 @@ async function connectPhoneCallToSofia(
     } catch (err: any) {
         console.error('[Telefono] Sofia non agganciata:', err?.message || err);
         void recordAppError(tenantId, 'sofia', 'register-call', err);
+        // 13/10/2026: ElevenLabs in timeout per ore, e ogni chiamata finiva
+        // nel messaggio di cortesia con il personale in sala e i cellulari a
+        // portata di mano. Meglio farli squillare.
+        const dial = ringLocaleInstead ? await ringLocaleInstead().catch(() => null) : null;
+        if (dial) {
+            // Cambia il giro: a fine squillo after-dial non riprova Sofia, e
+            // chi riattacca mentre squilla va richiamato.
+            await queryWithRetry(
+                `UPDATE phone_calls SET routing = 'ripiego_locale' WHERE call_sid = $1 AND tenant_id = $2`,
+                [call.callSid, tenantId]
+            ).catch(e => console.warn('[Telefono] ripiego sul locale non registrato:', e?.message || e));
+            res.type('text/xml').send(dial);
+            void announced.then(() => {
+                const live = updateLiveCallStage(tenantId, call.callSid, 'ringing');
+                if (live) socketService?.broadcastToRolesRoom(tenantId, PHONE_BANNER_ROLES, 'phoneCall:updated', { id: live.id, stage: live.stage });
+            });
+            console.warn('[Telefono] Sofia non raggiungibile, squilla il locale', { call_sid: call.callSid });
+            return;
+        }
         res.type('text/xml').send(unavailableTwiml(businessName));
         void announced.then(() => recordMissedPhoneCall(tenantId, call.callSid, call.caller, 'sofia_non_disponibile'));
     }
@@ -2512,11 +2568,8 @@ async function handleTwilioVoiceInbound(tenantId: number, req: express.Request, 
     const routing = voiceOn ? await getPhoneRouting(tenantId) : DEFAULT_PHONE_ROUTING;
     // Chi risponde adesso: interruttore rapido, poi fascia oraria, poi base.
     const mode = (await phoneModeNow(tenantId, routing)).mode;
-    // I dispositivi del CRM squillano solo se il softphone è configurato e
-    // se si sono fatti vivi di recente: uno spento da giorni non serve.
-    const clients = mode === 'prima_locale' && softphoneConfig() ? await ringingDeviceIdentities(tenantId) : [];
-    const sips = mode === 'prima_locale' ? await ringingSipUris(tenantId, caller) : [];
-    const ringLocale = mode === 'prima_locale' && (clients.length > 0 || sips.length > 0 || routing.mobiles.length > 0) && !!to;
+    const targets = mode === 'prima_locale' && to ? await localeRingTargets(tenantId, routing, caller) : null;
+    const ringLocale = targets != null && hasRingTargets(targets);
 
     // Il registro per primo: anche se Sofia fallisce, la chiamata resta.
     await queryWithRetry(
@@ -2545,22 +2598,17 @@ async function handleTwilioVoiceInbound(tenantId: number, req: express.Request, 
     }
 
     if (ringLocale) {
-        res.type('text/xml').send(dialLocaleTwiml({
-            clients,
-            sips,
-            mobiles: routing.mobiles,
-            ringSeconds: routing.ring_seconds,
-            callerId: to,
-            parentCallSid: callSid,
-            caller,
-            afterDialUrl: voiceStepUrl(req, 'after-dial'),
-            whisperUrl: voiceStepUrl(req, 'whisper', callSid),
-            clientAnsweredUrl: voiceStepUrl(req, 'client-answered', callSid),
-        }));
+        res.type('text/xml').send(ringLocaleTwiml(req, targets, routing.ring_seconds, { callSid, caller, to }));
         return;
     }
 
-    await connectPhoneCallToSofia(tenantId, res, { callSid, caller, fromRaw, to }, announced);
+    // Senza Sofia squilla il locale anche con «Solo Sofia»: i cellulari
+    // salvati e i dispositivi accesi sono lì apposta.
+    await connectPhoneCallToSofia(tenantId, res, { callSid, caller, fromRaw, to }, announced, async () => {
+        if (!to) return null;
+        const fallback = await localeRingTargets(tenantId, routing, caller);
+        return hasRingTargets(fallback) ? ringLocaleTwiml(req, fallback, routing.ring_seconds, { callSid, caller, to }) : null;
+    });
 }
 
 // Fine dello squillo ai cellulari: se qualcuno ha premuto 1 la chiamata è
@@ -2572,7 +2620,7 @@ async function handleTwilioVoiceAfterDial(tenantId: number, req: express.Request
     }
     const callSid = String(req.body?.CallSid || '');
     const found = await queryWithRetry(
-        `SELECT status, from_number, to_number, ended_at FROM phone_calls WHERE call_sid = $1 AND tenant_id = $2`,
+        `SELECT status, routing, from_number, to_number, ended_at FROM phone_calls WHERE call_sid = $1 AND tenant_id = $2`,
         [callSid, tenantId]
     );
     const row = found.rows[0];
@@ -2596,6 +2644,14 @@ async function handleTwilioVoiceAfterDial(tenantId: number, req: express.Request
         return;
     }
     const fromRaw = String(row.from_number || req.body?.From || '');
+    // Squillava perché Sofia non si era agganciata: un secondo tentativo
+    // aggiungerebbe altri secondi di silenzio dopo lo squillo, quasi sempre
+    // per lo stesso errore. Messaggio di cortesia e chiamata da richiamare.
+    if (row.routing === 'ripiego_locale') {
+        res.type('text/xml').send(unavailableTwiml(businessIdentity(tenantId).voiceName));
+        void recordMissedPhoneCall(tenantId, callSid, e164OrEmpty(fromRaw), 'sofia_non_disponibile');
+        return;
+    }
     await connectPhoneCallToSofia(
         tenantId, res,
         { callSid, caller: e164OrEmpty(fromRaw), fromRaw, to: e164OrEmpty(row.to_number) },
@@ -2985,8 +3041,9 @@ async function handleTwilioVoiceStatus(tenantId: number, req: express.Request, r
     if (!row) return;
     // Riattaccata mentre squillava il cellulare del locale: il cliente ha
     // aspettato e non ha trovato nessuno, va richiamato (10/10: due chiamate
-    // vere chiuse così, mai finite in Da ricontattare).
-    if (row.status === 'ringing' && (row.routing === 'prima_locale' || row.routing === 'prima_cellulare')) {
+    // vere chiuse così, mai finite in Da ricontattare). Vale anche quando
+    // squillava perché Sofia non rispondeva.
+    if (row.status === 'ringing' && ['prima_locale', 'prima_cellulare', 'ripiego_locale'].includes(row.routing)) {
         await recordMissedPhoneCall(tenantId, callSid, e164OrEmpty(row.from_number), 'riattaccata_in_attesa');
         return;
     }

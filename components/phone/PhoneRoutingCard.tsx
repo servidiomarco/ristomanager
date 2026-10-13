@@ -13,7 +13,9 @@ import { PHONE_SLOTS_MAX, isHHMM, type PhoneRoutingSlot } from '../../utils/phon
    «Questo dispositivo squilla» acceso e, se servono, fino a tre cellulari.
    Se nessuno risponde entro il tempo scelto, risponde Sofia. Le fasce
    orarie cambiano la regola in certi giorni e orari (per esempio Sofia
-   durante il servizio della sera); l'interruttore rapido sta in testata. */
+   durante il servizio della sera); l'interruttore rapido sta in testata.
+   Con «Solo Sofia» cellulari e dispositivi squillano lo stesso quando Sofia
+   non è raggiungibile: per questo i cellulari restano sempre in vista. */
 
 const MAX_MOBILES = 3;
 const MAX_CORDLESS = 5;
@@ -103,8 +105,8 @@ export const PhoneRoutingCard: React.FC<Props> = ({ showToast }) => {
   };
   const valid = Number.isInteger(draft.ring_seconds) && draft.ring_seconds >= 5 && draft.ring_seconds <= 60
     && slots.every(slotValid);
-  // Squilla il locale con la regola di base o in almeno una fascia: servono
-  // cellulari e secondi.
+  // Squilla il locale con la regola di base o in almeno una fascia; se no
+  // squilla solo quando Sofia non è raggiungibile.
   const usesLocale = mode === 'prima_locale' || slots.some(sl => sl.mode === 'prima_locale');
   const patchSlot = (i: number, patch: Partial<PhoneRoutingSlot>) =>
     setSlots(prev => prev.map((sl, j) => (j === i ? { ...sl, ...patch } : sl)));
@@ -303,60 +305,60 @@ export const PhoneRoutingCard: React.FC<Props> = ({ showToast }) => {
         )}
       </div>
 
-      {usesLocale && (
-        <div className="mt-4 space-y-3">
-          <p className="text-[13px] text-[var(--ds-text-secondary)]">
-            {t('pr.hintLocale', 'Squillano insieme i dispositivi del CRM col telefono acceso e i cellulari qui sotto. Dal cellulare si sente chi chiama e si preme 1. Se nessuno risponde in tempo, risponde Sofia.')}
-          </p>
-          <p className="text-[13px] font-medium text-[var(--ds-text-primary)]">{t('pr.mobilesTitle', 'Cellulari (facoltativi)')}</p>
-          {mobiles.map((m, i) => (
-            <div key={i} className="flex items-center gap-2">
-              <input
-                type="tel"
-                inputMode="tel"
-                value={m}
-                disabled={!canEdit}
-                onChange={e => setMobiles(prev => prev.map((v, j) => (j === i ? e.target.value : v)))}
-                placeholder={t('pr.mobilePh', 'Cellulare, es. 347 123 4567')}
-                aria-label={t('pr.mobile', 'Cellulare')}
-                className={dsInput}
-              />
-              {(mobiles.length > 1 || m.trim() !== '') && canEdit && (
-                <button
-                  type="button"
-                  onClick={() => setMobiles(prev => (prev.length > 1 ? prev.filter((_, j) => j !== i) : ['']))}
-                  aria-label={t('pr.remove', 'Togli questo cellulare')}
-                  className="inline-flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-[var(--ds-radius-control)] bg-[var(--ds-surface-row)] text-[var(--ds-text-secondary)] hover:text-[var(--ds-text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
-                >
-                  <X className="h-4 w-4" aria-hidden />
-                </button>
-              )}
-            </div>
-          ))}
-          {mobiles.length < MAX_MOBILES && canEdit && (
-            <button
-              type="button"
-              onClick={() => setMobiles(prev => [...prev, ''])}
-              className="inline-flex h-9 items-center gap-1.5 rounded-[var(--ds-radius-control)] px-3 text-[13px] font-medium text-[var(--ds-text-secondary)] hover:bg-[var(--ds-surface-row)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
-            >
-              <Plus className="h-4 w-4" aria-hidden /> {t('pr.add', 'Un altro cellulare')}
-            </button>
-          )}
-          <label className="flex items-center gap-2 text-[14px] text-[var(--ds-text-primary)]">
-            {t('pr.ringFor', 'Squilla per')}
+      <div className="mt-4 space-y-3">
+        <p className="text-[13px] text-[var(--ds-text-secondary)]">
+          {usesLocale
+            ? t('pr.hintLocale', 'Squillano insieme i dispositivi del CRM col telefono acceso e i cellulari qui sotto. Dal cellulare si sente chi chiama e si preme 1. Se nessuno risponde in tempo, risponde Sofia.')
+            : t('pr.hintFallback', 'Squillano solo se Sofia non è raggiungibile: i dispositivi del CRM col telefono acceso e i cellulari qui sotto. Dal cellulare si sente chi chiama e si preme 1.')}
+        </p>
+        <p className="text-[13px] font-medium text-[var(--ds-text-primary)]">{t('pr.mobilesTitle', 'Cellulari (facoltativi)')}</p>
+        {mobiles.map((m, i) => (
+          <div key={i} className="flex items-center gap-2">
             <input
-              type="number"
-              min={5}
-              max={60}
-              value={ring}
+              type="tel"
+              inputMode="tel"
+              value={m}
               disabled={!canEdit}
-              onChange={e => setRing(e.target.value)}
-              className="h-11 w-20 rounded-[var(--ds-radius-control)] bg-[var(--ds-surface-row)] px-3 text-center text-[15px] tabular-nums text-[var(--ds-text-primary)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+              onChange={e => setMobiles(prev => prev.map((v, j) => (j === i ? e.target.value : v)))}
+              placeholder={t('pr.mobilePh', 'Cellulare, es. 347 123 4567')}
+              aria-label={t('pr.mobile', 'Cellulare')}
+              className={dsInput}
             />
-            {t('pr.seconds', 'secondi, poi Sofia')}
-          </label>
-        </div>
-      )}
+            {(mobiles.length > 1 || m.trim() !== '') && canEdit && (
+              <button
+                type="button"
+                onClick={() => setMobiles(prev => (prev.length > 1 ? prev.filter((_, j) => j !== i) : ['']))}
+                aria-label={t('pr.remove', 'Togli questo cellulare')}
+                className="inline-flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-[var(--ds-radius-control)] bg-[var(--ds-surface-row)] text-[var(--ds-text-secondary)] hover:text-[var(--ds-text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+              >
+                <X className="h-4 w-4" aria-hidden />
+              </button>
+            )}
+          </div>
+        ))}
+        {mobiles.length < MAX_MOBILES && canEdit && (
+          <button
+            type="button"
+            onClick={() => setMobiles(prev => [...prev, ''])}
+            className="inline-flex h-9 items-center gap-1.5 rounded-[var(--ds-radius-control)] px-3 text-[13px] font-medium text-[var(--ds-text-secondary)] hover:bg-[var(--ds-surface-row)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+          >
+            <Plus className="h-4 w-4" aria-hidden /> {t('pr.add', 'Un altro cellulare')}
+          </button>
+        )}
+        <label className="flex items-center gap-2 text-[14px] text-[var(--ds-text-primary)]">
+          {t('pr.ringFor', 'Squilla per')}
+          <input
+            type="number"
+            min={5}
+            max={60}
+            value={ring}
+            disabled={!canEdit}
+            onChange={e => setRing(e.target.value)}
+            className="h-11 w-20 rounded-[var(--ds-radius-control)] bg-[var(--ds-surface-row)] px-3 text-center text-[15px] tabular-nums text-[var(--ds-text-primary)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+          />
+          {usesLocale ? t('pr.seconds', 'secondi, poi Sofia') : t('pr.secondsOnly', 'secondi')}
+        </label>
+      </div>
 
       {canEdit && (
         <div className="mt-4 flex justify-end">

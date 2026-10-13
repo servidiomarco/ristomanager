@@ -16,6 +16,7 @@ const STUB_PORT = Number(process.env.TEST_API_PORT || 3199) + 11;
 const NOSTRO_NUMERO = '+390985010032';
 const CLIENTE = '+393478809911';
 const SCONOSCIUTO = '+393478809922';
+const CELLULARE = '+393289900055';
 const STUB_TWIML = '<?xml version="1.0" encoding="UTF-8"?><Response><Connect><Stream url="wss://stub.example/conv"/></Connect></Response>';
 
 const waitFor = async <T>(read: () => Promise<T>, ok: (v: T) => boolean, tries = 30): Promise<T> => {
@@ -82,6 +83,8 @@ describe('telefono: Sympotia davanti al numero', () => {
     });
 
     afterAll(async () => {
+        // Gli altri file si aspettano Sofia subito, senza cellulari.
+        await api().put('/settings/phone-routing').set(bearer(token)).send({ mode: 'solo_sofia', mobiles: [], ring_seconds: 15 });
         await new Promise<void>(resolve => stub.close(() => resolve()));
         await db.end();
     });
@@ -190,5 +193,85 @@ describe('telefono: Sympotia davanti al numero', () => {
         expect(res.text).toContain('<Connect>');
         expect(received[0].conversation_initiation_client_data.dynamic_variables.customer_known).toBe('false');
         expect((await row('CAvoce0004')).status).toBe('sofia');
+    });
+
+    // 13/10/2026: ElevenLabs in timeout per ore, ogni chiamata finiva nel
+    // messaggio di cortesia. Se Sofia non si aggancia squilla il locale.
+    const afterDial = (callSid: string) =>
+        signed(`${webhookPath}/voice/after-dial`, { CallSid: callSid, CallStatus: 'in-progress', DialCallStatus: 'no-answer' });
+    const inboundWithSofiaDown = async (callSid: string) => {
+        stubStatus = 500;
+        try {
+            return await inbound(callSid, CLIENTE);
+        } finally {
+            stubStatus = 200;
+        }
+    };
+
+    it('Sofia non raggiungibile: con «Solo Sofia» squilla il cellulare salvato', async () => {
+        expect((await api().put('/settings/phone-routing').set(bearer(token)).send({ mode: 'solo_sofia', mobiles: [CELLULARE], ring_seconds: 12 })).status).toBe(200);
+        received.length = 0;
+        const res = await inboundWithSofiaDown('CAvoce0005');
+        expect(res.status).toBe(200);
+        expect(res.text).toContain(`<Dial timeout="12" ringTone="it" callerId="${NOSTRO_NUMERO}"`);
+        expect(res.text).toContain(`>${CELLULARE}</Number>`);
+        expect(res.text).toContain(`${webhookPath}/voice/whisper?p=CAvoce0005`);
+        expect(res.text).not.toContain('<Say');
+        expect(received).toHaveLength(1);
+
+        const r = await row('CAvoce0005');
+        expect(r.routing).toBe('ripiego_locale');
+        expect(r.status).toBe('ringing');
+        const live = await waitFor(
+            async () => ((await api().get('/phone/live').set(bearer(token))).body.calls as any[]).find(c => c.id === 'CAvoce0005'),
+            c => c?.stage === 'ringing',
+        );
+        expect(live?.stage).toBe('ringing');
+    });
+
+    it('a fine squillo senza risposta non riprova Sofia: cortesia e da ricontattare', async () => {
+        received.length = 0;
+        const after = await afterDial('CAvoce0005');
+        expect(after.status).toBe(200);
+        expect(after.text).toContain('<Say');
+        expect(after.text).toContain('<Hangup/>');
+        expect(received).toHaveLength(0);
+        const r = await waitFor(() => row('CAvoce0005'), v => v?.status === 'missed' && v?.voice_call_id != null);
+        expect(r.missed_reason).toBe('sofia_non_disponibile');
+        expect((await placeholder('CAvoce0005')).follow_up_status).toBe('PENDING');
+    });
+
+    it('col 1 dal cellulare la chiamata è del locale', async () => {
+        expect((await inboundWithSofiaDown('CAvoce0006')).text).toContain('<Dial');
+        const ok = await signed(`${webhookPath}/voice/whisper-ok?p=CAvoce0006`, { CallSid: 'CAlegvoce0006', To: CELLULARE, Digits: '1' });
+        expect(ok.text).not.toContain('<Hangup');
+        expect((await row('CAvoce0006')).status).toBe('answered');
+        expect((await afterDial('CAvoce0006')).text).toContain('<Hangup/>');
+        expect((await status('CAvoce0006', 30)).status).toBe(204);
+        expect((await row('CAvoce0006')).status).toBe('answered');
+    });
+
+    it('chi riattacca mentre squilla il ripiego va richiamato', async () => {
+        expect((await inboundWithSofiaDown('CAvoce0007')).text).toContain('<Dial');
+        expect((await status('CAvoce0007', 9)).status).toBe(204);
+        const r = await waitFor(() => row('CAvoce0007'), v => v?.status === 'missed' && v?.voice_call_id != null);
+        expect(r.missed_reason).toBe('riattaccata_in_attesa');
+    });
+
+    it('con «Prima il locale» lo squillo c\'è già stato: a fine squillo la cortesia', async () => {
+        expect((await api().put('/settings/phone-routing').set(bearer(token)).send({ mode: 'prima_locale', mobiles: [CELLULARE], ring_seconds: 12 })).status).toBe(200);
+        expect((await inbound('CAvoce0008', CLIENTE)).text).toContain('<Dial');
+        expect((await row('CAvoce0008')).routing).toBe('prima_locale');
+        stubStatus = 500;
+        try {
+            const after = await afterDial('CAvoce0008');
+            expect(after.text).toContain('<Say');
+            expect(after.text).toContain('<Hangup/>');
+            expect(after.text).not.toContain('<Dial');
+        } finally {
+            stubStatus = 200;
+        }
+        const r = await waitFor(() => row('CAvoce0008'), v => v?.status === 'missed' && v?.voice_call_id != null);
+        expect(r.missed_reason).toBe('sofia_non_disponibile');
     });
 });
