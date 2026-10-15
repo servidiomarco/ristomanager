@@ -1,5 +1,5 @@
 import React from 'react';
-import { Phone, MapPin, MessageCircle, Globe } from 'lucide-react';
+import { Phone, MapPin, MessageCircle, Globe, UserPlus } from 'lucide-react';
 
 /* La carta d'identità del ristorante in fondo alle pagine pubbliche React
    (preventivo, «La tua prenotazione»): chi parla e come raggiungerlo con un
@@ -14,9 +14,21 @@ export interface PublicBusiness {
   maps_url: string | null;
   website_url: string | null;
   logo_url: string | null;
+  /** La scheda contatto (vCard) servita dal backend; assente su un server
+   *  che non la conosce ancora. */
+  contact_card_url?: string | null;
 }
 
-export const PublicBusinessCard: React.FC<{ business: PublicBusiness }> = ({ business }) => (
+/** «Salva il nostro numero»: in Italia chi riceve una chiamata vede solo il
+ *  numero, quindi il nome del locale compare solo se il numero è in rubrica. */
+export interface SaveContactCopy {
+  label: string;
+  hint: string;
+  /** 'en' chiede le etichette dei numeri in inglese. */
+  lang?: string;
+}
+
+export const PublicBusinessCard: React.FC<{ business: PublicBusiness; saveContact?: SaveContactCopy }> = ({ business, saveContact }) => (
   <div className="mt-4 rounded-[var(--ds-radius)] bg-[var(--ds-surface)] px-5 py-4 shadow-[var(--ds-shadow-card)]">
     <p className="text-[14px] font-semibold text-[var(--ds-text-primary)]">{business.name}</p>
     {business.tagline && (
@@ -66,5 +78,16 @@ export const PublicBusinessCard: React.FC<{ business: PublicBusiness }> = ({ bus
         </a>
       )}
     </p>
+    {typeof business.contact_card_url === 'string' && business.contact_card_url && saveContact && (
+      <div className="mt-3 border-t border-[var(--ds-border)] pt-3">
+        <a
+          href={saveContact.lang === 'en' ? `${business.contact_card_url}?lang=en` : business.contact_card_url}
+          className="inline-flex min-h-11 items-center justify-center gap-2 rounded-[var(--ds-radius-control)] bg-[var(--ds-surface-row)] px-4 text-[14px] font-medium text-[var(--ds-text-primary)] hover:bg-[var(--ds-border)]"
+        >
+          <UserPlus className="h-4 w-4 flex-shrink-0" aria-hidden />{saveContact.label}
+        </a>
+        <p className="mt-1.5 text-[12px] text-[var(--ds-text-muted)]">{saveContact.hint}</p>
+      </div>
+    )}
   </div>
 );
