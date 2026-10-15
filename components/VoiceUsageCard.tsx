@@ -5,7 +5,7 @@ import { getVoiceUsage, updateVoiceExtraCap, updateVoiceAlertPercents, type Voic
 import { VOICE_ALERT_PERCENT_OPTIONS } from '../services/voicePlan';
 import { useAuth } from '../contexts/AuthContext';
 import { dsButton } from './ds';
-import { SettingsIcon, SettingsSummary, settingsCardClass } from './SettingsCard';
+import { SettingsIcon, SettingsStatus, SettingsSummary, settingsCardClass } from './SettingsCard';
 import { useDisplayLocale } from '../utils/formatLocale';
 
 /* ── Minuti di Sofia ──────────────────────────────────────────────────────
@@ -124,9 +124,7 @@ export const VoiceUsageCard: React.FC<Props> = ({ showToast }) => {
 
     // A card chiusa resta il numero per cui la si apre: minuti usati contro
     // inclusi, nel colore della barra (ambra da 80%, rosso a 100% o al tetto).
-    const usedTone = pct >= 100 || month.over_cap
-        ? 'text-[var(--ds-critical-text)]'
-        : pct >= 80 ? 'text-[var(--ds-pending-text)]' : 'text-[var(--ds-text-secondary)]';
+    const usedTone = pct >= 100 || month.over_cap ? 'critical' : pct >= 80 ? 'pending' : 'neutral';
 
     return (
         <details className={settingsCardClass}>
@@ -137,9 +135,9 @@ export const VoiceUsageCard: React.FC<Props> = ({ showToast }) => {
                     price: eur(plan.priceCents), included: plan.includedMinutes, overage: eur(plan.overageCentsPerMinute),
                 })}
                 trailing={
-                    <span className={`text-[12px] font-medium tabular-nums ${usedTone}`}>
+                    <SettingsStatus tone={usedTone}>
                         {t('vu.usedShort', '{{used}}/{{included}} min', { used, included: plan.includedMinutes })}
-                    </span>
+                    </SettingsStatus>
                 }
             />
 

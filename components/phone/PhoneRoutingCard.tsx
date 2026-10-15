@@ -6,7 +6,7 @@ import { useAuth } from '../../contexts/AuthContext';
 import { voiceCallsApiService, type PhoneDevice, type PhoneRouting, type PhoneSipLineCreated, type PhoneSipLinesResponse } from '../../services/voiceCallsApiService';
 import { deviceKey, disableSoftphone, enableSoftphone, isEnabledHere, useSoftphone } from '../../services/softphone';
 import { PHONE_SLOTS_MAX, isHHMM, type PhoneRoutingSlot } from '../../utils/phoneSchedule';
-import { SettingsSummary, settingsCardClass } from '../SettingsCard';
+import { SettingsStatus, SettingsSummary, settingsCardClass } from '../SettingsCard';
 
 /* ── Chi risponde al telefono (docs/telefono-piano.md, Fase 3) ─────────────
    Con Sympotia davanti al numero di Sofia, il ristoratore sceglie se
@@ -208,9 +208,9 @@ export const PhoneRoutingCard: React.FC<Props> = ({ showToast }) => {
         title={t('pr.title', 'Chi risponde al telefono')}
         description={t('pr.subtitle', 'Le chiamate al numero di Sofia')}
         trailing={
-          <span className="text-[12px] font-medium text-[var(--ds-text-secondary)]">
+          <SettingsStatus>
             {savedSlots > 0 ? `${savedRule} · ${t('pr.slotsCount', { count: savedSlots, defaultValue: '{{count}} fasce' })}` : savedRule}
-          </span>
+          </SettingsStatus>
         }
       />
 

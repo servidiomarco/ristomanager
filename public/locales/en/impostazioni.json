@@ -283,7 +283,10 @@
     "unsupported": "Your browser does not support push notifications.",
     "denied": "Notification permission denied. To switch them on, change the browser settings for this site.",
     "ios": "On iPhone/iPad push notifications need iOS 16.4+ and the app installed on the Home screen (Safari → Share → \"Add to Home Screen\").",
-    "sendTest": "Send a test notification"
+    "sendTest": "Send a test notification",
+    "perDevice": "They apply to this device only: turn them on separately on each phone or computer.",
+    "statusUnsupported": "Not supported",
+    "statusDenied": "Blocked"
   },
   "all": {
     "errLoad": "Could not load the intolerances",
