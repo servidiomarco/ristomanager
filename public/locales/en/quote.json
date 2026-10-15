@@ -52,5 +52,9 @@
   },
   "footer": {
     "notBinding": "A quote is not a commitment: it's confirmed together with the restaurant."
+  },
+  "saveContact": {
+    "label": "Save our number",
+    "hint": "So you know it's us when we call."
   }
 }

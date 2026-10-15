@@ -80,5 +80,9 @@
     "changed": "La prenotazione è cambiata nel frattempo: ricontrolla i dati.",
     "slots": "Non riesco a caricare gli orari. Riprova.",
     "generic": "Qualcosa non ha funzionato. Riprova, o chiama il ristorante."
+  },
+  "saveContact": {
+    "label": "Salva il nostro numero",
+    "hint": "Così ci riconosci quando ti chiamiamo."
   }
 }
