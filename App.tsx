@@ -4121,29 +4121,25 @@ const App: React.FC = () => {
               <div className={settingsGridClass} data-imp-lista="">
                 <FeatureTogglesManager showToast={addToast} only="voice" />
                 {/* Istruzioni testuali per una futura assegnazione tavoli
-                    guidata da AI; oggi il testo è solo salvato. Sta accanto
-                    a Sofia: le due card che si aprono fanno una riga, quelle
-                    già aperte sotto prendono tutta la larghezza. */}
+                    guidata da AI; oggi il testo è solo salvato. Tutte le card
+                    del blocco sono chiuse con la rotella: due per riga, e
+                    quella aperta prende la riga intera. */}
                 <CardErrorBoundary label={t('settings.aiTablePrompt')}>
                   <TableAssignmentAiPromptCard showToast={addToast} />
                 </CardErrorBoundary>
                 {/* Chi risponde al numero di Sofia: lei subito, o prima il
                     cellulare del locale (docs/telefono-piano.md). */}
                 {hasFeature('voice') && (
-                  <div className={settingsWideClass}>
-                    <CardErrorBoundary label={t('settings.phoneRouting', 'Chi risponde al telefono')}>
-                      <PhoneRoutingCard showToast={addToast} />
-                    </CardErrorBoundary>
-                  </div>
+                  <CardErrorBoundary label={t('settings.phoneRouting', 'Chi risponde al telefono')}>
+                    <PhoneRoutingCard showToast={addToast} />
+                  </CardErrorBoundary>
                 )}
                 {/* Minuti del mese contro quelli inclusi nell'add-on e tetto
                     degli extra: solo per chi ha Sofia. */}
                 {hasFeature('voice') && (
-                  <div className={settingsWideClass}>
-                    <CardErrorBoundary label={t('settings.voiceUsage', 'Minuti di Sofia')}>
-                      <VoiceUsageCard showToast={addToast} />
-                    </CardErrorBoundary>
-                  </div>
+                  <CardErrorBoundary label={t('settings.voiceUsage', 'Minuti di Sofia')}>
+                    <VoiceUsageCard showToast={addToast} />
+                  </CardErrorBoundary>
                 )}
               </div>
             </SettingsSection>

@@ -195,7 +195,7 @@ Agente conversazionale AI (ElevenLabs) che **risponde al telefono del ristorante
 
 **Minuti inclusi e consumi**
 - L'add-on include un pacchetto di **minuti di conversazione al mese** (listino: 49 €/mese, 250 minuti, poi 0,20 € al minuto; le chiamate sotto i 10 secondi non contano). La piattaforma può fare un piano su misura per singolo ristorante.
-- In **Impostazioni → AI** la card «Minuti di Sofia» mostra i minuti del mese contro quelli inclusi, la stima a fine mese al ritmo attuale, chiamate e prenotazioni prese da Sofia, gli extra maturati e un grafico dei minuti al giorno.
+- In **Impostazioni → AI** la card «Minuti di Sofia» dice già da chiusa i minuti usati su quelli inclusi (in ambra dall'80%, in rosso al 100%); aperta con la rotella mostra i minuti del mese contro quelli inclusi, la stima a fine mese al ritmo attuale, chiamate e prenotazioni prese da Sofia, gli extra maturati e un grafico dei minuti al giorno.
 - Il ristoratore sceglie il **tetto di spesa per i minuti extra** del mese (default 50 €, 0 = nessun extra).
 - **Avvisi** push al titolare e alla direzione (ed email al titolare), una volta per soglia al mese. Sui minuti inclusi il ristoratore sceglie a quali soglie riceverli fra 50%, 80%, 90% e 100% (default 80, 90 e 100; nessuna = niente avvisi sui minuti); se una chiamata ne supera più d'una arriva solo l'avviso della più alta. Gli avvisi all'80% e al 100% del tetto degli extra arrivano sempre. Resta da leggere solo l'avviso più recente: il 100% spegne l'80%, il tetto spegne i minuti inclusi, il mese nuovo spegne quello prima; cambiando il tetto si spengono gli avvisi sul tetto vecchio.
 
@@ -213,6 +213,7 @@ Agente conversazionale AI (ElevenLabs) che **risponde al telefono del ristorante
 - **Avviso di disservizio:** quando il fornitore della voce di Sofia (ElevenLabs) ha un disservizio, o le chiamate non riescono ad agganciarla, in cima a ogni schermata compare un avviso rosso: «Sofia può non rispondere», e le chiamate perse sono in Chiamate › Da ricontattare. Lo vedono i locali con Sofia attiva. Sparisce da solo quando il servizio torna normale; si può chiudere a mano su ogni dispositivo.
 
 **Chi risponde al telefono** (Impostazioni › AI)
+- È una card chiusa come le altre: in testata si legge la regola salvata («Solo Sofia», «Prima il locale», più le fasce se ci sono), e la rotella apre le regolazioni.
 - Si sceglie se le chiamate al numero di Sofia le prende subito Sofia o se prima squilla il locale, per un numero di secondi a scelta (di serie 15). Se nessuno risponde in tempo, risponde Sofia.
 - **Fasce orarie:** in certi giorni e orari vale un'altra regola, per esempio Sofia durante il servizio della sera e il locale a pranzo. Una fascia può passare la mezzanotte.
 - **Interruttore rapido in testata:** la pastiglia «Sofia» o «Locale» dice chi risponde adesso. Con un tocco si passa il telefono a Sofia, o lo si riprende, per un'ora, due ore o fino a stanotte; poi torna da solo alla regola.
@@ -962,6 +963,7 @@ La **ricerca** sta accanto alle schede (sopra, sul telefono) e resta visibile me
 
 | Data | Sezione | Modifica |
 |---|---|---|
+| 2026-10-15 | Impostazioni | In Impostazioni › AI anche «Chi risponde al telefono» e «Minuti di Sofia» sono card chiuse con la rotella, due per riga come le altre: da chiuse dicono la regola in uso e i minuti usati del mese, e si aprono per regolarle. |
 | 2026-10-13 | Impostazioni · Funzionalità trasversali | Nuova scheda **Menu** nelle Impostazioni: scegli quali azioni compaiono toccando il «+» sulla barra del telefono, fra tutte quelle del «+» del computer che il tuo ruolo può usare (anche Banchetto, Attività, Ordine d'asporto, Prodotto…). La scelta è tua e ti segue su ogni dispositivo. |
 | 2026-10-13 | Agente vocale "Sofia" | Quando ElevenLabs, il fornitore della voce di Sofia, ha un disservizio, in cima al CRM compare un avviso: Sofia può non rispondere, le chiamate perse sono in Chiamate › Da ricontattare. L'avviso sparisce da solo quando il servizio torna normale. |
 | 2026-10-13 | Agente vocale "Sofia", Impostazioni | Se Sofia non è raggiungibile, la chiamata non si chiude più subito col messaggio di cortesia: squillano i dispositivi del CRM accesi, i cordless e i cellulari di «Chi risponde al telefono», anche con «Solo Sofia». Per questo in Impostazioni › AI i cellulari si vedono sempre. |

@@ -14,7 +14,12 @@ import { ChevronRight, Settings as Cog } from 'lucide-react';
 
    La card resta un <details>: l'apertura non è stato applicativo e non deve
    passare per React, e il corpo resta nel DOM anche chiuso — è lì che lo
-   cerca la ricerca (components/settingsSearch.ts). */
+   cerca la ricerca (components/settingsSearch.ts).
+
+   Ogni funzione nuova di Impostazioni nasce da qui, chiusa e con la rotella:
+   «Chi risponde al telefono» e «Minuti di Sofia» erano arrivate come scatole
+   sempre aperte a tutta riga, con una testata loro, e sono state riportate
+   nello schema. */
 
 type IconType = React.ComponentType<{ className?: string }>;
 export type SettingsIconTone = 'neutral' | 'pending' | 'positive' | 'ai';
