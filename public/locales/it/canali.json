@@ -383,6 +383,7 @@
     "title": "Minuti di Sofia",
     "plan": "{{price}} al mese · {{included}} minuti inclusi · poi {{overage}} al minuto",
     "used": "{{used}} / {{included}} minuti",
+    "usedShort": "{{used}}/{{included}} min",
     "projected": "A questo ritmo circa {{minutes}} minuti a fine mese",
     "noProjection": "Stima a fine mese non ancora disponibile",
     "calls": "Chiamate",
@@ -564,6 +565,8 @@
     "cordlessName": "Nome del cordless",
     "cordlessAdd": "Aggiungi",
     "cordlessEmergency": "Dal cordless si chiamano solo fissi e cellulari italiani: non il 112, il 113 o il 118. Per le emergenze resta il fisso.",
-    "cordlessNoProxy": "Niente proxy in uscita: basta il server con la porta."
+    "cordlessNoProxy": "Niente proxy in uscita: basta il server con la porta.",
+    "slotsCount_one": "{{count}} fascia",
+    "slotsCount_other": "{{count}} fasce"
   }
 }

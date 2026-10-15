@@ -10,7 +10,7 @@ import {
     sendTestPush,
 } from '../services/pushClient';
 import { useToast } from '../contexts/ToastContext';
-import { SettingsIcon, settingsCardClass } from './SettingsCard';
+import { SettingsStatus, SettingsSummary, SettingsSwitch, settingsCardClass } from './SettingsCard';
 
 export const PushNotificationsCard: React.FC = () => {
     const { t } = useTranslation('impostazioni', { useSuspense: false });
@@ -69,55 +69,60 @@ export const PushNotificationsCard: React.FC = () => {
     const isIOS = typeof navigator !== 'undefined' && /iPhone|iPad|iPod/.test(navigator.userAgent);
     const iosPwaWarning = isIOS && !isStandalone;
 
+    // In testata l'interruttore; quando il browser non le permette, al suo
+    // posto il perché in una parola, e dentro la card la spiegazione.
+    const blocked = supported && permission === 'denied';
+
     return (
-        // Una card della griglia di Impostazioni → Profilo, come le vicine:
-        // il titolo «Notifiche» sopra la card stava dentro una cella sola.
-        <div className={`${settingsCardClass} px-4 py-3`}>
-                <div className="flex min-h-[48px] items-center justify-between gap-3">
-                    <div className="flex items-center gap-3 min-w-0">
-                        <SettingsIcon icon={enabled ? Bell : BellOff} tone={enabled ? 'positive' : 'neutral'} />
-                        <div className="min-w-0">
-                            <h4 className="font-semibold text-[14px] text-[var(--ds-text-primary)]">{t('push.title', 'Notifiche push')}</h4>
-                            <p className="text-[13px] leading-snug text-[var(--ds-text-muted)]">
-                                {t('push.subtitle', 'Ricevi avvisi su questo dispositivo per nuove prenotazioni e todo assegnati.')}
-                            </p>
-                        </div>
-                    </div>
-                    <button
-                        type="button"
-                        onClick={handleToggle}
-                        disabled={!supported || busy || permission === 'denied'}
-                        className={`inline-flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-[var(--ds-radius-control)] text-xs font-medium border transition flex-shrink-0 ${
-                            enabled
-                                ? 'bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] border-[var(--ds-text-primary)]'
-                                : 'bg-[var(--ds-surface)] text-[var(--ds-text-muted)] border-[var(--ds-border)] hover:bg-[var(--ds-surface-row)] hover:text-[var(--ds-text-primary)]'
-                        } disabled:opacity-50 disabled:cursor-not-allowed`}
-                    >
-                        {busy && <Loader2 className="h-3 w-3 animate-spin" />}
-                        {enabled ? t('push.active', 'Attive') : t('push.activate', 'Attiva')}
-                    </button>
-                </div>
+        // Una card della griglia di Impostazioni → Profilo, chiusa con la
+        // rotella come le vicine.
+        <details className={settingsCardClass}>
+            <SettingsSummary
+                icon={enabled ? Bell : BellOff}
+                tone={enabled ? 'positive' : 'neutral'}
+                title={t('push.title', 'Notifiche push')}
+                description={t('push.subtitle', 'Ricevi avvisi su questo dispositivo per nuove prenotazioni e todo assegnati.')}
+                trailing={
+                    !supported ? <SettingsStatus>{t('push.statusUnsupported', 'Non supportate')}</SettingsStatus>
+                    : blocked ? <SettingsStatus tone="pending">{t('push.statusDenied', 'Bloccate')}</SettingsStatus>
+                    : (
+                        <span className="flex items-center gap-2">
+                            {busy && <Loader2 className="h-4 w-4 animate-spin text-[var(--ds-text-muted)]" aria-hidden />}
+                            <SettingsSwitch
+                                checked={enabled}
+                                onChange={handleToggle}
+                                disabled={busy}
+                                label={t('push.title', 'Notifiche push')}
+                            />
+                        </span>
+                    )
+                }
+            />
+            <div className="space-y-3 border-t border-[var(--ds-border)] px-4 pb-4 pt-3">
+                <p className="text-[13px] leading-snug text-[var(--ds-text-muted)]">
+                    {t('push.perDevice', 'Valgono solo per questo dispositivo: su ogni telefono o computer si accendono a parte.')}
+                </p>
 
                 {!supported && (
-                    <p className="mt-3 text-xs text-[var(--ds-critical-text)] bg-[var(--ds-critical-tint)] border border-[var(--ds-critical-solid)] rounded-[var(--ds-radius)] px-2.5 py-1.5">
+                    <p className="text-xs text-[var(--ds-critical-text)] bg-[var(--ds-critical-tint)] border border-[var(--ds-critical-solid)] rounded-[var(--ds-radius)] px-2.5 py-1.5">
                         {t('push.unsupported', 'Il tuo browser non supporta le notifiche push.')}
                     </p>
                 )}
 
-                {supported && permission === 'denied' && (
-                    <p className="mt-3 text-xs text-[var(--ds-pending-text)] bg-[var(--ds-pending-tint)] border border-[var(--ds-pending-solid)] rounded-[var(--ds-radius)] px-2.5 py-1.5">
+                {blocked && (
+                    <p className="text-xs text-[var(--ds-pending-text)] bg-[var(--ds-pending-tint)] border border-[var(--ds-pending-solid)] rounded-[var(--ds-radius)] px-2.5 py-1.5">
                         {t('push.denied', 'Permesso notifiche negato. Per attivarle modifica le impostazioni del browser per questo sito.')}
                     </p>
                 )}
 
                 {iosPwaWarning && (
-                    <p className="mt-3 text-xs text-[var(--ds-text-muted)] bg-[var(--ds-surface-row)] border border-[var(--ds-border)] rounded-[var(--ds-radius)] px-2.5 py-1.5">
+                    <p className="text-xs text-[var(--ds-text-muted)] bg-[var(--ds-surface-row)] border border-[var(--ds-border)] rounded-[var(--ds-radius)] px-2.5 py-1.5">
                         {t('push.ios', 'Su iPhone/iPad le notifiche push richiedono iOS 16.4+ e che l\'app sia installata sulla schermata Home (Safari → Condividi → "Aggiungi alla schermata Home").')}
                     </p>
                 )}
 
                 {enabled && (
-                    <div className="mt-3 flex justify-end">
+                    <div className="flex justify-end">
                         <button
                             type="button"
                             onClick={handleTest}
@@ -128,6 +133,7 @@ export const PushNotificationsCard: React.FC = () => {
                         </button>
                     </div>
                 )}
-        </div>
+            </div>
+        </details>
     );
 };

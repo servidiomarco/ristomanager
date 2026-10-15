@@ -383,6 +383,7 @@
     "title": "Sofia minutes",
     "plan": "{{price}} per month · {{included}} minutes included · then {{overage}} per minute",
     "used": "{{used}} / {{included}} minutes",
+    "usedShort": "{{used}}/{{included}} min",
     "projected": "At this pace about {{minutes}} minutes by month end",
     "noProjection": "Month-end estimate not available yet",
     "calls": "Calls",
@@ -564,6 +565,8 @@
     "cordlessName": "Cordless name",
     "cordlessAdd": "Add",
     "cordlessEmergency": "The cordless only calls Italian landlines and mobiles: not 112, 113 or 118. For emergencies use the landline.",
-    "cordlessNoProxy": "No outbound proxy: the server with its port is enough."
+    "cordlessNoProxy": "No outbound proxy: the server with its port is enough.",
+    "slotsCount_one": "{{count}} time slot",
+    "slotsCount_other": "{{count}} time slots"
   }
 }

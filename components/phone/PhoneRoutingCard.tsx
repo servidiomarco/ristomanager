@@ -6,6 +6,7 @@ import { useAuth } from '../../contexts/AuthContext';
 import { voiceCallsApiService, type PhoneDevice, type PhoneRouting, type PhoneSipLineCreated, type PhoneSipLinesResponse } from '../../services/voiceCallsApiService';
 import { deviceKey, disableSoftphone, enableSoftphone, isEnabledHere, useSoftphone } from '../../services/softphone';
 import { PHONE_SLOTS_MAX, isHHMM, type PhoneRoutingSlot } from '../../utils/phoneSchedule';
+import { SettingsStatus, SettingsSummary, settingsCardClass } from '../SettingsCard';
 
 /* ── Chi risponde al telefono (docs/telefono-piano.md, Fase 3) ─────────────
    Con Sympotia davanti al numero di Sofia, il ristoratore sceglie se
@@ -195,252 +196,228 @@ export const PhoneRoutingCard: React.FC<Props> = ({ showToast }) => {
   const lastSeen = (iso: string) =>
     new Intl.DateTimeFormat(i18n.language, { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }).format(new Date(iso));
 
+  // A card chiusa basta la regola salvata, non la bozza: dice chi risponde
+  // adesso, non cosa si sta scrivendo.
+  const savedSlots = saved.slots?.length ?? 0;
+  const savedRule = saved.mode === 'prima_locale' ? t('pr.primaLocale', 'Prima il locale') : t('pr.soloSofia', 'Solo Sofia');
+
   return (
-    <div className="rounded-[var(--ds-radius)] bg-[var(--ds-surface)] p-4 shadow-[var(--ds-shadow-card)]">
-      <div className="flex items-center gap-3">
-        <div className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-[var(--ds-radius)] bg-[var(--ds-surface-row)] text-[var(--ds-text-secondary)]">
-          <PhoneForwarded className="h-5 w-5" />
-        </div>
-        <div className="min-w-0">
-          <h4 className="text-[14px] font-medium text-[var(--ds-text-primary)]">{t('pr.title', 'Chi risponde al telefono')}</h4>
-          <p className="text-[13px] text-[var(--ds-text-muted)]">{t('pr.subtitle', 'Le chiamate al numero di Sofia')}</p>
-        </div>
-      </div>
+    <details className={settingsCardClass}>
+      <SettingsSummary
+        icon={PhoneForwarded}
+        title={t('pr.title', 'Chi risponde al telefono')}
+        description={t('pr.subtitle', 'Le chiamate al numero di Sofia')}
+        trailing={
+          <SettingsStatus>
+            {savedSlots > 0 ? `${savedRule} · ${t('pr.slotsCount', { count: savedSlots, defaultValue: '{{count}} fasce' })}` : savedRule}
+          </SettingsStatus>
+        }
+      />
 
-      <div className="mt-4">
-        {slots.length > 0 && (
-          <p className="mb-2 text-[13px] font-medium text-[var(--ds-text-primary)]">{t('pr.outsideSlots', 'Fuori dalle fasce')}</p>
-        )}
-        <SegmentedControl
-          value={mode}
-          onChange={next => canEdit && setMode(next)}
-          ariaLabel={t('pr.title', 'Chi risponde al telefono')}
-          equalWidth={false}
-          options={[
-            { value: 'solo_sofia', label: t('pr.soloSofia', 'Solo Sofia') },
-            { value: 'prima_locale', label: t('pr.primaLocale', 'Prima il locale') },
-          ]}
-        />
-      </div>
+      <div className="border-t border-[var(--ds-border)] px-4 pb-4 pt-3">
+        <div>
+          {slots.length > 0 && (
+            <p className="mb-2 text-[13px] font-medium text-[var(--ds-text-primary)]">{t('pr.outsideSlots', 'Fuori dalle fasce')}</p>
+          )}
+          <SegmentedControl
+            value={mode}
+            onChange={next => canEdit && setMode(next)}
+            ariaLabel={t('pr.title', 'Chi risponde al telefono')}
+            equalWidth={false}
+            options={[
+              { value: 'solo_sofia', label: t('pr.soloSofia', 'Solo Sofia') },
+              { value: 'prima_locale', label: t('pr.primaLocale', 'Prima il locale') },
+            ]}
+          />
+        </div>
 
-      {/* Fasce orarie: in quei giorni e orari vale un'altra regola. */}
-      <div className="mt-4 space-y-3">
-        {slots.map((sl, i) => (
-          <div key={i} className="space-y-3 rounded-[var(--ds-radius-sm)] bg-[var(--ds-surface-row)] p-3">
-            <div className="flex items-center gap-2">
-              <Clock className="h-4 w-4 flex-shrink-0 text-[var(--ds-text-secondary)]" aria-hidden />
-              <input
-                type="time"
-                value={sl.start}
-                disabled={!canEdit}
-                onChange={e => patchSlot(i, { start: e.target.value })}
-                aria-label={t('pr.slotFrom', 'Dalle')}
-                className="h-10 min-w-0 flex-1 rounded-[var(--ds-radius-control)] bg-[var(--ds-surface)] px-3 text-[14px] tabular-nums text-[var(--ds-text-primary)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+        {/* Fasce orarie: in quei giorni e orari vale un'altra regola. */}
+        <div className="mt-4 space-y-3">
+          {slots.map((sl, i) => (
+            <div key={i} className="space-y-3 rounded-[var(--ds-radius-sm)] bg-[var(--ds-surface-row)] p-3">
+              <div className="flex items-center gap-2">
+                <Clock className="h-4 w-4 flex-shrink-0 text-[var(--ds-text-secondary)]" aria-hidden />
+                <input
+                  type="time"
+                  value={sl.start}
+                  disabled={!canEdit}
+                  onChange={e => patchSlot(i, { start: e.target.value })}
+                  aria-label={t('pr.slotFrom', 'Dalle')}
+                  className="h-10 min-w-0 flex-1 rounded-[var(--ds-radius-control)] bg-[var(--ds-surface)] px-3 text-[14px] tabular-nums text-[var(--ds-text-primary)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+                />
+                <span className="flex-shrink-0 text-[var(--ds-text-muted)]" aria-hidden>→</span>
+                <input
+                  type="time"
+                  value={sl.end}
+                  disabled={!canEdit}
+                  onChange={e => patchSlot(i, { end: e.target.value })}
+                  aria-label={t('pr.slotTo', 'Alle')}
+                  className="h-10 min-w-0 flex-1 rounded-[var(--ds-radius-control)] bg-[var(--ds-surface)] px-3 text-[14px] tabular-nums text-[var(--ds-text-primary)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+                />
+                {canEdit && (
+                  <button
+                    type="button"
+                    onClick={() => setSlots(prev => prev.filter((_, j) => j !== i))}
+                    aria-label={t('pr.slotRemove', 'Togli questa fascia')}
+                    className="inline-flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-[var(--ds-radius-control)] bg-[var(--ds-surface)] text-[var(--ds-text-secondary)] hover:text-[var(--ds-text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+                  >
+                    <X className="h-4 w-4" aria-hidden />
+                  </button>
+                )}
+              </div>
+              <div className="flex flex-wrap gap-1.5" role="group" aria-label={t('pr.slotDays', 'Giorni')}>
+                {DAYS.map(d => {
+                  const on = sl.days.includes(d);
+                  return (
+                    <button
+                      key={d}
+                      type="button"
+                      disabled={!canEdit}
+                      aria-pressed={on}
+                      aria-label={dayLong(d)}
+                      title={dayLong(d)}
+                      onClick={() => patchSlot(i, { days: on ? sl.days.filter(x => x !== d) : [...sl.days, d].sort() })}
+                      className={`inline-flex h-10 w-10 items-center justify-center rounded-[var(--ds-radius-control)] text-[13px] font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] ${
+                        on ? 'bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)]' : 'bg-[var(--ds-surface)] text-[var(--ds-text-secondary)]'
+                      }`}
+                    >
+                      {dayShort(d)}
+                    </button>
+                  );
+                })}
+              </div>
+              <SegmentedControl
+                value={sl.mode}
+                onChange={next => canEdit && patchSlot(i, { mode: next })}
+                ariaLabel={t('pr.slotMode', 'In questa fascia')}
+                size="sm"
+                equalWidth={false}
+                options={[
+                  { value: 'solo_sofia', label: t('pr.soloSofia', 'Solo Sofia') },
+                  { value: 'prima_locale', label: t('pr.primaLocale', 'Prima il locale') },
+                ]}
               />
-              <span className="flex-shrink-0 text-[var(--ds-text-muted)]" aria-hidden>→</span>
+              {!slotValid(sl) && (
+                <p className="text-[13px] text-[var(--ds-critical-text)]">{t('pr.slotInvalid', 'Scegli almeno un giorno e due orari diversi')}</p>
+              )}
+            </div>
+          ))}
+          {canEdit && slots.length < PHONE_SLOTS_MAX && (
+            <button
+              type="button"
+              onClick={() => setSlots(prev => [...prev, { ...NEW_SLOT, mode: mode === 'solo_sofia' ? 'prima_locale' : 'solo_sofia' }])}
+              className="inline-flex h-9 items-center gap-1.5 rounded-[var(--ds-radius-control)] px-3 text-[13px] font-medium text-[var(--ds-text-secondary)] hover:bg-[var(--ds-surface-row)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+            >
+              <Plus className="h-4 w-4" aria-hidden /> {t('pr.slotAdd', 'Fascia oraria')}
+            </button>
+          )}
+        </div>
+
+        <div className="mt-4 space-y-3">
+          <p className="text-[13px] text-[var(--ds-text-secondary)]">
+            {usesLocale
+              ? t('pr.hintLocale', 'Squillano insieme i dispositivi del CRM col telefono acceso e i cellulari qui sotto. Dal cellulare si sente chi chiama e si preme 1. Se nessuno risponde in tempo, risponde Sofia.')
+              : t('pr.hintFallback', 'Squillano solo se Sofia non è raggiungibile: i dispositivi del CRM col telefono acceso e i cellulari qui sotto. Dal cellulare si sente chi chiama e si preme 1.')}
+          </p>
+          <p className="text-[13px] font-medium text-[var(--ds-text-primary)]">{t('pr.mobilesTitle', 'Cellulari (facoltativi)')}</p>
+          {mobiles.map((m, i) => (
+            <div key={i} className="flex items-center gap-2">
               <input
-                type="time"
-                value={sl.end}
+                type="tel"
+                inputMode="tel"
+                value={m}
                 disabled={!canEdit}
-                onChange={e => patchSlot(i, { end: e.target.value })}
-                aria-label={t('pr.slotTo', 'Alle')}
-                className="h-10 min-w-0 flex-1 rounded-[var(--ds-radius-control)] bg-[var(--ds-surface)] px-3 text-[14px] tabular-nums text-[var(--ds-text-primary)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+                onChange={e => setMobiles(prev => prev.map((v, j) => (j === i ? e.target.value : v)))}
+                placeholder={t('pr.mobilePh', 'Cellulare, es. 347 123 4567')}
+                aria-label={t('pr.mobile', 'Cellulare')}
+                className={dsInput}
               />
-              {canEdit && (
+              {(mobiles.length > 1 || m.trim() !== '') && canEdit && (
                 <button
                   type="button"
-                  onClick={() => setSlots(prev => prev.filter((_, j) => j !== i))}
-                  aria-label={t('pr.slotRemove', 'Togli questa fascia')}
-                  className="inline-flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-[var(--ds-radius-control)] bg-[var(--ds-surface)] text-[var(--ds-text-secondary)] hover:text-[var(--ds-text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+                  onClick={() => setMobiles(prev => (prev.length > 1 ? prev.filter((_, j) => j !== i) : ['']))}
+                  aria-label={t('pr.remove', 'Togli questo cellulare')}
+                  className="inline-flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-[var(--ds-radius-control)] bg-[var(--ds-surface-row)] text-[var(--ds-text-secondary)] hover:text-[var(--ds-text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
                 >
                   <X className="h-4 w-4" aria-hidden />
                 </button>
               )}
             </div>
-            <div className="flex flex-wrap gap-1.5" role="group" aria-label={t('pr.slotDays', 'Giorni')}>
-              {DAYS.map(d => {
-                const on = sl.days.includes(d);
-                return (
-                  <button
-                    key={d}
-                    type="button"
-                    disabled={!canEdit}
-                    aria-pressed={on}
-                    aria-label={dayLong(d)}
-                    title={dayLong(d)}
-                    onClick={() => patchSlot(i, { days: on ? sl.days.filter(x => x !== d) : [...sl.days, d].sort() })}
-                    className={`inline-flex h-10 w-10 items-center justify-center rounded-[var(--ds-radius-control)] text-[13px] font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] ${
-                      on ? 'bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)]' : 'bg-[var(--ds-surface)] text-[var(--ds-text-secondary)]'
-                    }`}
-                  >
-                    {dayShort(d)}
-                  </button>
-                );
-              })}
-            </div>
-            <SegmentedControl
-              value={sl.mode}
-              onChange={next => canEdit && patchSlot(i, { mode: next })}
-              ariaLabel={t('pr.slotMode', 'In questa fascia')}
-              size="sm"
-              equalWidth={false}
-              options={[
-                { value: 'solo_sofia', label: t('pr.soloSofia', 'Solo Sofia') },
-                { value: 'prima_locale', label: t('pr.primaLocale', 'Prima il locale') },
-              ]}
-            />
-            {!slotValid(sl) && (
-              <p className="text-[13px] text-[var(--ds-critical-text)]">{t('pr.slotInvalid', 'Scegli almeno un giorno e due orari diversi')}</p>
-            )}
-          </div>
-        ))}
-        {canEdit && slots.length < PHONE_SLOTS_MAX && (
-          <button
-            type="button"
-            onClick={() => setSlots(prev => [...prev, { ...NEW_SLOT, mode: mode === 'solo_sofia' ? 'prima_locale' : 'solo_sofia' }])}
-            className="inline-flex h-9 items-center gap-1.5 rounded-[var(--ds-radius-control)] px-3 text-[13px] font-medium text-[var(--ds-text-secondary)] hover:bg-[var(--ds-surface-row)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
-          >
-            <Plus className="h-4 w-4" aria-hidden /> {t('pr.slotAdd', 'Fascia oraria')}
-          </button>
-        )}
-      </div>
-
-      <div className="mt-4 space-y-3">
-        <p className="text-[13px] text-[var(--ds-text-secondary)]">
-          {usesLocale
-            ? t('pr.hintLocale', 'Squillano insieme i dispositivi del CRM col telefono acceso e i cellulari qui sotto. Dal cellulare si sente chi chiama e si preme 1. Se nessuno risponde in tempo, risponde Sofia.')
-            : t('pr.hintFallback', 'Squillano solo se Sofia non è raggiungibile: i dispositivi del CRM col telefono acceso e i cellulari qui sotto. Dal cellulare si sente chi chiama e si preme 1.')}
-        </p>
-        <p className="text-[13px] font-medium text-[var(--ds-text-primary)]">{t('pr.mobilesTitle', 'Cellulari (facoltativi)')}</p>
-        {mobiles.map((m, i) => (
-          <div key={i} className="flex items-center gap-2">
+          ))}
+          {mobiles.length < MAX_MOBILES && canEdit && (
+            <button
+              type="button"
+              onClick={() => setMobiles(prev => [...prev, ''])}
+              className="inline-flex h-9 items-center gap-1.5 rounded-[var(--ds-radius-control)] px-3 text-[13px] font-medium text-[var(--ds-text-secondary)] hover:bg-[var(--ds-surface-row)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+            >
+              <Plus className="h-4 w-4" aria-hidden /> {t('pr.add', 'Un altro cellulare')}
+            </button>
+          )}
+          <label className="flex items-center gap-2 text-[14px] text-[var(--ds-text-primary)]">
+            {t('pr.ringFor', 'Squilla per')}
             <input
-              type="tel"
-              inputMode="tel"
-              value={m}
+              type="number"
+              min={5}
+              max={60}
+              value={ring}
               disabled={!canEdit}
-              onChange={e => setMobiles(prev => prev.map((v, j) => (j === i ? e.target.value : v)))}
-              placeholder={t('pr.mobilePh', 'Cellulare, es. 347 123 4567')}
-              aria-label={t('pr.mobile', 'Cellulare')}
-              className={dsInput}
+              onChange={e => setRing(e.target.value)}
+              className="h-11 w-20 rounded-[var(--ds-radius-control)] bg-[var(--ds-surface-row)] px-3 text-center text-[15px] tabular-nums text-[var(--ds-text-primary)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
             />
-            {(mobiles.length > 1 || m.trim() !== '') && canEdit && (
+            {usesLocale ? t('pr.seconds', 'secondi, poi Sofia') : t('pr.secondsOnly', 'secondi')}
+          </label>
+        </div>
+
+        {canEdit && (
+          <div className="mt-4 flex justify-end">
+            <button type="button" onClick={save} disabled={!valid || !dirty || saving} className={dsButton.primary}>
+              {saving && <Loader2 className="h-4 w-4 animate-spin" aria-hidden />}
+              {t('pr.save', 'Salva')}
+            </button>
+          </div>
+        )}
+
+        {/* Il telefono di questo browser e degli altri dispositivi del locale. */}
+        <div className="mt-4 border-t border-[var(--ds-border)] pt-4">
+          <div className="flex items-center gap-3">
+            <div className="min-w-0 flex-1">
+              <p className="text-[14px] font-medium text-[var(--ds-text-primary)]">{t('pr.here', 'Questo dispositivo squilla')}</p>
+              <p className="text-[13px] text-[var(--ds-text-muted)]">{statusText}</p>
+            </div>
+            {configured && (
               <button
                 type="button"
-                onClick={() => setMobiles(prev => (prev.length > 1 ? prev.filter((_, j) => j !== i) : ['']))}
-                aria-label={t('pr.remove', 'Togli questo cellulare')}
-                className="inline-flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-[var(--ds-radius-control)] bg-[var(--ds-surface-row)] text-[var(--ds-text-secondary)] hover:text-[var(--ds-text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+                role="switch"
+                aria-checked={hereOn}
+                aria-label={t('pr.here', 'Questo dispositivo squilla')}
+                disabled={toggling}
+                onClick={toggleHere}
+                className={`relative inline-flex h-6 w-11 flex-shrink-0 rounded-full transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--ds-surface)] disabled:opacity-50 disabled:cursor-not-allowed ${
+                  hereOn ? 'bg-[var(--ds-seated-solid)]' : 'bg-[var(--ds-surface-row)] border border-[var(--ds-border)]'
+                }`}
               >
-                <X className="h-4 w-4" aria-hidden />
+                <span aria-hidden="true"
+                      className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition-transform ${hereOn ? 'translate-x-5' : 'translate-x-0.5'} translate-y-0.5`} />
               </button>
             )}
           </div>
-        ))}
-        {mobiles.length < MAX_MOBILES && canEdit && (
-          <button
-            type="button"
-            onClick={() => setMobiles(prev => [...prev, ''])}
-            className="inline-flex h-9 items-center gap-1.5 rounded-[var(--ds-radius-control)] px-3 text-[13px] font-medium text-[var(--ds-text-secondary)] hover:bg-[var(--ds-surface-row)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
-          >
-            <Plus className="h-4 w-4" aria-hidden /> {t('pr.add', 'Un altro cellulare')}
-          </button>
-        )}
-        <label className="flex items-center gap-2 text-[14px] text-[var(--ds-text-primary)]">
-          {t('pr.ringFor', 'Squilla per')}
-          <input
-            type="number"
-            min={5}
-            max={60}
-            value={ring}
-            disabled={!canEdit}
-            onChange={e => setRing(e.target.value)}
-            className="h-11 w-20 rounded-[var(--ds-radius-control)] bg-[var(--ds-surface-row)] px-3 text-center text-[15px] tabular-nums text-[var(--ds-text-primary)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
-          />
-          {usesLocale ? t('pr.seconds', 'secondi, poi Sofia') : t('pr.secondsOnly', 'secondi')}
-        </label>
-      </div>
-
-      {canEdit && (
-        <div className="mt-4 flex justify-end">
-          <button type="button" onClick={save} disabled={!valid || !dirty || saving} className={dsButton.primary}>
-            {saving && <Loader2 className="h-4 w-4 animate-spin" aria-hidden />}
-            {t('pr.save', 'Salva')}
-          </button>
-        </div>
-      )}
-
-      {/* Il telefono di questo browser e degli altri dispositivi del locale. */}
-      <div className="mt-4 border-t border-[var(--ds-border)] pt-4">
-        <div className="flex items-center gap-3">
-          <div className="min-w-0 flex-1">
-            <p className="text-[14px] font-medium text-[var(--ds-text-primary)]">{t('pr.here', 'Questo dispositivo squilla')}</p>
-            <p className="text-[13px] text-[var(--ds-text-muted)]">{statusText}</p>
-          </div>
-          {configured && (
-            <button
-              type="button"
-              role="switch"
-              aria-checked={hereOn}
-              aria-label={t('pr.here', 'Questo dispositivo squilla')}
-              disabled={toggling}
-              onClick={toggleHere}
-              className={`relative inline-flex h-6 w-11 flex-shrink-0 rounded-full transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--ds-surface)] disabled:opacity-50 disabled:cursor-not-allowed ${
-                hereOn ? 'bg-[var(--ds-seated-solid)]' : 'bg-[var(--ds-surface-row)] border border-[var(--ds-border)]'
-              }`}
-            >
-              <span aria-hidden="true"
-                    className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition-transform ${hereOn ? 'translate-x-5' : 'translate-x-0.5'} translate-y-0.5`} />
-            </button>
+          {hereOn && (
+            <p className="mt-2 text-[12px] text-[var(--ds-text-muted)]">
+              {t('pr.hereHint', 'Serve il microfono (il browser lo chiede alla prima chiamata) e la pagina del CRM aperta. Meglio con una cuffia.')}
+            </p>
           )}
-        </div>
-        {hereOn && (
-          <p className="mt-2 text-[12px] text-[var(--ds-text-muted)]">
-            {t('pr.hereHint', 'Serve il microfono (il browser lo chiede alla prima chiamata) e la pagina del CRM aperta. Meglio con una cuffia.')}
-          </p>
-        )}
-        {devices.filter(d => !d.mine).length > 0 && (
-          <ul className="mt-3 space-y-1.5">
-            {devices.filter(d => !d.mine).map(d => (
-              <li key={d.id} className="flex items-center gap-2 rounded-[var(--ds-radius-sm)] bg-[var(--ds-surface-row)] px-3 py-2 text-[13px]">
-                <Monitor className="h-4 w-4 flex-shrink-0 text-[var(--ds-text-secondary)]" aria-hidden />
-                <span className="min-w-0 flex-1 truncate text-[var(--ds-text-primary)]">{d.label || d.user_name || t('pr.device', 'Dispositivo')}</span>
-                <span className="flex-shrink-0 tabular-nums text-[var(--ds-text-muted)]">{lastSeen(d.last_seen_at)}</span>
-                {canEdit && (
-                  <button
-                    type="button"
-                    onClick={() => removeDevice(d)}
-                    aria-label={t('pr.removeDevice', 'Spegni questo dispositivo')}
-                    className="inline-flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-[var(--ds-radius-control)] text-[var(--ds-text-secondary)] hover:text-[var(--ds-text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
-                  >
-                    <X className="h-4 w-4" aria-hidden />
-                  </button>
-                )}
-              </li>
-            ))}
-          </ul>
-        )}
-      </div>
-
-      {/* Cordless: una base DECT IP registrata sul dominio SIP di Sympotia. */}
-      {sip?.configured && (
-        <div className="mt-4 border-t border-[var(--ds-border)] pt-4">
-          <p className="text-[14px] font-medium text-[var(--ds-text-primary)]">{t('pr.cordless', 'Cordless')}</p>
-          <p className="text-[13px] text-[var(--ds-text-muted)]">
-            {t('pr.cordlessHint', 'Una base DECT IP (o un\'app SIP) squilla insieme al CRM, col nome di chi chiama, e chiama i clienti col numero del locale.')}
-          </p>
-
-          {sip.lines.length > 0 && (
+          {devices.filter(d => !d.mine).length > 0 && (
             <ul className="mt-3 space-y-1.5">
-              {sip.lines.map(l => (
-                <li key={l.id} className="flex items-center gap-2 rounded-[var(--ds-radius-sm)] bg-[var(--ds-surface-row)] px-3 py-2 text-[13px]">
-                  <Radio className="h-4 w-4 flex-shrink-0 text-[var(--ds-text-secondary)]" aria-hidden />
-                  <span className="min-w-0 flex-1 truncate text-[var(--ds-text-primary)]">{l.label}</span>
-                  <span className="flex-shrink-0 tabular-nums text-[var(--ds-text-muted)]">{l.username}</span>
+              {devices.filter(d => !d.mine).map(d => (
+                <li key={d.id} className="flex items-center gap-2 rounded-[var(--ds-radius-sm)] bg-[var(--ds-surface-row)] px-3 py-2 text-[13px]">
+                  <Monitor className="h-4 w-4 flex-shrink-0 text-[var(--ds-text-secondary)]" aria-hidden />
+                  <span className="min-w-0 flex-1 truncate text-[var(--ds-text-primary)]">{d.label || d.user_name || t('pr.device', 'Dispositivo')}</span>
+                  <span className="flex-shrink-0 tabular-nums text-[var(--ds-text-muted)]">{lastSeen(d.last_seen_at)}</span>
                   {canEdit && (
                     <button
                       type="button"
-                      onClick={() => removeCordless(l.id)}
-                      aria-label={t('pr.cordlessRemove', 'Togli questo cordless')}
+                      onClick={() => removeDevice(d)}
+                      aria-label={t('pr.removeDevice', 'Spegni questo dispositivo')}
                       className="inline-flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-[var(--ds-radius-control)] text-[var(--ds-text-secondary)] hover:text-[var(--ds-text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
                     >
                       <X className="h-4 w-4" aria-hidden />
@@ -450,69 +427,101 @@ export const PhoneRoutingCard: React.FC<Props> = ({ showToast }) => {
               ))}
             </ul>
           )}
-
-          {/* La password esiste solo qui e adesso: il server non la conserva. */}
-          {createdCordless && (
-            <div className="mt-3 space-y-2 rounded-[var(--ds-radius-sm)] bg-[var(--ds-pending-tint)] p-3 text-[13px] text-[var(--ds-text-primary)]">
-              <p className="font-medium">{t('pr.cordlessConfig', 'Da scrivere nella base del cordless')}</p>
-              <dl className="space-y-1.5">
-                {([
-                  [t('pr.sipServer', 'Server SIP'), `${createdCordless.registrar}:5060`],
-                  [t('pr.sipUser', 'Utente'), createdCordless.username],
-                  [t('pr.sipPassword', 'Password'), createdCordless.password],
-                  [t('pr.sipTransport', 'Trasporto'), 'UDP'],
-                ] as [string, string][]).map(([k, v]) => (
-                  <div key={k} className="flex items-center gap-2">
-                    <dt className="w-28 flex-shrink-0 text-[var(--ds-text-secondary)]">{k}</dt>
-                    <dd className="min-w-0 flex-1 truncate font-mono text-[13px]">{v}</dd>
-                    <button
-                      type="button"
-                      onClick={() => copy(v)}
-                      aria-label={t('pr.copy', 'Copia')}
-                      title={t('pr.copy', 'Copia')}
-                      className="inline-flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-[var(--ds-radius-control)] text-[var(--ds-text-secondary)] hover:bg-[var(--ds-surface)] hover:text-[var(--ds-text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
-                    >
-                      <Copy className="h-4 w-4" aria-hidden />
-                    </button>
-                  </div>
-                ))}
-              </dl>
-              <p className="text-[12px] text-[var(--ds-text-secondary)]">
-                {t('pr.cordlessNoProxy', 'Niente proxy in uscita: basta il server con la porta.')}
-                {' '}
-                {t('pr.cordlessOnce', 'La password si vede solo adesso. Se la perdi, togli il cordless e aggiungilo di nuovo.')}
-              </p>
-              <div className="flex justify-end">
-                <button type="button" onClick={() => setCreatedCordless(null)} className={dsButton.secondary}>{t('pr.done', 'Fatto')}</button>
-              </div>
-            </div>
-          )}
-
-          {canEdit && sip.lines.length < MAX_CORDLESS && (
-            <div className="mt-3 flex items-center gap-2">
-              <input
-                type="text"
-                value={cordlessLabel}
-                maxLength={80}
-                onChange={e => setCordlessLabel(e.target.value)}
-                onKeyDown={e => { if (e.key === 'Enter') void addCordless(); }}
-                placeholder={t('pr.cordlessPh', 'Nome, es. Cordless sala')}
-                aria-label={t('pr.cordlessName', 'Nome del cordless')}
-                className={dsInput}
-              />
-              <button type="button" onClick={addCordless} disabled={!cordlessLabel.trim() || addingCordless} className={`${dsButton.secondary} flex-shrink-0`}>
-                {addingCordless ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> : <Plus className="h-4 w-4" aria-hidden />}
-                {t('pr.cordlessAdd', 'Aggiungi')}
-              </button>
-            </div>
-          )}
-
-          <p className="mt-3 flex gap-1.5 text-[12px] text-[var(--ds-text-muted)]">
-            <AlertTriangle className="mt-0.5 h-3.5 w-3.5 flex-shrink-0" aria-hidden />
-            {t('pr.cordlessEmergency', 'Dal cordless si chiamano solo fissi e cellulari italiani: non il 112, il 113 o il 118. Per le emergenze resta il fisso.')}
-          </p>
         </div>
-      )}
-    </div>
+
+        {/* Cordless: una base DECT IP registrata sul dominio SIP di Sympotia. */}
+        {sip?.configured && (
+          <div className="mt-4 border-t border-[var(--ds-border)] pt-4">
+            <p className="text-[14px] font-medium text-[var(--ds-text-primary)]">{t('pr.cordless', 'Cordless')}</p>
+            <p className="text-[13px] text-[var(--ds-text-muted)]">
+              {t('pr.cordlessHint', 'Una base DECT IP (o un\'app SIP) squilla insieme al CRM, col nome di chi chiama, e chiama i clienti col numero del locale.')}
+            </p>
+
+            {sip.lines.length > 0 && (
+              <ul className="mt-3 space-y-1.5">
+                {sip.lines.map(l => (
+                  <li key={l.id} className="flex items-center gap-2 rounded-[var(--ds-radius-sm)] bg-[var(--ds-surface-row)] px-3 py-2 text-[13px]">
+                    <Radio className="h-4 w-4 flex-shrink-0 text-[var(--ds-text-secondary)]" aria-hidden />
+                    <span className="min-w-0 flex-1 truncate text-[var(--ds-text-primary)]">{l.label}</span>
+                    <span className="flex-shrink-0 tabular-nums text-[var(--ds-text-muted)]">{l.username}</span>
+                    {canEdit && (
+                      <button
+                        type="button"
+                        onClick={() => removeCordless(l.id)}
+                        aria-label={t('pr.cordlessRemove', 'Togli questo cordless')}
+                        className="inline-flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-[var(--ds-radius-control)] text-[var(--ds-text-secondary)] hover:text-[var(--ds-text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+                      >
+                        <X className="h-4 w-4" aria-hidden />
+                      </button>
+                    )}
+                  </li>
+                ))}
+              </ul>
+            )}
+
+            {/* La password esiste solo qui e adesso: il server non la conserva. */}
+            {createdCordless && (
+              <div className="mt-3 space-y-2 rounded-[var(--ds-radius-sm)] bg-[var(--ds-pending-tint)] p-3 text-[13px] text-[var(--ds-text-primary)]">
+                <p className="font-medium">{t('pr.cordlessConfig', 'Da scrivere nella base del cordless')}</p>
+                <dl className="space-y-1.5">
+                  {([
+                    [t('pr.sipServer', 'Server SIP'), `${createdCordless.registrar}:5060`],
+                    [t('pr.sipUser', 'Utente'), createdCordless.username],
+                    [t('pr.sipPassword', 'Password'), createdCordless.password],
+                    [t('pr.sipTransport', 'Trasporto'), 'UDP'],
+                  ] as [string, string][]).map(([k, v]) => (
+                    <div key={k} className="flex items-center gap-2">
+                      <dt className="w-28 flex-shrink-0 text-[var(--ds-text-secondary)]">{k}</dt>
+                      <dd className="min-w-0 flex-1 truncate font-mono text-[13px]">{v}</dd>
+                      <button
+                        type="button"
+                        onClick={() => copy(v)}
+                        aria-label={t('pr.copy', 'Copia')}
+                        title={t('pr.copy', 'Copia')}
+                        className="inline-flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-[var(--ds-radius-control)] text-[var(--ds-text-secondary)] hover:bg-[var(--ds-surface)] hover:text-[var(--ds-text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+                      >
+                        <Copy className="h-4 w-4" aria-hidden />
+                      </button>
+                    </div>
+                  ))}
+                </dl>
+                <p className="text-[12px] text-[var(--ds-text-secondary)]">
+                  {t('pr.cordlessNoProxy', 'Niente proxy in uscita: basta il server con la porta.')}
+                  {' '}
+                  {t('pr.cordlessOnce', 'La password si vede solo adesso. Se la perdi, togli il cordless e aggiungilo di nuovo.')}
+                </p>
+                <div className="flex justify-end">
+                  <button type="button" onClick={() => setCreatedCordless(null)} className={dsButton.secondary}>{t('pr.done', 'Fatto')}</button>
+                </div>
+              </div>
+            )}
+
+            {canEdit && sip.lines.length < MAX_CORDLESS && (
+              <div className="mt-3 flex items-center gap-2">
+                <input
+                  type="text"
+                  value={cordlessLabel}
+                  maxLength={80}
+                  onChange={e => setCordlessLabel(e.target.value)}
+                  onKeyDown={e => { if (e.key === 'Enter') void addCordless(); }}
+                  placeholder={t('pr.cordlessPh', 'Nome, es. Cordless sala')}
+                  aria-label={t('pr.cordlessName', 'Nome del cordless')}
+                  className={dsInput}
+                />
+                <button type="button" onClick={addCordless} disabled={!cordlessLabel.trim() || addingCordless} className={`${dsButton.secondary} flex-shrink-0`}>
+                  {addingCordless ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> : <Plus className="h-4 w-4" aria-hidden />}
+                  {t('pr.cordlessAdd', 'Aggiungi')}
+                </button>
+              </div>
+            )}
+
+            <p className="mt-3 flex gap-1.5 text-[12px] text-[var(--ds-text-muted)]">
+              <AlertTriangle className="mt-0.5 h-3.5 w-3.5 flex-shrink-0" aria-hidden />
+              {t('pr.cordlessEmergency', 'Dal cordless si chiamano solo fissi e cellulari italiani: non il 112, il 113 o il 118. Per le emergenze resta il fisso.')}
+            </p>
+          </div>
+        )}
+      </div>
+    </details>
   );
 };

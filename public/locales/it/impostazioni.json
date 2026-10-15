@@ -283,7 +283,10 @@
     "unsupported": "Il tuo browser non supporta le notifiche push.",
     "denied": "Permesso notifiche negato. Per attivarle modifica le impostazioni del browser per questo sito.",
     "ios": "Su iPhone/iPad le notifiche push richiedono iOS 16.4+ e che l'app sia installata sulla schermata Home (Safari → Condividi → \"Aggiungi alla schermata Home\").",
-    "sendTest": "Invia notifica di test"
+    "sendTest": "Invia notifica di test",
+    "perDevice": "Valgono solo per questo dispositivo: su ogni telefono o computer si accendono a parte.",
+    "statusUnsupported": "Non supportate",
+    "statusDenied": "Bloccate"
   },
   "all": {
     "errLoad": "Errore nel caricamento delle intolleranze",

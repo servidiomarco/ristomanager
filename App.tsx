@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
-import { LayoutDashboard, Grid, Settings, ChevronRight, ChevronDown, ChevronUp, ChefHat, PanelLeft, Calendar, CalendarDays, Bell, X, AlertTriangle, LogOut, Users, UserCheck, FileText, UsersRound, Sun, Moon, Sunset, MoreHorizontal, Search, UtensilsCrossed, Plus, BookUser, Boxes, Clock, ShoppingCart, ListChecks, ShieldCheck, Phone, ConciergeBell, Zap, PartyPopper, DoorClosed, StickyNote, CreditCard, MessageCircle, Mail, Kanban, ClipboardList, CookingPot, BellRing, MessagesSquare, Gauge, Building2, Milestone, Ban, Landmark, Percent, Calculator, BarChart3, Star, ShoppingBag, LifeBuoy, Radio, Thermometer, SlidersHorizontal, Tag, Scale, CalendarCheck, Wand2, QrCode, AudioLines, Megaphone } from 'lucide-react';
+import { LayoutDashboard, Grid, Settings, ChevronRight, ChevronDown, ChevronUp, ChefHat, PanelLeft, Calendar, CalendarDays, Bell, X, AlertTriangle, LogOut, Users, UserCheck, FileText, UsersRound, Sun, Moon, Sunset, MoreHorizontal, Search, UtensilsCrossed, Plus, BookUser, Boxes, Clock, ShoppingCart, ListChecks, ShieldCheck, Phone, ConciergeBell, Zap, PartyPopper, DoorClosed, StickyNote, CreditCard, MessageCircle, Mail, Kanban, ClipboardList, CookingPot, BellRing, MessagesSquare, Gauge, Building2, Milestone, Ban, Landmark, Percent, Calculator, BarChart3, Star, ShoppingBag, LifeBuoy, Radio, Thermometer, SlidersHorizontal, Tag, Scale, CalendarCheck, Wand2, QrCode, AudioLines, Megaphone, House, TabletSmartphone, SquareRoundCorner, Languages } from 'lucide-react';
 import { ViewState, Room, Table, Dish, RestaurantMenu, Reservation, TableStatus, TableShape, BanquetMenu, PaymentStatus, Shift, UserRole, ReservationStatus, DEFAULT_MOBILE_CREATE_ACTIONS, type MobileCreateAction } from './types';
 import { Dashboard } from './components/Dashboard';
 import { FloorPlan } from './components/FloorPlan';
@@ -58,7 +58,7 @@ import { ScheduledClosuresManager } from './components/ScheduledClosuresManager'
 import { RemindersManager } from './components/RemindersManager';
 import { ScheduledTasksManager } from './components/ScheduledTasksManager';
 import { useSettingsSearch } from './components/settingsSearch';
-import { SettingsSection, SettingsIcon, SettingsDisclosure, SettingsNavCard, SettingsVisibleContext, settingsCardClass, settingsGridClass, settingsWideClass } from './components/SettingsCard';
+import { SettingsSection, SettingsIcon, SettingsDisclosure, SettingsNavCard, SettingsStatus, SettingsVisibleContext, settingsCardClass, settingsGridClass } from './components/SettingsCard';
 import { ReservationNotesManager } from './components/ReservationNotesManager';
 import { ReservationAllergensManager } from './components/ReservationAllergensManager';
 import { AutoDepositManager } from './components/AutoDepositManager';
@@ -2336,6 +2336,8 @@ const App: React.FC = () => {
   );
   // Le schede con almeno un blocco visibile. Se quella scelta non ne ha più
   // (permessi o piano cambiati), si torna alla prima.
+  // La pagina di partenza scelta, per la testata della sua card in Profilo.
+  const landingNavItem = NAV_ITEMS.find(n => n.view === user?.preferred_landing_view);
   const visibleSettingsTabs = SETTINGS_TABS.filter(tab => visibleSettingsGroups.some(g => g.tab === tab.id));
   const activeSettingsTab: SettingsTabId = visibleSettingsTabs.some(tab => tab.id === settingsTab)
     ? settingsTab
@@ -3567,15 +3569,22 @@ const App: React.FC = () => {
                 dispositivo, nel caso delle push), non per il ristorante. */}
             <SettingsSection id="imp-profilo" label={t('settings.tabProfile')} description={t('settings.sectionProfileHint', 'Valgono per te, su ogni dispositivo.')}>
               <div className={settingsGridClass} data-imp-lista="">
-              <div className="rounded-[var(--ds-radius)] bg-[var(--ds-surface)] p-4 shadow-[var(--ds-shadow-card)]">
-                <label htmlFor="preferred-landing" className="mb-1 block text-[15px] font-semibold text-[var(--ds-text-primary)]">
-                  {t('settings.landingPage')}
-                </label>
-                <p className="mb-3 text-[13px] text-[var(--ds-text-muted)]">
-                  {t('settings.landingPageHint')}
-                </p>
+              {/* Quattro preferenze a tendina, ognuna una card chiusa con la
+                  rotella come il resto della pagina: in testata la scelta in
+                  uso, dentro la tendina per cambiarla. */}
+              <SettingsDisclosure
+                icon={House}
+                title={t('settings.landingPage')}
+                description={t('settings.landingPageHint')}
+                trailing={
+                  <SettingsStatus>
+                    {landingNavItem ? t(landingNavItem.labelKey, landingNavItem.label) : t('settings.landingPageDefaultShort', 'Predefinita')}
+                  </SettingsStatus>
+                }
+              >
                 <select
                   id="preferred-landing"
+                  aria-label={t('settings.landingPage')}
                   value={user?.preferred_landing_view ?? ''}
                   onChange={async (e) => {
                     const v = e.target.value || null;
@@ -3600,20 +3609,24 @@ const App: React.FC = () => {
                     );
                   })}
                 </select>
-              </div>
+              </SettingsDisclosure>
               {/* Layout della presa comanda: 'pages' è la variante a pagine
                   stile cassa, per chi arriva dall'app di Passepartout e
                   naviga il menu a memoria muscolare. Per account, non per
                   dispositivo: la scelta segue l'operatore su ogni palmare. */}
-              <div className="rounded-[var(--ds-radius)] bg-[var(--ds-surface)] p-4 shadow-[var(--ds-shadow-card)]">
-                <label htmlFor="preferred-orderpad-layout" className="mb-1 block text-[15px] font-semibold text-[var(--ds-text-primary)]">
-                  {t('settings.orderpadLayout')}
-                </label>
-                <p className="mb-3 text-[13px] text-[var(--ds-text-muted)]">
-                  {t('settings.orderpadLayoutHint')}
-                </p>
+              <SettingsDisclosure
+                icon={TabletSmartphone}
+                title={t('settings.orderpadLayout')}
+                description={t('settings.orderpadLayoutHint')}
+                trailing={
+                  <SettingsStatus>
+                    {user?.preferred_orderpad_layout === 'pages' ? t('settings.layoutPagedShort', 'A pagine') : t('settings.layoutClassic')}
+                  </SettingsStatus>
+                }
+              >
                 <select
                   id="preferred-orderpad-layout"
+                  aria-label={t('settings.orderpadLayout')}
                   value={user?.preferred_orderpad_layout ?? ''}
                   onChange={async (e) => {
                     const v = e.target.value || null;
@@ -3629,21 +3642,25 @@ const App: React.FC = () => {
                   <option value="">{t('settings.layoutClassic')}</option>
                   <option value="pages">{t('settings.layoutPaged')}</option>
                 </select>
-              </div>
+              </SettingsDisclosure>
               {/* Stile dell'interfaccia: 'squadrato' è il redesign dei raggi
                   (angoli netti, un raggio solo), null il look di sempre.
                   Cambia solo i tre token in index.css via data-design sul
                   root — colori e spaziature restano gli stessi. Per account,
                   come il layout comande: segue l'operatore ovunque. */}
-              <div className="rounded-[var(--ds-radius)] bg-[var(--ds-surface)] p-4 shadow-[var(--ds-shadow-card)]">
-                <label htmlFor="preferred-design-style" className="mb-1 block text-[15px] font-semibold text-[var(--ds-text-primary)]">
-                  {t('settings.designStyle')}
-                </label>
-                <p className="mb-3 text-[13px] text-[var(--ds-text-muted)]">
-                  {t('settings.designStyleHint')}
-                </p>
+              <SettingsDisclosure
+                icon={SquareRoundCorner}
+                title={t('settings.designStyle')}
+                description={t('settings.designStyleHint')}
+                trailing={
+                  <SettingsStatus>
+                    {user?.preferred_design_style === 'squadrato' ? t('settings.designSquaredShort', 'Squadrato') : t('settings.designClassicShort', 'Classico')}
+                  </SettingsStatus>
+                }
+              >
                 <select
                   id="preferred-design-style"
+                  aria-label={t('settings.designStyle')}
                   value={user?.preferred_design_style ?? ''}
                   onChange={async (e) => {
                     const v = e.target.value || null;
@@ -3659,20 +3676,24 @@ const App: React.FC = () => {
                   <option value="">{t('settings.designClassic')}</option>
                   <option value="squadrato">{t('settings.designSquared')}</option>
                 </select>
-              </div>
+              </SettingsDisclosure>
               {/* Lingua dell'interfaccia: per account come le due card qui
                   sopra, quindi segue l'operatore su ogni dispositivo. Vuoto =
                   si eredita la lingua del ristorante. È la prima card tradotta
                   della SPA: si legge già nella lingua che imposta. */}
-              <div className="rounded-[var(--ds-radius)] bg-[var(--ds-surface)] p-4 shadow-[var(--ds-shadow-card)]">
-                <label htmlFor="preferred-language" className="mb-1 block text-[15px] font-semibold text-[var(--ds-text-primary)]">
-                  {t('profile.languageLabel')}
-                </label>
-                <p className="mb-3 text-[13px] text-[var(--ds-text-muted)]">
-                  {t('profile.languageHint')}
-                </p>
+              <SettingsDisclosure
+                icon={Languages}
+                title={t('profile.languageLabel')}
+                description={t('profile.languageHint')}
+                trailing={
+                  <SettingsStatus>
+                    {user?.language === 'it' ? t('profile.languageIt') : user?.language === 'en' ? t('profile.languageEn') : t('profile.languageDefault')}
+                  </SettingsStatus>
+                }
+              >
                 <select
                   id="preferred-language"
+                  aria-label={t('profile.languageLabel')}
                   value={user?.language ?? ''}
                   onChange={async (e) => {
                     const v = e.target.value || null;
@@ -3689,7 +3710,7 @@ const App: React.FC = () => {
                   <option value="it">{t('profile.languageIt')}</option>
                   <option value="en">{t('profile.languageEn')}</option>
                 </select>
-              </div>
+              </SettingsDisclosure>
                 <PushNotificationsCard />
               </div>
             </SettingsSection>
@@ -3700,13 +3721,11 @@ const App: React.FC = () => {
                 preferenza. Si regola anche dal desktop: segue l'utente. */}
             <SettingsSection id="imp-menu" label={t('settings.sectionMobileMenu', 'Menu mobile')} description={t('settings.sectionMobileMenuHint', 'Il «+» della barra del telefono. Vale per te, su ogni dispositivo.')}>
               <div className={settingsGridClass} data-imp-lista="">
-                <div className={settingsWideClass}>
-                  <MobileActionsPicker
-                    options={visibleCreateItems.map(item => ({ key: item.key, label: item.label, Icon: item.Icon }))}
-                    selected={mobileCreateItems.map(item => item.key)}
-                    onToggle={key => toggleMobileAction(key as MobileCreateAction)}
-                  />
-                </div>
+                <MobileActionsPicker
+                  options={visibleCreateItems.map(item => ({ key: item.key, label: item.label, Icon: item.Icon }))}
+                  selected={mobileCreateItems.map(item => item.key)}
+                  onToggle={key => toggleMobileAction(key as MobileCreateAction)}
+                />
               </div>
             </SettingsSection>
 
@@ -4121,29 +4140,25 @@ const App: React.FC = () => {
               <div className={settingsGridClass} data-imp-lista="">
                 <FeatureTogglesManager showToast={addToast} only="voice" />
                 {/* Istruzioni testuali per una futura assegnazione tavoli
-                    guidata da AI; oggi il testo è solo salvato. Sta accanto
-                    a Sofia: le due card che si aprono fanno una riga, quelle
-                    già aperte sotto prendono tutta la larghezza. */}
+                    guidata da AI; oggi il testo è solo salvato. Tutte le card
+                    del blocco sono chiuse con la rotella: due per riga, e
+                    quella aperta prende la riga intera. */}
                 <CardErrorBoundary label={t('settings.aiTablePrompt')}>
                   <TableAssignmentAiPromptCard showToast={addToast} />
                 </CardErrorBoundary>
                 {/* Chi risponde al numero di Sofia: lei subito, o prima il
                     cellulare del locale (docs/telefono-piano.md). */}
                 {hasFeature('voice') && (
-                  <div className={settingsWideClass}>
-                    <CardErrorBoundary label={t('settings.phoneRouting', 'Chi risponde al telefono')}>
-                      <PhoneRoutingCard showToast={addToast} />
-                    </CardErrorBoundary>
-                  </div>
+                  <CardErrorBoundary label={t('settings.phoneRouting', 'Chi risponde al telefono')}>
+                    <PhoneRoutingCard showToast={addToast} />
+                  </CardErrorBoundary>
                 )}
                 {/* Minuti del mese contro quelli inclusi nell'add-on e tetto
                     degli extra: solo per chi ha Sofia. */}
                 {hasFeature('voice') && (
-                  <div className={settingsWideClass}>
-                    <CardErrorBoundary label={t('settings.voiceUsage', 'Minuti di Sofia')}>
-                      <VoiceUsageCard showToast={addToast} />
-                    </CardErrorBoundary>
-                  </div>
+                  <CardErrorBoundary label={t('settings.voiceUsage', 'Minuti di Sofia')}>
+                    <VoiceUsageCard showToast={addToast} />
+                  </CardErrorBoundary>
                 )}
               </div>
             </SettingsSection>

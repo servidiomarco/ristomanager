@@ -5,6 +5,7 @@ import { getVoiceUsage, updateVoiceExtraCap, updateVoiceAlertPercents, type Voic
 import { VOICE_ALERT_PERCENT_OPTIONS } from '../services/voicePlan';
 import { useAuth } from '../contexts/AuthContext';
 import { dsButton } from './ds';
+import { SettingsIcon, SettingsStatus, SettingsSummary, settingsCardClass } from './SettingsCard';
 import { useDisplayLocale } from '../utils/formatLocale';
 
 /* ── Minuti di Sofia ──────────────────────────────────────────────────────
@@ -55,10 +56,16 @@ export const VoiceUsageCard: React.FC<Props> = ({ showToast }) => {
         return () => { cancelled = true; };
     }, []);
 
+    // Mentre i minuti arrivano la testata c'è già, con lo spinner al posto
+    // della rotella: la griglia non cambia forma quando arrivano.
     if (loading) {
         return (
-            <div className="flex items-center gap-2 rounded-[var(--ds-radius)] border border-[var(--ds-border)] bg-[var(--ds-surface)] px-4 py-3 text-[13px] text-[var(--ds-text-muted)]">
-                <Loader2 className="h-4 w-4 animate-spin" /> {t('vu.loading', 'Caricamento…')}
+            <div className={settingsCardClass}>
+                <div className="flex min-h-[72px] items-center gap-3 px-4 py-3">
+                    <SettingsIcon icon={Clock} />
+                    <span className="min-w-0 flex-1 text-[14px] font-semibold text-[var(--ds-text-primary)]">{t('vu.title', 'Minuti di Sofia')}</span>
+                    <Loader2 className="h-4 w-4 animate-spin text-[var(--ds-text-muted)]" aria-label={t('vu.loading', 'Caricamento…')} />
+                </div>
             </div>
         );
     }
@@ -115,150 +122,155 @@ export const VoiceUsageCard: React.FC<Props> = ({ showToast }) => {
         }
     };
 
+    // A card chiusa resta il numero per cui la si apre: minuti usati contro
+    // inclusi, nel colore della barra (ambra da 80%, rosso a 100% o al tetto).
+    const usedTone = pct >= 100 || month.over_cap ? 'critical' : pct >= 80 ? 'pending' : 'neutral';
+
     return (
-        <div className="rounded-[var(--ds-radius)] bg-[var(--ds-surface)] p-4 shadow-[var(--ds-shadow-card)]">
-            <div className="flex items-center gap-3">
-                <div className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-[var(--ds-radius)] bg-[var(--ds-surface-row)] text-[var(--ds-text-secondary)]">
-                    <Clock className="h-5 w-5" />
-                </div>
-                <div className="min-w-0">
-                    <h4 className="text-[14px] font-medium text-[var(--ds-text-primary)]">{t('vu.title', 'Minuti di Sofia')}</h4>
-                    <p className="text-[13px] text-[var(--ds-text-muted)]">
-                        {t('vu.plan', '{{price}} al mese · {{included}} minuti inclusi · poi {{overage}} al minuto', {
-                            price: eur(plan.priceCents), included: plan.includedMinutes, overage: eur(plan.overageCentsPerMinute),
-                        })}
+        <details className={settingsCardClass}>
+            <SettingsSummary
+                icon={Clock}
+                title={t('vu.title', 'Minuti di Sofia')}
+                description={t('vu.plan', '{{price}} al mese · {{included}} minuti inclusi · poi {{overage}} al minuto', {
+                    price: eur(plan.priceCents), included: plan.includedMinutes, overage: eur(plan.overageCentsPerMinute),
+                })}
+                trailing={
+                    <SettingsStatus tone={usedTone}>
+                        {t('vu.usedShort', '{{used}}/{{included}} min', { used, included: plan.includedMinutes })}
+                    </SettingsStatus>
+                }
+            />
+
+            <div className="border-t border-[var(--ds-border)] px-4 pb-4 pt-3">
+                <div>
+                    <div className="mb-1.5 flex items-baseline justify-between gap-2 text-[13px]">
+                        <span className="text-[var(--ds-text-secondary)]">{monthName}</span>
+                        <span className="tabular-nums font-semibold text-[var(--ds-text-primary)]">
+                            {t('vu.used', '{{used}} / {{included}} minuti', { used, included: plan.includedMinutes })}
+                        </span>
+                    </div>
+                    <div className="h-2.5 w-full overflow-hidden rounded-full bg-[var(--ds-border)]">
+                        <div className={`h-full rounded-full ${barClass}`} style={{ width: `${pct}%` }} />
+                    </div>
+                    <p className="mt-1.5 text-[13px] text-[var(--ds-text-muted)]">
+                        {month.projected_minutes > used
+                            ? t('vu.projected', 'A questo ritmo circa {{minutes}} minuti a fine mese', { minutes: month.projected_minutes })
+                            : t('vu.noProjection', 'Stima a fine mese non ancora disponibile')}
                     </p>
                 </div>
-            </div>
 
-            <div className="mt-4">
-                <div className="mb-1.5 flex items-baseline justify-between gap-2 text-[13px]">
-                    <span className="text-[var(--ds-text-secondary)]">{monthName}</span>
-                    <span className="tabular-nums font-semibold text-[var(--ds-text-primary)]">
-                        {t('vu.used', '{{used}} / {{included}} minuti', { used, included: plan.includedMinutes })}
-                    </span>
-                </div>
-                <div className="h-2.5 w-full overflow-hidden rounded-full bg-[var(--ds-border)]">
-                    <div className={`h-full rounded-full ${barClass}`} style={{ width: `${pct}%` }} />
-                </div>
-                <p className="mt-1.5 text-[13px] text-[var(--ds-text-muted)]">
-                    {month.projected_minutes > used
-                        ? t('vu.projected', 'A questo ritmo circa {{minutes}} minuti a fine mese', { minutes: month.projected_minutes })
-                        : t('vu.noProjection', 'Stima a fine mese non ancora disponibile')}
-                </p>
-            </div>
-
-            <div className="mt-4 grid grid-cols-3 gap-2">
-                <div className="rounded-[var(--ds-radius-sm)] bg-[var(--ds-surface-row)] px-3 py-2">
-                    <div className="text-[12px] text-[var(--ds-text-muted)]">{t('vu.calls', 'Chiamate')}</div>
-                    <div className="tabular-nums text-[16px] font-semibold text-[var(--ds-text-primary)]">{month.calls}</div>
-                </div>
-                <div className="rounded-[var(--ds-radius-sm)] bg-[var(--ds-surface-row)] px-3 py-2">
-                    <div className="text-[12px] text-[var(--ds-text-muted)]">{t('vu.bookings', 'Prenotazioni')}</div>
-                    <div className="tabular-nums text-[16px] font-semibold text-[var(--ds-text-primary)]">{month.bookings}</div>
-                </div>
-                <div className="rounded-[var(--ds-radius-sm)] bg-[var(--ds-surface-row)] px-3 py-2">
-                    <div className="text-[12px] text-[var(--ds-text-muted)]">{t('vu.extra', 'Extra')}</div>
-                    <div className="tabular-nums text-[16px] font-semibold text-[var(--ds-text-primary)]">
-                        {month.extra_minutes > 0 ? eur(month.extra_cents) : '—'}
+                <div className="mt-4 grid grid-cols-3 gap-2">
+                    <div className="rounded-[var(--ds-radius-sm)] bg-[var(--ds-surface-row)] px-3 py-2">
+                        <div className="text-[12px] text-[var(--ds-text-muted)]">{t('vu.calls', 'Chiamate')}</div>
+                        <div className="tabular-nums text-[16px] font-semibold text-[var(--ds-text-primary)]">{month.calls}</div>
+                    </div>
+                    <div className="rounded-[var(--ds-radius-sm)] bg-[var(--ds-surface-row)] px-3 py-2">
+                        <div className="text-[12px] text-[var(--ds-text-muted)]">{t('vu.bookings', 'Prenotazioni')}</div>
+                        <div className="tabular-nums text-[16px] font-semibold text-[var(--ds-text-primary)]">{month.bookings}</div>
+                    </div>
+                    <div className="rounded-[var(--ds-radius-sm)] bg-[var(--ds-surface-row)] px-3 py-2">
+                        <div className="text-[12px] text-[var(--ds-text-muted)]">{t('vu.extra', 'Extra')}</div>
+                        <div className="tabular-nums text-[16px] font-semibold text-[var(--ds-text-primary)]">
+                            {month.extra_minutes > 0 ? eur(month.extra_cents) : '—'}
+                        </div>
                     </div>
                 </div>
-            </div>
 
-            {month.daily.length > 0 && (
-                <div className="mt-4">
-                    <div className="mb-1 text-[12px] text-[var(--ds-text-muted)]">{t('vu.daily', 'Minuti al giorno')}</div>
-                    <div className="flex h-16 items-end gap-[3px]" role="img" aria-label={t('vu.daily', 'Minuti al giorno')}>
-                        {month.daily.map(d => (
-                            <div
-                                key={d.day}
-                                title={t('vu.dayTip', '{{day}}: {{minutes}} min, {{calls}} chiamate', { day: d.day.slice(8), minutes: d.billable_minutes, calls: d.calls })}
-                                className="min-w-0 flex-1 rounded-t-[var(--ds-radius-sm)] bg-[var(--ds-seated-solid)]"
-                                style={{ height: `${Math.max(4, Math.round((d.billable_minutes / maxDaily) * 100))}%` }}
+                {month.daily.length > 0 && (
+                    <div className="mt-4">
+                        <div className="mb-1 text-[12px] text-[var(--ds-text-muted)]">{t('vu.daily', 'Minuti al giorno')}</div>
+                        <div className="flex h-16 items-end gap-[3px]" role="img" aria-label={t('vu.daily', 'Minuti al giorno')}>
+                            {month.daily.map(d => (
+                                <div
+                                    key={d.day}
+                                    title={t('vu.dayTip', '{{day}}: {{minutes}} min, {{calls}} chiamate', { day: d.day.slice(8), minutes: d.billable_minutes, calls: d.calls })}
+                                    className="min-w-0 flex-1 rounded-t-[var(--ds-radius-sm)] bg-[var(--ds-seated-solid)]"
+                                    style={{ height: `${Math.max(4, Math.round((d.billable_minutes / maxDaily) * 100))}%` }}
+                                />
+                            ))}
+                        </div>
+                    </div>
+                )}
+
+                {month.over_cap && (
+                    <p className="mt-3 rounded-[var(--ds-radius-sm)] bg-[var(--ds-critical-tint)] px-3 py-2 text-[13px] text-[var(--ds-critical-text)]">
+                        {t('vu.overCap', 'Gli extra hanno raggiunto il tetto di {{cap}}: alzalo per non perdere prenotazioni.', { cap: eur(plan.extraCapCents) })}
+                    </p>
+                )}
+
+                <div className="mt-4 border-t border-[var(--ds-border)] pt-3">
+                    <label htmlFor="voice-extra-cap" className="text-[13px] font-medium text-[var(--ds-text-primary)]">
+                        {t('vu.capLabel', 'Tetto di spesa per i minuti extra')}
+                    </label>
+                    <p className="text-[12px] text-[var(--ds-text-muted)]">
+                        {t('vu.capHint', 'Al mese, oltre il canone. 0 = nessun minuto extra.')}
+                    </p>
+                    <div className="mt-2 flex items-center gap-2">
+                        <div className="relative w-32">
+                            <input
+                                id="voice-extra-cap"
+                                inputMode="decimal"
+                                value={capDraft}
+                                disabled={!canEdit || saving}
+                                onChange={e => setCapDraft(e.target.value)}
+                                onKeyDown={e => { if (e.key === 'Enter') saveCap(); }}
+                                className="h-11 w-full rounded-[var(--ds-radius-control)] border border-[var(--ds-border)] bg-[var(--ds-surface)] pl-3 pr-8 text-[14px] tabular-nums disabled:opacity-50"
                             />
-                        ))}
+                            <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-[14px] text-[var(--ds-text-muted)]">€</span>
+                        </div>
+                        {canEdit && (
+                            <button
+                                type="button"
+                                onClick={saveCap}
+                                disabled={!capDirty || saving}
+                                className={`${dsButton.primary} h-11 px-4 text-[14px]`}
+                            >
+                                {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : t('vu.save', 'Salva')}
+                            </button>
+                        )}
                     </div>
-                </div>
-            )}
-
-            {month.over_cap && (
-                <p className="mt-3 rounded-[var(--ds-radius-sm)] bg-[var(--ds-critical-tint)] px-3 py-2 text-[13px] text-[var(--ds-critical-text)]">
-                    {t('vu.overCap', 'Gli extra hanno raggiunto il tetto di {{cap}}: alzalo per non perdere prenotazioni.', { cap: eur(plan.extraCapCents) })}
-                </p>
-            )}
-
-            <div className="mt-4 border-t border-[var(--ds-border)] pt-3">
-                <label htmlFor="voice-extra-cap" className="text-[13px] font-medium text-[var(--ds-text-primary)]">
-                    {t('vu.capLabel', 'Tetto di spesa per i minuti extra')}
-                </label>
-                <p className="text-[12px] text-[var(--ds-text-muted)]">
-                    {t('vu.capHint', 'Al mese, oltre il canone. 0 = nessun minuto extra.')}
-                </p>
-                <div className="mt-2 flex items-center gap-2">
-                    <div className="relative w-32">
-                        <input
-                            id="voice-extra-cap"
-                            inputMode="decimal"
-                            value={capDraft}
-                            disabled={!canEdit || saving}
-                            onChange={e => setCapDraft(e.target.value)}
-                            onKeyDown={e => { if (e.key === 'Enter') saveCap(); }}
-                            className="h-11 w-full rounded-[var(--ds-radius-control)] border border-[var(--ds-border)] bg-[var(--ds-surface)] pl-3 pr-8 text-[14px] tabular-nums disabled:opacity-50"
-                        />
-                        <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-[14px] text-[var(--ds-text-muted)]">€</span>
-                    </div>
-                    {canEdit && (
-                        <button
-                            type="button"
-                            onClick={saveCap}
-                            disabled={!capDirty || saving}
-                            className={`${dsButton.primary} h-11 px-4 text-[14px]`}
-                        >
-                            {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : t('vu.save', 'Salva')}
-                        </button>
+                    {!capValid && capDraft.trim() !== '' && (
+                        <p className="mt-1 text-[12px] text-[var(--ds-critical-text)]">{t('vu.capInvalid', 'Inserisci un importo da 0 a 1.000 €.')}</p>
                     )}
                 </div>
-                {!capValid && capDraft.trim() !== '' && (
-                    <p className="mt-1 text-[12px] text-[var(--ds-critical-text)]">{t('vu.capInvalid', 'Inserisci un importo da 0 a 1.000 €.')}</p>
+
+                {alertPercents && (
+                    <div className="mt-4 border-t border-[var(--ds-border)] pt-3">
+                        <div id="voice-alerts-label" className="text-[13px] font-medium text-[var(--ds-text-primary)]">
+                            {t('vu.alertsLabel', 'Avvisi sui minuti inclusi')}
+                        </div>
+                        <p className="text-[12px] text-[var(--ds-text-muted)]">
+                            {t('vu.alertsHint', 'Notifica a titolare e direzione quando Sofia arriva a:')}
+                        </p>
+                        <div className="mt-2 flex flex-wrap gap-2" role="group" aria-labelledby="voice-alerts-label">
+                            {VOICE_ALERT_PERCENT_OPTIONS.map(p => {
+                                const on = alertPercents.includes(p);
+                                return (
+                                    <button
+                                        key={p}
+                                        type="button"
+                                        onClick={() => toggleAlert(p)}
+                                        disabled={!canEdit || alertsSaving}
+                                        aria-pressed={on}
+                                        className={`inline-flex h-11 items-center rounded-[var(--ds-radius-control)] px-4 text-[14px] font-semibold tabular-nums transition-colors disabled:opacity-50 ${
+                                            on
+                                                ? 'bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)]'
+                                                : 'bg-[var(--ds-surface-row)] text-[var(--ds-text-primary)] hover:bg-[var(--ds-border)]'
+                                        }`}
+                                    >
+                                        {p}%
+                                    </button>
+                                );
+                            })}
+                        </div>
+                        {alertPercents.length === 0 && (
+                            <p className="mt-1.5 text-[12px] text-[var(--ds-text-muted)]">
+                                {t('vu.alertsNone', "Arriverà solo l'avviso sul tetto degli extra.")}
+                            </p>
+                        )}
+                    </div>
                 )}
             </div>
-
-            {alertPercents && (
-                <div className="mt-4 border-t border-[var(--ds-border)] pt-3">
-                    <div id="voice-alerts-label" className="text-[13px] font-medium text-[var(--ds-text-primary)]">
-                        {t('vu.alertsLabel', 'Avvisi sui minuti inclusi')}
-                    </div>
-                    <p className="text-[12px] text-[var(--ds-text-muted)]">
-                        {t('vu.alertsHint', 'Notifica a titolare e direzione quando Sofia arriva a:')}
-                    </p>
-                    <div className="mt-2 flex flex-wrap gap-2" role="group" aria-labelledby="voice-alerts-label">
-                        {VOICE_ALERT_PERCENT_OPTIONS.map(p => {
-                            const on = alertPercents.includes(p);
-                            return (
-                                <button
-                                    key={p}
-                                    type="button"
-                                    onClick={() => toggleAlert(p)}
-                                    disabled={!canEdit || alertsSaving}
-                                    aria-pressed={on}
-                                    className={`inline-flex h-11 items-center rounded-[var(--ds-radius-control)] px-4 text-[14px] font-semibold tabular-nums transition-colors disabled:opacity-50 ${
-                                        on
-                                            ? 'bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)]'
-                                            : 'bg-[var(--ds-surface-row)] text-[var(--ds-text-primary)] hover:bg-[var(--ds-border)]'
-                                    }`}
-                                >
-                                    {p}%
-                                </button>
-                            );
-                        })}
-                    </div>
-                    {alertPercents.length === 0 && (
-                        <p className="mt-1.5 text-[12px] text-[var(--ds-text-muted)]">
-                            {t('vu.alertsNone', "Arriverà solo l'avviso sul tetto degli extra.")}
-                        </p>
-                    )}
-                </div>
-            )}
-        </div>
+        </details>
     );
 };
