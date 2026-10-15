@@ -52,5 +52,9 @@
   },
   "footer": {
     "notBinding": "Il preventivo non è un impegno: si conferma insieme al ristorante."
+  },
+  "saveContact": {
+    "label": "Salva il nostro numero",
+    "hint": "Così ci riconosci quando ti chiamiamo."
   }
 }

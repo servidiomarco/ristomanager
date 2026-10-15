@@ -540,7 +540,7 @@ export const PublicReservationPage: React.FC = () => {
         </section>
 
         <footer className="mt-6 text-center text-[13px] text-[var(--ds-text-muted)]">
-          <PublicBusinessCard business={business} />
+          <PublicBusinessCard business={business} saveContact={{ label: t('saveContact.label'), hint: t('saveContact.hint'), lang }} />
         </footer>
       </div>
     </div>

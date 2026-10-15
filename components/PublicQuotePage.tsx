@@ -224,7 +224,7 @@ export const PublicQuotePage: React.FC = () => {
           {isQuote && <p>{t('footer.notBinding')}</p>}
           {/* La carta d'identità del ristorante: chi manda il preventivo e
               come raggiungerlo con un tocco. */}
-          <PublicBusinessCard business={business} />
+          <PublicBusinessCard business={business} saveContact={{ label: t('saveContact.label'), hint: t('saveContact.hint'), lang }} />
         </footer>
       </div>
     </div>

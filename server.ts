@@ -16,6 +16,7 @@ import rateLimit from 'express-rate-limit';
 import QRCode from 'qrcode';
 import pool, { createSchema, queryWithRetry, runMigrations, tenantQuery, runWithTenantContext, runAsPlatform, withTenant } from './db.js';
 import { SocketService } from './services/socketService.js';
+import { buildContactCard, contactCardFileName, contactPhotoFromLogo, type ContactCardPhone } from './services/contactCard.js';
 import { retryOnLockContention } from './utils/lockRetry.js';
 import * as bookingTools from './services/bookingTools.js';
 import * as whatsappAgent from './services/whatsapp/agent/index.js';
@@ -2842,19 +2843,25 @@ function refuseOutbound(res: express.Response, text: string): void {
     res.type('text/xml').send(twimlResponse(`<Say language="it-IT">${xmlEscape(text)}</Say><Hangup/>`));
 }
 
-/** In uscita col numero del locale, dal CRM o dal cordless: solo fissi e
- *  cellulari italiani (isCallableNumber), con la riga nel registro. */
-async function dialOutFromLocale(tenantId: number, req: express.Request, res: express.Response, rawTarget: string, answeredBy: string): Promise<void> {
-    const target = e164OrEmpty(normalizeItalianPhone(rawTarget));
-    if (!target || !isCallableNumber(target)) return refuseOutbound(res, 'Numero non chiamabile da qui.');
-    // Il numero del locale è quello su cui arrivano le chiamate di Sofia.
+/** Il numero con cui il locale chiama i clienti: quello su cui arrivano le
+ *  chiamate di Sofia. Lo usano le chiamate in uscita e la scheda contatto
+ *  («Salva il nostro numero»), così il cliente salva il numero che vedrà. */
+async function localeCallerId(tenantId: number): Promise<string> {
     const line = await queryWithRetry(
         `SELECT to_number FROM phone_calls
          WHERE tenant_id = $1 AND direction = 'inbound' AND to_number IS NOT NULL
          ORDER BY started_at DESC LIMIT 1`,
         [tenantId]
     );
-    const callerId = e164OrEmpty(line.rows[0]?.to_number);
+    return e164OrEmpty(line.rows[0]?.to_number);
+}
+
+/** In uscita col numero del locale, dal CRM o dal cordless: solo fissi e
+ *  cellulari italiani (isCallableNumber), con la riga nel registro. */
+async function dialOutFromLocale(tenantId: number, req: express.Request, res: express.Response, rawTarget: string, answeredBy: string): Promise<void> {
+    const target = e164OrEmpty(normalizeItalianPhone(rawTarget));
+    if (!target || !isCallableNumber(target)) return refuseOutbound(res, 'Numero non chiamabile da qui.');
+    const callerId = await localeCallerId(tenantId);
     if (!callerId) return refuseOutbound(res, 'Il numero del locale non è ancora collegato.');
     const customer = await findCustomerByPhone(tenantId, target);
     await queryWithRetry(
@@ -4242,6 +4249,7 @@ app.put('/reservations/:id', authenticate, requirePermission('reservations:full'
         ) {
             const roomName = await resolveReservationRoomName(updatedReservation);
             const manage = await guestManageLink(req.tenantId!, updatedReservation.id);
+            const contactCard = await contactCardUrl(req.tenantId!, resolveGuestLanguage(updatedReservation));
             // Canale (o canali) decisi dalla policy per fonte in Impostazioni
             // → Canali di risposta; il default riproduce la condotta storica.
             dispatchBookingNotification({
@@ -4266,7 +4274,7 @@ app.put('/reservations/:id', authenticate, requirePermission('reservations:full'
                     reservationTime: updatedReservation.reservation_time,
                     guests: updatedReservation.guests,
                     roomName,
-                    language: resolveGuestLanguage(updatedReservation), timezone: fusoMsg, manage }),
+                    language: resolveGuestLanguage(updatedReservation), timezone: fusoMsg, manage, contactCard }),
                 kind: 'confirmation',
             }).catch(err => console.error('Auto-confirmation send failed:', err));
         }
@@ -4919,12 +4927,13 @@ app.post('/reservations/:id/confirm-email', authenticate, requirePermission('res
 
         const roomName = await resolveReservationRoomName(reservation);
         const manage = await guestManageLink(req.tenantId!, reservation.id);
+        const contactCard = await contactCardUrl(req.tenantId!, reservation.language);
         const { subject, text, html } = buildBookingConfirmationEmail({
             customerName: reservation.customer_name,
             reservationTime: reservation.reservation_time,
             guests: reservation.guests,
             roomName,
-            language: reservation.language, timezone: fusoMsg, manage });
+            language: reservation.language, timezone: fusoMsg, manage, contactCard });
 
         const emailStatus = await getSmtpConfigStatus(req.tenantId!).catch(() => null);
         const emailProvider: 'smtp' | 'resend' = emailStatus?.provider === 'resend' ? 'resend' : 'smtp';
@@ -19416,6 +19425,7 @@ const startBookingReminderScheduler = () => {
                     const language = resolveGuestLanguage(row);
                     const identity = businessIdentity(tenantId);
                     const manage = await guestManageLink(tenantId, row.id);
+                    const contactCard = await contactCardUrl(tenantId, language);
                     const msgOpts = { timezone: gate.tz, manage };
                     const outcome = await dispatchBookingNotification({
                         tenantId,
@@ -19435,6 +19445,7 @@ const startBookingReminderScheduler = () => {
                             timezone: gate.tz,
                             identity,
                             manage,
+                            contactCard,
                         }),
                         kind: 'reminder',
                     });
@@ -21446,6 +21457,122 @@ function publicBusinessCard(tenantId: number) {
     };
 }
 
+// ── «Salva il nostro numero»: la scheda contatto del locale ──────────────
+// In Italia chi riceve una chiamata vede solo il numero (services/
+// contactCard.ts). La scheda mette in rubrica il numero con cui il locale
+// richiama (CRM e cordless), il telefono pubblico e WhatsApp, così il
+// cliente vede il nome del locale quando lo chiamiamo noi.
+
+/** I numeri della scheda, in ordine: quello con cui chiamiamo, il telefono
+ *  pubblico, WhatsApp. Vuoto se il locale non ne ha nessuno. */
+async function contactCardPhones(tenantId: number, english: boolean): Promise<ContactCardPhone[]> {
+    const identity = await publicBusinessIdentity(tenantId);
+    const dialCode = (await getTenantLocale(tenantId)).dialCode;
+    const phones: ContactCardPhone[] = [];
+    const line = await localeCallerId(tenantId);
+    if (line) phones.push({ number: line, label: english ? 'Bookings' : 'Prenotazioni', kind: 'work' });
+    const fixed = e164OrEmpty(normalizePhoneE164(identity.phone, dialCode));
+    if (fixed) phones.push({ number: fixed, kind: 'work' });
+    const whatsapp = e164OrEmpty(normalizePhoneE164(identity.whatsapp, dialCode));
+    if (whatsapp) phones.push({ number: whatsapp, label: 'WhatsApp', kind: 'cell' });
+    return phones;
+}
+
+const tenantSlugById = new Map<number, { slug: string | null; at: number }>();
+
+/** Il link della scheda per messaggi e pagine pubbliche, o null (nessun
+ *  numero, backend senza indirizzo pubblico, tenant senza slug). È un URL
+ *  del BACKEND: la SPA su un path che non conosce risponde 200 con
+ *  l'index.html, e il telefono scaricherebbe una pagina invece del contatto
+ *  (stesso errore già visto con gli allegati WhatsApp). */
+async function contactCardUrl(tenantId: number, language?: string | null): Promise<string | null> {
+    const base = publicAppBaseUrl();
+    if (!base || isServiceNode) return null;
+    try {
+        const english = isEnglishGuest(language);
+        if ((await contactCardPhones(tenantId, english)).length === 0) return null;
+        let cached = tenantSlugById.get(tenantId);
+        if (!cached || Date.now() - cached.at > TENANT_TOKEN_TTL_MS) {
+            const r = await queryWithRetry('SELECT slug FROM tenants WHERE id = $1', [tenantId]);
+            cached = { slug: r.rows[0]?.slug || null, at: Date.now() };
+            tenantSlugById.set(tenantId, cached);
+        }
+        // Il path senza slug ricade sul tenant 1 (resolveTenantForPublicRequest):
+        // va bene solo per lui.
+        const cardPath = cached.slug
+            ? `/public/${encodeURIComponent(cached.slug)}/contatto.vcf`
+            : (tenantId === PUBLIC_TENANT_ID ? '/public/contatto.vcf' : null);
+        if (!cardPath) return null;
+        return `${base}${cardPath}${english ? '?lang=en' : ''}`;
+    } catch (err: any) {
+        console.warn('[contatto] link non disponibile:', err?.message || err);
+        return null;
+    }
+}
+
+/** Il logo dell'anagrafica in byte: quello caricato dalle Impostazioni
+ *  (/public/media/<token>) o il logo statico del Frantoio. */
+async function businessLogoBytes(tenantId: number, logoUrl: string): Promise<Buffer | null> {
+    const media = logoUrl.match(LOGO_MEDIA_RE);
+    if (media) {
+        const r = await queryWithRetry(
+            `SELECT bytes FROM outbound_media WHERE tenant_id = $1 AND token = $2`,
+            [tenantId, media[1]]
+        );
+        return r.rows[0]?.bytes ?? null;
+    }
+    if (logoUrl === '/prenota/logo.png') {
+        return readFileAsync(path.join(process.cwd(), 'public', 'logo-vf.png')).catch(() => null);
+    }
+    return null;
+}
+
+// La foto si ricalcola con sharp: dieci minuti di cache bastano a non
+// rifarla per ogni cliente che tocca il link, e un cambio di anagrafica
+// arriva comunque in fretta.
+const CONTACT_CARD_TTL_MS = 10 * 60 * 1000;
+const contactCardCache = new Map<string, { body: string; fileName: string; at: number }>();
+
+async function handleContactCard(tenantId: number, req: express.Request, res: express.Response): Promise<void> {
+    try {
+        const english = isEnglishGuest(typeof req.query.lang === 'string' ? req.query.lang : null);
+        const key = `${tenantId}:${english ? 'en' : 'it'}`;
+        let card = contactCardCache.get(key);
+        if (!card || Date.now() - card.at > CONTACT_CARD_TTL_MS) {
+            const phones = await contactCardPhones(tenantId, english);
+            if (phones.length === 0) {
+                res.status(404).json({ error: 'no_contact' });
+                return;
+            }
+            const identity = await publicBusinessIdentity(tenantId);
+            const logo = identity.logoUrl ? await businessLogoBytes(tenantId, identity.logoUrl).catch(() => null) : null;
+            const photoJpeg = logo ? await contactPhotoFromLogo(logo) : null;
+            card = {
+                body: buildContactCard({
+                    name: identity.name,
+                    phones,
+                    address: identity.address,
+                    websiteUrl: identity.websiteUrl,
+                    photoJpeg,
+                }),
+                fileName: contactCardFileName(identity.name),
+                at: Date.now(),
+            };
+            contactCardCache.set(key, card);
+        }
+        res.set('Cache-Control', 'public, max-age=600');
+        // inline: l'iPhone apre subito la scheda «Nuovo contatto»; Android la
+        // scarica e la apre con Contatti. Il nome del file in UTF-8 per gli
+        // accenti, con il ripiego ASCII per i browser vecchi.
+        const ascii = card.fileName.normalize('NFD').replace(/[^\x20-\x7e]/g, '').replace(/"/g, '');
+        res.set('Content-Disposition', `inline; filename="${ascii || 'contatto.vcf'}"; filename*=UTF-8''${encodeURIComponent(card.fileName)}`);
+        res.type('text/vcard; charset=utf-8').send(card.body);
+    } catch (err) {
+        console.error('GET /public/contatto.vcf error:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+}
+
 // La pagina pubblica del preventivo: composizione per uscite, tariffe e
 // totali. Niente note operative (cucina/sala/mise en place) né riferimenti
 // interni — è il documento che il cliente inoltra alla famiglia.
@@ -21491,7 +21618,7 @@ app.get('/preventivo/:token', publicPayLimiter, async (req, res) => runAsPlatfor
             : row.discount_type === 'AMOUNT' ? Math.min(gross, discountValue) : 0;
 
         res.json({
-            business: publicBusinessCard(row.tenant_id),
+            business: { ...publicBusinessCard(row.tenant_id), contact_card_url: await contactCardUrl(Number(row.tenant_id)) },
             // La valuta del ristorante: la pagina ci scrive tutti gli importi.
             currency: (await getTenantLocale(row.tenant_id)).currency,
             quote: {
@@ -28602,8 +28729,13 @@ function escapeHtml(s: string): string {
 // place so any future number change lives in a single spot. The WhatsApp link
 // uses wa.me (works in Gmail, iOS Mail, most clients); the phone link uses
 // tel: so a tap on mobile opens the dialer.
-function contactBlockHtml(language?: string | null, identity: BusinessIdentity = businessIdentity()): string {
+function contactBlockHtml(language?: string | null, identity: BusinessIdentity = businessIdentity(), contactCard?: string | null): string {
     const english = isEnglishGuest(language);
+    // La scheda contatto (contactCardUrl): col numero in rubrica il cliente
+    // vede il nome del locale quando lo richiamiamo.
+    const saveContact = contactCard
+        ? `<br>📇 <a href="${escapeHtml(contactCard)}" style="color:#065f46;text-decoration:none;">${english ? 'Save our number' : 'Salva il nostro numero'}</a> <span style="color:#78716c;">${english ? '— so you know it\'s us when we call' : '— così ci riconosci quando ti chiamiamo'}</span>`
+        : '';
     return `
       <table role="presentation" cellpadding="0" cellspacing="0" style="width:100%;margin:0 0 16px;">
         <tr>
@@ -28613,7 +28745,7 @@ function contactBlockHtml(language?: string | null, identity: BusinessIdentity =
             &nbsp;·&nbsp;
             💬 <a href="${whatsappHref(identity.whatsapp)}" style="color:#065f46;text-decoration:none;">WhatsApp ${escapeHtml(identity.whatsapp)}</a>
             &nbsp;·&nbsp;
-            📍 <a href="${identity.mapsUrl}" style="color:#065f46;text-decoration:none;">${english ? 'Get directions' : 'Come raggiungerci'}</a>
+            📍 <a href="${identity.mapsUrl}" style="color:#065f46;text-decoration:none;">${english ? 'Get directions' : 'Come raggiungerci'}</a>${saveContact}
           </td>
         </tr>
       </table>
@@ -28858,6 +28990,8 @@ function buildBookingConfirmationEmail(params: {
     timezone?: string | null;
     /** Il link «Gestisci la prenotazione», se il locale l'ha acceso. */
     manage?: GuestManageLink | null;
+    /** La scheda contatto del locale (contactCardUrl), o null. */
+    contactCard?: string | null;
 }): { subject: string; text: string; html: string } {
     // DB-sourced confirmation time → read a bare naive string as UTC (see
     // asUtcInstant). The request email above keeps the raw web-form input (#85).
@@ -28868,12 +29002,13 @@ function buildBookingConfirmationEmail(params: {
     const name = toTitleCase(params.customerName);
     const shortConfirm = buildConfirmationMessage(params.customerName, params.reservationTime, params.guests, params.roomName ?? null, params.language, { timezone: params.timezone, manage: params.manage });
     const manageUrl = params.manage?.url ?? null;
+    const contactCard = params.contactCard ?? null;
 
     if (isEnglishGuest(params.language)) {
         const guestsLabel = guestsNum === 1 ? 'guest' : 'guests';
         const roomPart = room ? ` · ${escapeHtml(room)}` : '';
         const subject = `Booking confirmed — ${dateLabel} ${timeLabel}`;
-        const text = `${shortConfirm}\n\nNeed to change or cancel? Reply to this email or contact us:\n• Phone: ${identity.phone}\n• WhatsApp: ${identity.whatsapp}\n• Get directions: ${identity.mapsUrl}`;
+        const text = `${shortConfirm}\n\nNeed to change or cancel? Reply to this email or contact us:\n• Phone: ${identity.phone}\n• WhatsApp: ${identity.whatsapp}\n• Get directions: ${identity.mapsUrl}${contactCard ? `\n• Save our number: ${contactCard}` : ''}`;
         const detailsHtml = `
       <p style="margin:0 0 16px;font-size:15px;line-height:1.6;">${name ? `Hi ${escapeHtml(name)},` : 'Hi,'}<br>your reservation is <strong>confirmed</strong>.</p>
       <table role="presentation" cellpadding="0" cellspacing="0" class="confirm-box" style="width:100%;background:#ecfdf5;border:1px solid #a7f3d0;border-radius:12px;padding:16px;margin:0 0 16px;">
@@ -28884,7 +29019,7 @@ function buildBookingConfirmationEmail(params: {
       ${manageUrl
         ? `<p class="muted" style="margin:0 0 12px;font-size:14px;line-height:1.6;color:#57534e;">We look forward to seeing you. Something came up? You can cancel from here:</p>${guestManageButtonHtml(manageUrl, 'Manage your booking')}`
         : `<p class="muted" style="margin:0 0 8px;font-size:14px;line-height:1.6;color:#57534e;">We look forward to seeing you. If you need to change or cancel, reply to this email or contact us directly.</p>`}
-      ${contactBlockHtml(params.language)}
+      ${contactBlockHtml(params.language, identity, contactCard)}
       <p style="margin:16px 0 0;font-size:14px;">See you soon!<br><em>${escapeHtml(identity.name)}</em></p>
     `;
         const html = wrapEmailHtml(`Booking confirmed for ${dateLabel} at ${timeLabel}`, detailsHtml, params.language);
@@ -28894,7 +29029,7 @@ function buildBookingConfirmationEmail(params: {
     const persone = guestsNum === 1 ? 'persona' : 'persone';
     const roomPart = room ? ` · ${escapeHtml(room)}` : '';
     const subject = `Conferma prenotazione — ${dateLabel} ${timeLabel}`;
-    const text = `${shortConfirm}\n\nSe hai bisogno di modificare o annullare puoi rispondere a questa email oppure contattarci:\n• Telefono: ${identity.phone}\n• WhatsApp: ${identity.whatsapp}\n• Come raggiungerci: ${identity.mapsUrl}`;
+    const text = `${shortConfirm}\n\nSe hai bisogno di modificare o annullare puoi rispondere a questa email oppure contattarci:\n• Telefono: ${identity.phone}\n• WhatsApp: ${identity.whatsapp}\n• Come raggiungerci: ${identity.mapsUrl}${contactCard ? `\n• Salva il nostro numero: ${contactCard}` : ''}`;
 
     const detailsHtml = `
       <p style="margin:0 0 16px;font-size:15px;line-height:1.6;">${name ? `Ciao ${escapeHtml(name)},` : 'Ciao,'}<br>la tua prenotazione è <strong>confermata</strong>.</p>
@@ -28906,7 +29041,7 @@ function buildBookingConfirmationEmail(params: {
       ${manageUrl
         ? `<p class="muted" style="margin:0 0 12px;font-size:14px;line-height:1.6;color:#57534e;">Ti aspettiamo a tavola. Un imprevisto? Puoi annullare da qui:</p>${guestManageButtonHtml(manageUrl, 'Gestisci la prenotazione')}`
         : `<p class="muted" style="margin:0 0 8px;font-size:14px;line-height:1.6;color:#57534e;">Ti aspettiamo a tavola. Se hai bisogno di modificare o annullare, rispondi a questa email o contattaci direttamente.</p>`}
-      ${contactBlockHtml()}
+      ${contactBlockHtml(null, identity, contactCard)}
       <p style="margin:16px 0 0;font-size:14px;">A presto!<br><em>${escapeHtml(identity.name)}</em></p>
     `;
     const html = wrapEmailHtml(`Prenotazione confermata per il ${dateLabel} alle ${timeLabel}`, detailsHtml);
@@ -28927,14 +29062,18 @@ function buildBookingReminderEmail(params: {
     identity: BusinessIdentity;
     /** Il link «Gestisci la prenotazione», se il locale l'ha acceso. */
     manage?: GuestManageLink | null;
+    /** La scheda contatto del locale (contactCardUrl), o null. */
+    contactCard?: string | null;
 }): { subject: string; text: string; html: string } {
     const { identity } = params;
     const manageUrl = params.manage?.url ?? null;
+    const contactCard = params.contactCard ?? null;
     const { dateLabel, timeLabel } = formatBookingDateTime(asUtcInstant(params.reservationTime), params.timezone || 'Europe/Rome');
     const guestsNum = Math.max(1, Math.trunc(Number(params.guests) || 1));
     const room = (params.roomName || '').trim();
     const name = toTitleCase(params.customerName);
-    const text = buildReminderMessage(params.customerName, params.reservationTime, params.guests, params.roomName ?? null, params.language, { timezone: params.timezone, manage: params.manage }, identity);
+    const text = buildReminderMessage(params.customerName, params.reservationTime, params.guests, params.roomName ?? null, params.language, { timezone: params.timezone, manage: params.manage }, identity)
+        + (contactCard ? `\n\n${isEnglishGuest(params.language) ? 'Save our number' : 'Salva il nostro numero'}: ${contactCard}` : '');
 
     if (isEnglishGuest(params.language)) {
         const guestsLabel = guestsNum === 1 ? 'guest' : 'guests';
@@ -28950,7 +29089,7 @@ function buildBookingReminderEmail(params: {
       ${manageUrl
         ? `<p class="muted" style="margin:0 0 12px;font-size:14px;line-height:1.6;color:#57534e;">Will you make it? Confirm or cancel from here:</p>${guestManageButtonHtml(manageUrl, 'Manage your booking')}`
         : `<p class="muted" style="margin:0 0 8px;font-size:14px;line-height:1.6;color:#57534e;">Need to change or cancel? Reply to this email or contact us: we'll take care of it.</p>`}
-      ${contactBlockHtml(params.language, identity)}
+      ${contactBlockHtml(params.language, identity, contactCard)}
       <p style="margin:16px 0 0;font-size:14px;">See you soon!<br><em>${escapeHtml(identity.name)}</em></p>
     `;
         return { subject, text, html: wrapEmailHtml(`Your table on ${dateLabel} at ${timeLabel}`, detailsHtml, params.language) };
@@ -28969,7 +29108,7 @@ function buildBookingReminderEmail(params: {
       ${manageUrl
         ? `<p class="muted" style="margin:0 0 12px;font-size:14px;line-height:1.6;color:#57534e;">Ci sarai? Conferma o annulla da qui:</p>${guestManageButtonHtml(manageUrl, 'Gestisci la prenotazione')}`
         : `<p class="muted" style="margin:0 0 8px;font-size:14px;line-height:1.6;color:#57534e;">Per modifiche o imprevisti rispondi a questa email o contattaci: sistemiamo tutto noi.</p>`}
-      ${contactBlockHtml(params.language, identity)}
+      ${contactBlockHtml(params.language, identity, contactCard)}
       <p style="margin:16px 0 0;font-size:14px;">A presto!<br><em>${escapeHtml(identity.name)}</em></p>
     `;
     return { subject, text, html: wrapEmailHtml(`Il tuo tavolo il ${dateLabel} alle ${timeLabel}`, detailsHtml) };
@@ -33768,7 +33907,9 @@ async function guestReservationView(row: any) {
     const depositCents = guestDepositPaidCents(row);
     const today = getItalianTodayIso(now, locale.timezone);
     return {
-        business: publicBusinessCard(tenantId),
+        // Il link nudo: la pagina ha il suo selettore di lingua e aggiunge
+        // ?lang=en da sé.
+        business: { ...publicBusinessCard(tenantId), contact_card_url: await contactCardUrl(tenantId) },
         currency: locale.currency,
         reservation: {
             customer_name: toTitleCase(row.customer_name) || null,
@@ -34193,6 +34334,7 @@ app.post('/r/:token/modify', guestPageLimiter, guestActionLimiter, async (req, r
                 const manage = await guestManageLink(tenantId, id);
                 const roomName = await resolveReservationRoomName({ ...row, table_id: tableReleased ? null : row.table_id });
                 const language = resolveGuestLanguage(row);
+                const contactCard = await contactCardUrl(tenantId, language);
                 dispatchBookingNotification({
                     tenantId,
                     source: row.source,
@@ -34206,7 +34348,7 @@ app.post('/r/:token/modify', guestPageLimiter, guestActionLimiter, async (req, r
                         reservationTime: row.reservation_time,
                         guests: row.guests,
                         roomName,
-                        language, timezone: tz, manage }),
+                        language, timezone: tz, manage, contactCard }),
                     kind: 'confirmation',
                 }).catch(err => console.error('[guest-modify] conferma non inviata:', err?.message || err));
             }
@@ -38273,6 +38415,9 @@ const handlePublicReservationCreate = async (tenantId: number, req: express.Requ
         const ackManage = !depositCheckoutUrl && confirmedNow
             ? await guestManageLink(tenantId, created.id)
             : null;
+        const ackContactCard = !depositCheckoutUrl && confirmedNow
+            ? await contactCardUrl(tenantId, language)
+            : null;
         const ackText = depositCheckoutUrl
             ? buildDepositRequestMessage(
                 toTitleCase(customer_name),
@@ -38354,7 +38499,7 @@ const handlePublicReservationCreate = async (tenantId: number, req: express.Requ
                     reservationTime: created.reservation_time,
                     guests: guestsNum,
                     roomName: ackRoomName,
-                    language, timezone: fusoMsg, manage: ackManage })
+                    language, timezone: fusoMsg, manage: ackManage, contactCard: ackContactCard })
                 : buildBookingRequestEmail({
                     customerName: toTitleCase(customer_name),
                     reservationTime: reservation_time,
@@ -38381,6 +38526,7 @@ const handlePublicReservationCreate = async (tenantId: number, req: express.Requ
 app.get(['/public/availability', '/public/:slug/availability'], publicReadLimiter, withPublicTenant(handlePublicAvailability));
 app.get(['/public/rooms', '/public/:slug/rooms'], publicReadLimiter, withPublicTenant(handlePublicRooms));
 app.get(['/public/contact', '/public/:slug/contact'], publicReadLimiter, withPublicTenant(handlePublicContact));
+app.get(['/public/contatto.vcf', '/public/:slug/contatto.vcf'], publicReadLimiter, withPublicTenant(handleContactCard));
 app.post(['/public/reservations', '/public/:slug/reservations'], publicBookingLimiter, withPublicTenant(handlePublicReservationCreate));
 
 // Serve la pagina con la testa SEO di QUESTO ristorante. Vedi

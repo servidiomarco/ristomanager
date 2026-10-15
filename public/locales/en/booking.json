@@ -80,5 +80,9 @@
     "changed": "The booking changed in the meantime: check the details again.",
     "slots": "Couldn't load the times. Try again.",
     "generic": "Something went wrong. Try again, or call the restaurant."
+  },
+  "saveContact": {
+    "label": "Save our number",
+    "hint": "So you know it's us when we call."
   }
 }
