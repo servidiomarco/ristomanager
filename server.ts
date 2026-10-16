@@ -95,6 +95,7 @@ import {
     passepartoutAgentSupports,
     callPassepartout,
     comandaToBillPayload,
+    usciteNonPartite,
     PassepartoutBridgeError,
     scollegaAgentePassepartout,
 } from './services/passepartoutBridge.js';
@@ -12859,6 +12860,66 @@ async function comandaGiaIncassata(tenantId: number, idComanda: number): Promise
     return rs.rows.length > 0;
 }
 
+// --- Le portate prima del conto dal QR -------------------------------------
+// Dal QR un tavolo aperto in cassa si paga solo quando tutte le uscite sono
+// partite per la cucina: prima si poteva pagare a metà cena (16/10). Le
+// regole delle righe stanno in usciteNonPartite. Il preconto in cassa vale
+// come via libera: lo stampa il cameriere quando il tavolo chiede il conto,
+// e lo stampa il tocco dal QR quando il conto nasce (segnalaRichiestaContoQr).
+
+const PORTATE_QR_FRESCHE_MS = 60_000;
+const PORTATE_QR_ATTESA_MS = 1_500;
+const portateQr = new Map<string, { at: number; inCorso: boolean }>();
+const portateQrInLettura = new Map<string, Promise<boolean>>();
+
+/** Un conto aperto sulla comanda in cassa, cioè il preconto. null = non si
+ *  sa (agente senza 'sconto-cassa', o muto). */
+async function precontoInCassa(tenantId: number, idComanda: number): Promise<boolean | null> {
+    if (!passepartoutAgentSupports(tenantId, 'sconto-cassa')) return null;
+    try {
+        return (await callPassepartout<unknown>(tenantId, 'scontoComanda', { idComanda }, 10_000)) != null;
+    } catch (err: any) {
+        console.warn('[passepartout] preconto non letto per la comanda', idComanda, err?.message ?? err);
+        return null;
+    }
+}
+
+/** true = uscite ancora da mandare e nessun preconto: dal QR non si paga.
+ *  L'esito resta in memoria per il tasto della pagina del tavolo. */
+async function portateInCorso(tenantId: number, comanda: PassepartoutComanda): Promise<boolean> {
+    const id = comanda.idGestionale;
+    let inCorso = usciteNonPartite(comanda).length > 0;
+    if (inCorso && id != null && (await precontoInCassa(tenantId, id)) === true) inCorso = false;
+    if (id != null) {
+        const adesso = Date.now();
+        for (const [k, v] of portateQr) if (adesso - v.at > 10 * PORTATE_QR_FRESCHE_MS) portateQr.delete(k);
+        portateQr.set(`${tenantId}:${id}`, { at: adesso, inCorso });
+    }
+    return inCorso;
+}
+
+/** Per il tasto della pagina del tavolo, che si ricontrolla ogni 30 s: la
+ *  lettura dell'ultimo minuto, o una nuova, una per comanda anche con più
+ *  telefoni. Se la cassa tarda il tasto resta com'era (e alla prima
+ *  lettura compare): il tocco ricontrolla comunque. */
+async function portateInCorsoPerIlTasto(tenantId: number, idComanda: number): Promise<boolean> {
+    const chiave = `${tenantId}:${idComanda}`;
+    const nota = portateQr.get(chiave);
+    if (nota && Date.now() - nota.at < PORTATE_QR_FRESCHE_MS) return nota.inCorso;
+    let lettura = portateQrInLettura.get(chiave);
+    if (!lettura) {
+        lettura = callPassepartout<PassepartoutComanda | null>(tenantId, 'comanda', { idGestionale: idComanda }, 20_000)
+            .then((comanda) => (comanda && !comanda.isPagato ? portateInCorso(tenantId, comanda) : false))
+            .catch(() => nota?.inCorso ?? false)
+            .finally(() => portateQrInLettura.delete(chiave));
+        portateQrInLettura.set(chiave, lettura);
+    }
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const tardi = new Promise<null>((resolve) => { timer = setTimeout(() => resolve(null), PORTATE_QR_ATTESA_MS); });
+    const esito = await Promise.race([lettura, tardi]).finally(() => clearTimeout(timer));
+    return esito ?? nota?.inCorso ?? false;
+}
+
 /** «Paga il conto» per la pagina del tavolo: aperto solo col pagamento al
  *  tavolo attivo e un conto con qualcosa ancora da pagare (quote in corso e
  *  incassi staff contano come a /pay). Niente righe del conto: il dettaglio
@@ -12868,14 +12929,19 @@ async function comandaGiaIncassata(tenantId: number, idComanda: number): Promise
  *  Vale per un tavolo con la comanda solo in cassa Passepartout (il conto
  *  si importa al tocco, e l'importo si sa solo allora) e per un conto
  *  importato dalla cassa che nessuno ha ancora iniziato a pagare (si
- *  riallinea, così un piatto aggiunto in cassa dopo l'import c'è). */
-async function tablePayState(tenantId: number, tableId: number): Promise<{ open: boolean; url?: string; residual_cents?: number; currency?: string; cassa?: boolean }> {
+ *  riallinea, così un piatto aggiunto in cassa dopo l'import c'è).
+ *
+ *  `portate_in_corso`: tavolo aperto in cassa con uscite non ancora partite
+ *  per la cucina e senza preconto. Il tasto non c'è; la pagina lo dice solo
+ *  a chi ha già provato a pagare. */
+async function tablePayState(tenantId: number, tableId: number): Promise<{ open: boolean; url?: string; residual_cents?: number; currency?: string; cassa?: boolean; portate_in_corso?: boolean }> {
     if (!(await isPayAtTableActive(tenantId))) return { open: false };
     const bill = await findOpenBillForTable(tenantId, tableId);
     if (!bill) {
         if (!(await qrCassaAttivo(tenantId))) return { open: false };
         const aperta = await comandaApertaSuiTavoli(tenantId, await tavoliDelQr(tenantId, tableId));
         if (!aperta || await comandaGiaIncassata(tenantId, aperta.pp_comanda_id)) return { open: false };
+        if (await portateInCorsoPerIlTasto(tenantId, aperta.pp_comanda_id)) return { open: false, portate_in_corso: true };
         return { open: true, cassa: true, currency: (await getTenantLocale(tenantId)).currency };
     }
     const claimedRs = await queryWithRetry(
@@ -13107,7 +13173,7 @@ async function annullaContoQrStantio(tenantId: number, billId: number): Promise<
     return annullato != null;
 }
 
-type EsitoQrCassa = { url: string } | { status: number; error: 'non_disponibile' | 'nessuna_comanda' | 'chiuso' };
+type EsitoQrCassa = { url: string } | { status: number; error: 'non_disponibile' | 'nessuna_comanda' | 'chiuso' | 'portate_in_corso' };
 
 /** Il conto da pagare dal QR del tavolo, preso dalla cassa: quello già
  *  aperto (riallineato alla comanda, se nessuno sta pagando) o uno nuovo
@@ -13152,6 +13218,10 @@ async function contoDalQrCassa(tenantId: number, tableId: number): Promise<Esito
         if (giro === 0) await aggiornaTavoliAperti(tenantId).catch(() => null);
     }
     if (!aperta || !comanda) return { status: 409, error: 'chiuso' };
+    // Uscite ancora da mandare in cucina: niente conto, niente preconto né
+    // avviso «vuole pagare». Solo qui, dove il conto nasce dal tocco: un
+    // conto che c'è già l'ha fatto il personale, o un tocco passato da qui.
+    if (await portateInCorso(tenantId, comanda)) return { status: 409, error: 'portate_in_corso' };
     const externalRef = `pp:comanda:${aperta.pp_comanda_id}`;
     const payload = comandaToBillPayload(comanda);
     if (payload.total_cents <= 0) return { status: 409, error: 'nessuna_comanda' };
