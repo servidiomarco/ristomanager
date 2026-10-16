@@ -22,6 +22,9 @@ const oraRoma = () => {
 };
 const riga = (id: number, descrizione: string, prezzo: number, pezzi = 1) =>
     ({ idGestionale: id, descrizione, articolo: descrizione.toUpperCase(), prezzo, pezzi, totale: prezzo * pezzi, stato: '1' });
+/** Una riga con la sua uscita e lo stato in cassa (EnumStatoRigaComanda). */
+const rigaUscita = (id: number, descrizione: string, prezzo: number, uscita: number, statoEnum: string, pezzi = 1) =>
+    ({ ...riga(id, descrizione, prezzo, pezzi), uscita, statoEnum });
 
 describe('pagamento dal QR delle comande della cassa Passepartout', () => {
     let token: string;
@@ -36,6 +39,9 @@ describe('pagamento dal QR delle comande della cassa Passepartout', () => {
     // GetContiGiorno; scontoMuto = l'agente non risponde su quella lettura.
     const sconti = new Map<number, number>();
     let scontoMuto = false;
+    // Le comande col preconto stampato: solo loro (o uno sconto) hanno un
+    // conto aperto in cassa, come nella cassa vera.
+    const precontati = new Set<number>();
     const chiamate: Array<{ op: string; params: any }> = [];
 
     const finoA = async (cond: () => Promise<boolean>, descr: string, timeoutMs = 10_000) => {
@@ -137,12 +143,15 @@ describe('pagamento dal QR delle comande della cassa Passepartout', () => {
                 if (scontoMuto) return ack({ ok: false, error: 'GetContiGiorno: timeout', kind: 'gestionale' });
                 const id = Number(payload.params?.idComanda);
                 const c = comande.get(id);
-                if (!c || c.isPagato) return ack({ ok: true, result: null });
+                if (!c || c.isPagato || (!precontati.has(id) && !sconti.has(id))) return ack({ ok: true, result: null });
                 const totale = c.righe.reduce((s: number, r: any) => s + r.totale, 0);
                 const sconto = sconti.get(id) ?? 0;
                 return ack({ ok: true, result: { idConto: id + 100_000, totaleDocumento: totale, totaleDaPagare: totale - sconto, scontoEuro: sconto } });
             }
-            if (payload?.op === 'preconto') return ack({ ok: true, result: { emesso: true } });
+            if (payload?.op === 'preconto') {
+                precontati.add(Number(payload.params?.idComanda));
+                return ack({ ok: true, result: { emesso: true } });
+            }
             if (payload?.op === 'chiudi') {
                 const c = comande.get(Number(payload.params?.idComanda));
                 if (c) c.isPagato = true;
@@ -166,7 +175,7 @@ describe('pagamento dal QR delle comande della cassa Passepartout', () => {
         await api().put('/settings/integrations/revolut').set(bearer(token)).send({ webhook_secret: '' });
         socket?.close();
         await db.query(`DELETE FROM passepartout_tavoli_aperti WHERE tenant_id = 1`);
-        await db.query(`DELETE FROM passepartout_tavoli WHERE tenant_id = 1 AND pp_tavolo IN ('PPQ1', 'PPQ2')`);
+        await db.query(`DELETE FROM passepartout_tavoli WHERE tenant_id = 1 AND pp_tavolo IN ('PPQ1', 'PPQ2', 'PPQ4')`);
         await db.query(`DELETE FROM notifications WHERE tag LIKE 'pp-comanda-cambiata-%' OR tag LIKE 'bill-paying-%'`);
         await db.end();
     });
@@ -426,6 +435,82 @@ describe('pagamento dal QR delle comande della cassa Passepartout', () => {
         await finoA(async () => (await conto(8811)).status === 'VOIDED', 'conto del QR annullato con la comanda chiusa');
         const pay = (await api().get(`/public/table/${qr2}/conto`)).body.pay;
         expect(pay.open).toBe(false);
+    });
+
+    it('uscite ancora da mandare in cucina: dal QR non si paga finché non partono tutte (16/10)', async () => {
+        const room = await db.query(`SELECT room_id FROM tables WHERE id = $1`, [tableId]);
+        const t4 = await api().post('/tables').set(bearer(token)).send({
+            name: 'PPQ4', shape: 'SQUARE', seats: 4, x: 340, y: 40, room_id: room.rows[0].room_id, status: 'FREE',
+        });
+        await db.query(
+            `INSERT INTO passepartout_tavoli (table_id, tenant_id, pp_sala, pp_tavolo, origine, confermato) VALUES ($1, 1, 'TETTOIA', 'PPQ4', 'manuale', true)`,
+            [t4.body.id]
+        );
+        const tokens = await api().post('/tables/qr-tokens').set(bearer(token)).send({});
+        const qr4 = tokens.body.find((r: any) => r.table_id === t4.body.id).public_token;
+        const tocca = () => api().post(`/public/table/${qr4}/conto/cassa`);
+
+        // Antipasto in cucina, secondo e dolce in attesa di essere chiamati.
+        // Il coperto sta sull'uscita 0 e in cassa non parte mai: non conta.
+        apriInCassa(8820, [
+            rigaUscita(88200, 'Coperto', 2, 0, 'Nuovo', 2),
+            rigaUscita(88201, 'Antipasto', 8, 1, 'InProduzione'),
+            rigaUscita(88202, 'Tagliata', 18, 2, 'InAttesa', 2),
+            rigaUscita(88203, 'Tiramisù', 5, 3, 'InAttesa'),
+        ], 'PPQ4');
+        await aggiornaLettura();
+        expect((await api().get(`/public/table/${qr4}/conto`)).body.pay).toEqual({ open: false, portate_in_corso: true });
+
+        // Chi tocca lo stesso (pagina aperta da prima) non apre il conto, e
+        // in cassa non parte né il preconto né l'avviso.
+        let tocco = await tocca();
+        expect(tocco.status).toBe(409);
+        expect(tocco.body.error).toBe('portate_in_corso');
+        expect(await conto(8820)).toBeUndefined();
+        expect(chiamate.some(c => c.op === 'preconto' && c.params?.idComanda === 8820)).toBe(false);
+
+        // Partito il secondo, il dolce è ancora in attesa.
+        const righe = comande.get(8820).righe;
+        righe[2].statoEnum = 'InProduzione';
+        expect((await tocca()).body.error).toBe('portate_in_corso');
+
+        // Partito anche il dolce: si paga.
+        righe[3].statoEnum = 'Fatto';
+        tocco = await tocca();
+        expect(tocco.status).toBe(200);
+        const bill = await conto(8820);
+        expect(bill).toMatchObject({ status: 'OPEN', total_cents: 5300 });
+        expect(await api().get(`/public/table/${qr4}/conto`).then(r => r.body.pay)).toMatchObject({ open: true, residual_cents: 5300 });
+
+        // Col conto già aperto un amaro aggiunto in cassa non lo ferma: il
+        // tocco lo riallinea.
+        righe.push(rigaUscita(88204, 'Amaro', 3, 4, 'Nuovo'));
+        expect((await tocca()).status).toBe(200);
+        expect((await conto(8820)).total_cents).toBe(5600);
+
+        // Per il caso dopo, il tavolo si libera in cassa.
+        comande.get(8820).isPagato = true;
+        await db.query(`UPDATE table_bills SET status = 'VOIDED' WHERE id = $1`, [bill.id]);
+        await aggiornaLettura();
+    });
+
+    it('il preconto stampato dal cameriere apre il pagamento anche con un\'uscita in attesa', async () => {
+        const qr4 = (await db.query(`SELECT public_token FROM tables WHERE tenant_id = 1 AND name = 'PPQ4'`)).rows[0].public_token;
+        apriInCassa(8821, [
+            rigaUscita(88211, 'Pizza', 9, 1, 'InProduzione', 2),
+            rigaUscita(88212, 'Sorbetto', 4, 2, 'InAttesa', 2),
+        ], 'PPQ4');
+        await aggiornaLettura();
+        expect((await api().post(`/public/table/${qr4}/conto/cassa`)).body.error).toBe('portate_in_corso');
+
+        precontati.add(8821);
+        const tocco = await api().post(`/public/table/${qr4}/conto/cassa`);
+        expect(tocco.status).toBe(200);
+        expect(await conto(8821)).toMatchObject({ status: 'OPEN', total_cents: 2600 });
+
+        comande.get(8821).isPagato = true;
+        await db.query(`UPDATE table_bills SET status = 'VOIDED' WHERE external_ref = 'pp:comanda:8821'`);
+        await aggiornaLettura();
     });
 
     it('senza conto al tavolo non si accende', async () => {

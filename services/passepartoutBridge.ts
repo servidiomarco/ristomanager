@@ -265,3 +265,23 @@ export function comandaToBillPayload(comanda: PassepartoutComanda): Passepartout
         external_ref: `pp:comanda:${comanda.idGestionale}`,
     };
 }
+
+/**
+ * Le uscite della comanda non ancora partite per la cucina: quelle dalla 1
+ * in su con righe «Nuovo» (scritte, mai mandate) o «InAttesa» (in attesa
+ * che il cameriere chiami l'uscita). Passepartout non sa se un piatto è
+ * arrivato al tavolo: sa se la sua uscita è stata mandata, e una riga
+ * mandata passa «InProduzione», poi «Fatto». L'uscita 0 è quella del
+ * coperto, che in cassa non parte mai; righe cancellate e preventivi non
+ * contano. Uno stato che manca (agente vecchio) non ferma niente.
+ */
+export function usciteNonPartite(comanda: PassepartoutComanda): number[] {
+    const uscite = new Set<number>();
+    for (const r of comanda.righe) {
+        const u = r.uscita ?? 0;
+        if (u < 1) continue;
+        if (/^copert/i.test(r.articolo ?? '') || /^copert/i.test(r.descrizione ?? '')) continue;
+        if (r.statoEnum === 'Nuovo' || r.statoEnum === 'InAttesa') uscite.add(u);
+    }
+    return [...uscite].sort((a, b) => a - b);
+}
