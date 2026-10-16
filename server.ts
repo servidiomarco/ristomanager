@@ -24300,6 +24300,7 @@ interface LeaveSettingsJson {
     minimums: CoverageMinimums;
     priority: LeavePriority;
     trackingStart: string | null; // avvio del registro ferie, vedi prorateEntitlement
+    countRestDays: boolean;       // i riposi si scalano dal monte, vedi leaveDayWeights
 }
 
 async function loadLeaveSettings(tenantId: number): Promise<LeaveSettingsJson> {
@@ -24313,6 +24314,7 @@ async function loadLeaveSettings(tenantId: number): Promise<LeaveSettingsJson> {
         },
         priority: row?.priority === 'FEWEST_DAYS' ? 'FEWEST_DAYS' : 'FIRST_COME',
         trackingStart: row?.leave_start_date ? leaveIsoDay(row.leave_start_date) : null,
+        countRestDays: row?.count_rest_days === true,
     };
 }
 
@@ -24400,11 +24402,16 @@ const leaveEntitlement = (row: any, settings: LeaveSettingsJson, year: number | 
 // Giorni per persona e anno di un insieme di assenze o richieste. Il monte
 // si legge dalle VACANZA in staff_time_off, non dalle richieste: le ferie
 // registrate a mano dal responsabile pesano quanto quelle chieste dall'app.
-const leaveDaysByStaffYear = (rows: any[], restDayOf: (staffId: string) => number | null, isOpen: ServiceOpen): Map<string, number> => {
+const leaveDaysByStaffYear = (
+    rows: any[],
+    restDayOf: (staffId: string) => number | null,
+    isOpen: ServiceOpen,
+    countRestDays: boolean
+): Map<string, number> => {
     const out = new Map<string, number>();
     for (const r of rows) {
         const shift = r.shift === 'LUNCH' || r.shift === 'DINNER' ? r.shift : null;
-        const byYear = leaveDaysByYear(restDayOf(r.staff_id), leaveIsoDay(r.start_date), leaveIsoDay(r.end_date), isOpen, shift);
+        const byYear = leaveDaysByYear(restDayOf(r.staff_id), leaveIsoDay(r.start_date), leaveIsoDay(r.end_date), isOpen, shift, countRestDays);
         for (const [year, n] of Object.entries(byYear)) {
             const key = `${r.staff_id}|${year}`;
             out.set(key, (out.get(key) ?? 0) + n);
@@ -24423,8 +24430,8 @@ function computeLeaveBalances(
 ) {
     const restDay = new Map<string, number | null>(staffRows.map(r => [r.id, r.weekly_rest_day ?? null]));
     const restDayOf = (id: string) => restDay.get(id) ?? null;
-    const approved = leaveDaysByStaffYear(vacations, restDayOf, isOpen);
-    const pending = leaveDaysByStaffYear(pendingRows, restDayOf, isOpen);
+    const approved = leaveDaysByStaffYear(vacations, restDayOf, isOpen, settings.countRestDays);
+    const pending = leaveDaysByStaffYear(pendingRows, restDayOf, isOpen, settings.countRestDays);
     return staffRows.map(row => {
         const entitled = leaveEntitlement(row, settings, year);
         const used = approved.get(`${row.id}|${year}`) ?? 0;
@@ -24449,14 +24456,14 @@ const LEAVE_REQUEST_SELECT = `
       LEFT JOIN users du ON du.id = r.decided_by_user_id
 `;
 
-const leaveRequestJson = (row: any, isOpen: ServiceOpen) => ({
+const leaveRequestJson = (row: any, isOpen: ServiceOpen, countRestDays: boolean) => ({
     id: row.id,
     staffId: row.staff_id,
     startDate: leaveIsoDay(row.start_date),
     endDate: leaveIsoDay(row.end_date),
     note: row.note ?? null,
     status: row.status,
-    days: countLeaveDays(row.weekly_rest_day ?? null, leaveIsoDay(row.start_date), leaveIsoDay(row.end_date), isOpen),
+    days: countLeaveDays(row.weekly_rest_day ?? null, leaveIsoDay(row.start_date), leaveIsoDay(row.end_date), isOpen, null, countRestDays),
     requestedByStaff: row.by_staff === true,
     decidedByName: row.decided_by_name ?? null,
     decidedAt: row.decided_at ?? null,
@@ -24477,7 +24484,7 @@ const formatLeaveRange = (start: string, end: string): string => {
 const formatLeaveDays = (n: number): string => `${String(n).replace('.', ',')} ${n === 1 ? 'giorno' : 'giorni'}`;
 
 type LeaveCheck =
-    | { ok: true; days: number; isOpen: ServiceOpen }
+    | { ok: true; days: number; isOpen: ServiceOpen; countRestDays: boolean }
     | { ok: false; status: number; error: string };
 
 // Le regole di una richiesta nuova, uguali per il dipendente e per il
@@ -24497,7 +24504,7 @@ async function checkNewLeaveRequest(
     if (notBefore && startDate < notBefore) return { ok: false, status: 400, error: 'in_the_past' };
     if (staffRow.is_active === false) return { ok: false, status: 409, error: 'staff_inactive' };
 
-    const [overlap, calendar] = await Promise.all([
+    const [overlap, calendar, settings] = await Promise.all([
         queryWithRetry(
             `SELECT 1 FROM staff_leave_requests
               WHERE tenant_id = $1 AND staff_id = $2 AND status IN ('PENDING', 'APPROVED')
@@ -24510,15 +24517,17 @@ async function checkNewLeaveRequest(
             [tenantId, staffRow.id, startDate, endDate]
         ),
         loadOpeningCalendar(tenantId, startDate, endDate),
+        loadLeaveSettings(tenantId),
     ]);
     if (overlap.rows.length > 0) return { ok: false, status: 409, error: 'overlap' };
 
     const isOpen = makeServiceOpen(calendar);
-    const days = countLeaveDays(staffRow.weekly_rest_day ?? null, startDate, endDate, isOpen);
+    const { countRestDays } = settings;
+    const days = countLeaveDays(staffRow.weekly_rest_day ?? null, startDate, endDate, isOpen, null, countRestDays);
     // Solo riposi e chiusure: non costerebbe niente e non toglierebbe
     // nessuno dal turno — quasi sempre date sbagliate.
     if (days <= 0) return { ok: false, status: 400, error: 'no_working_days' };
-    return { ok: true, days, isOpen };
+    return { ok: true, days, isOpen, countRestDays };
 }
 
 async function insertLeaveRequest(
@@ -24625,7 +24634,7 @@ app.get('/staff/leave-plan', authenticate, requirePermission('staff:leave'), asy
             year,
             today,
             settings,
-            requests: reqRs.rows.map((r: any) => leaveRequestJson(r, isOpen)),
+            requests: reqRs.rows.map((r: any) => leaveRequestJson(r, isOpen, settings.countRestDays)),
             balances,
             absences: absRs.rows.map((a: any) => ({
                 id: a.id,
@@ -24680,11 +24689,16 @@ app.put('/staff/leave-settings', authenticate, requirePermission('staff:full'), 
         const startProvided = b.trackingStart !== undefined;
         const trackingStart = b.trackingStart === null || b.trackingStart === '' || b.trackingStart === undefined ? null : b.trackingStart;
         if (trackingStart !== null && !isIsoDay(trackingStart)) return res.status(400).json({ error: 'invalid_date' });
+        // I riposi nel conteggio: stessa regola, assente = lascia com'è.
+        if (b.countRestDays !== undefined && typeof b.countRestDays !== 'boolean') {
+            return res.status(400).json({ error: 'invalid_count_rest_days' });
+        }
+        const countRestProvided = typeof b.countRestDays === 'boolean';
 
         await queryWithRetry(
             `INSERT INTO staff_leave_settings
-                (tenant_id, default_annual_days, min_sala_lunch, min_sala_dinner, min_cucina_lunch, min_cucina_dinner, priority, leave_start_date, updated_at)
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $9::date, now())
+                (tenant_id, default_annual_days, min_sala_lunch, min_sala_dinner, min_cucina_lunch, min_cucina_dinner, priority, leave_start_date, count_rest_days, updated_at)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $9::date, COALESCE($11::boolean, false), now())
              ON CONFLICT (tenant_id) DO UPDATE SET
                 default_annual_days = EXCLUDED.default_annual_days,
                 min_sala_lunch = EXCLUDED.min_sala_lunch,
@@ -24693,8 +24707,9 @@ app.put('/staff/leave-settings', authenticate, requirePermission('staff:full'), 
                 min_cucina_dinner = EXCLUDED.min_cucina_dinner,
                 priority = EXCLUDED.priority,
                 leave_start_date = CASE WHEN $8::boolean THEN EXCLUDED.leave_start_date ELSE staff_leave_settings.leave_start_date END,
+                count_rest_days = CASE WHEN $10::boolean THEN EXCLUDED.count_rest_days ELSE staff_leave_settings.count_rest_days END,
                 updated_at = now()`,
-            [req.tenantId!, days.value, ...mins, priority, startProvided, trackingStart]
+            [req.tenantId!, days.value, ...mins, priority, startProvided, trackingStart, countRestProvided, countRestProvided ? b.countRestDays : null]
         );
         const settings = await loadLeaveSettings(req.tenantId!);
         const socketId = req.headers['x-socket-id'] as string;
@@ -24724,7 +24739,7 @@ app.post('/staff/leave-requests', authenticate, requirePermission('staff:full'),
         const row = await insertLeaveRequest(tenantId, staffRow.id, startDate, endDate, note, req.user?.userId ?? null);
         const socketId = req.headers['x-socket-id'] as string;
         if (socketService) socketService.broadcastToAll(tenantId, 'leave:changed', { ids: [row.id] }, socketId);
-        res.status(201).json(leaveRequestJson(row, check.isOpen));
+        res.status(201).json(leaveRequestJson(row, check.isOpen, check.countRestDays));
     } catch (err) {
         console.error('POST /staff/leave-requests error:', err);
         res.status(500).json({ error: 'Internal server error' });
@@ -24899,7 +24914,8 @@ app.post('/staff/leave-plan/proposal', authenticate, requirePermission('staff:fu
         const used = leaveDaysByStaffYear(
             absRs.rows.filter((a: any) => a.type === 'VACANZA'),
             id => byId.get(id)?.weekly_rest_day ?? null,
-            isOpen
+            isOpen,
+            settings.countRestDays
         );
         const items = proposeLeavePlan({
             staff: staffRs.rows.map(toLeaveStaff),
@@ -24909,6 +24925,7 @@ app.post('/staff/leave-plan/proposal', authenticate, requirePermission('staff:fu
             minimums: settings.minimums,
             isOpen,
             priority: settings.priority,
+            countRestDays: settings.countRestDays,
             entitlement: (id, year) => {
                 const row = byId.get(id);
                 return row ? leaveEntitlement(row, settings, year) : null;
@@ -24996,10 +25013,11 @@ app.get('/staff/my-leave', authenticate, async (req, res) => {
             linked: true,
             staffId: me.id,
             weeklyRestDay: me.weekly_rest_day ?? null,
+            countRestDays: settings.countRestDays,
             year,
             today,
             balance,
-            requests: reqRs.rows.map((r: any) => leaveRequestJson(r, isOpen)),
+            requests: reqRs.rows.map((r: any) => leaveRequestJson(r, isOpen, settings.countRestDays)),
             calendar,
         });
     } catch (err) {
@@ -25032,7 +25050,7 @@ app.post('/staff/my-leave', authenticate, async (req, res) => {
             `leave-${row.id}`
         );
 
-        res.status(201).json(leaveRequestJson(row, check.isOpen));
+        res.status(201).json(leaveRequestJson(row, check.isOpen, check.countRestDays));
     } catch (err) {
         console.error('POST /staff/my-leave error:', err);
         res.status(500).json({ error: 'Internal server error' });

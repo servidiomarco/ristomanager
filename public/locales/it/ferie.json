@@ -93,6 +93,15 @@
   "defaultDaysTitle": "Giorni di ferie l'anno",
   "defaultDaysHint": "Per fissi e stagionali senza un valore sulla scheda, in proporzione ai mesi di contratto nell'anno. Vuoto: monte non tenuto.",
   "notTracked": "Non tenuto",
+  "restDaysTitle": "Giorni di riposo",
+  "restDays": {
+    "EXCLUDED": "Esclusi",
+    "INCLUDED": "Inclusi"
+  },
+  "restDaysHint": {
+    "EXCLUDED": "Il riposo settimanale non si scala dal monte; chi non ha un riposo fisso paga 6 giorni ogni 7.",
+    "INCLUDED": "Si scala ogni giorno di assenza, riposi compresi. Le chiusure del ristorante restano escluse."
+  },
   "priorityTitle": "Chi ha la precedenza",
   "priority": {
     "FIRST_COME": "Chi chiede prima",

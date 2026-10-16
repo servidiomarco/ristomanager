@@ -993,6 +993,7 @@ const LeaveRulesModal: React.FC<{
   const [trackingStart, setTrackingStart] = useState('');
   const [mins, setMins] = useState(settings.minimums);
   const [priority, setPriority] = useState(settings.priority);
+  const [countRestDays, setCountRestDays] = useState(settings.countRestDays === true);
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
@@ -1001,6 +1002,7 @@ const LeaveRulesModal: React.FC<{
     setTrackingStart(typeof settings.trackingStart === 'string' ? settings.trackingStart : '');
     setMins(settings.minimums);
     setPriority(settings.priority);
+    setCountRestDays(settings.countRestDays === true);
   }, [open, settings]);
 
   const setMin = (c: StaffCategory, s: Service, v: string) => {
@@ -1021,6 +1023,7 @@ const LeaveRulesModal: React.FC<{
         minimums: mins,
         priority,
         trackingStart: trackingStart || null,
+        countRestDays,
       });
       showToast(t('rulesSaved'), 'success');
       onSaved();
@@ -1098,6 +1101,17 @@ const LeaveRulesModal: React.FC<{
             value={trackingStart}
             onChange={e => setTrackingStart(e.target.value)}
             className={dsInput}
+          />
+        </Field>
+        <Field label={t('restDaysTitle')} hint={countRestDays ? t('restDaysHint.INCLUDED') : t('restDaysHint.EXCLUDED')}>
+          <SegmentedControl<'EXCLUDED' | 'INCLUDED'>
+            value={countRestDays ? 'INCLUDED' : 'EXCLUDED'}
+            onChange={v => setCountRestDays(v === 'INCLUDED')}
+            ariaLabel={t('restDaysTitle')}
+            options={[
+              { value: 'EXCLUDED', label: t('restDays.EXCLUDED') },
+              { value: 'INCLUDED', label: t('restDays.INCLUDED') },
+            ]}
           />
         </Field>
       </FormCard>

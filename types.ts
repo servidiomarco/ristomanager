@@ -1481,6 +1481,9 @@ export interface LeaveSettings {
   // Avvio del registro ferie: chi risulta assunto fino a questo giorno
   // matura da inizio anno. Opzionale: il backend precedente non lo manda.
   trackingStart?: string | null;
+  // true = i giorni di riposo si scalano dal monte come gli altri.
+  // Opzionale: il backend precedente non lo manda (= esclusi).
+  countRestDays?: boolean;
 }
 
 export interface LeaveBalance {
@@ -1531,6 +1534,7 @@ export interface MyLeave {
   linked: boolean;
   staffId?: string;
   weeklyRestDay?: number | null;
+  countRestDays?: boolean;
   year?: number;
   today?: string;
   balance?: LeaveBalance;

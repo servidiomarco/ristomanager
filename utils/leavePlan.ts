@@ -120,15 +120,21 @@ export const makeServiceOpen = (cal: OpeningCalendar): ServiceOpen => {
  *  sforare il monte a chi aveva fatto meno di 26 giorni veri (in produzione
  *  28,5 su 26 a un fisso senza riposo sulla scheda). Nei blocchi di 7 in
  *  cui il ristorante chiude almeno un giorno, quella chiusura è già il
- *  riposo; un periodo sotto la settimana conta per intero. */
+ *  riposo; un periodo sotto la settimana conta per intero.
+ *
+ *  `countRestDays` è la regola del ristorante che sceglie di scalare anche
+ *  i riposi (Regole del piano ferie): allora il riposo fisso e il settimo
+ *  giorno di chi non ce l'ha si pagano come gli altri. Le chiusure no —
+ *  quelle non sono un riposo della persona. */
 export const leaveDayWeights = (
     restDay: number | null,
     start: string,
     end: string,
     isOpen: ServiceOpen,
     shift: LeaveService | null = null,
+    countRestDays = false,
 ): Array<{ date: string; weight: number }> => {
-    const hasRestDay = restDay !== null && restDay !== undefined;
+    const hasRestDay = !countRestDays && restDay !== null && restDay !== undefined;
     const days = eachIsoDay(start, end);
     const out: Array<{ date: string; weight: number }> = [];
     for (let i = 0; i < days.length; i++) {
@@ -140,7 +146,7 @@ export const leaveDayWeights = (
         }
         if (!isOpen(date, 'LUNCH') && !isOpen(date, 'DINNER')) continue;
         // Settimo giorno di un blocco pieno di 7, senza chiusure: è il riposo.
-        if (!hasRestDay && i % 7 === 6) {
+        if (!countRestDays && !hasRestDay && i % 7 === 6) {
             const block = days.slice(i - 6, i + 1);
             if (block.every(d => isOpen(d, 'LUNCH') || isOpen(d, 'DINNER'))) continue;
         }
@@ -188,7 +194,8 @@ export const countLeaveDays = (
     end: string,
     isOpen: ServiceOpen,
     shift: LeaveService | null = null,
-): number => leaveDayWeights(restDay, start, end, isOpen, shift).reduce((n, d) => n + d.weight, 0);
+    countRestDays = false,
+): number => leaveDayWeights(restDay, start, end, isOpen, shift, countRestDays).reduce((n, d) => n + d.weight, 0);
 
 /** Lo stesso conteggio, diviso per anno solare: una richiesta dal 28
  *  dicembre al 3 gennaio pesa su due monti diversi. */
@@ -198,9 +205,10 @@ export const leaveDaysByYear = (
     end: string,
     isOpen: ServiceOpen,
     shift: LeaveService | null = null,
+    countRestDays = false,
 ): Record<string, number> => {
     const out: Record<string, number> = {};
-    for (const d of leaveDayWeights(restDay, start, end, isOpen, shift)) {
+    for (const d of leaveDayWeights(restDay, start, end, isOpen, shift, countRestDays)) {
         const y = d.date.slice(0, 4);
         out[y] = (out[y] ?? 0) + d.weight;
     }
@@ -330,6 +338,7 @@ export const proposeLeavePlan = (input: {
     minimums: CoverageMinimums;
     isOpen: ServiceOpen;
     priority: LeavePriority;
+    countRestDays?: boolean;
     entitlement: (staffId: string, year: string) => number | null;
     usedDays: (staffId: string, year: string) => number;
 }): ProposalItem[] => {
@@ -367,7 +376,7 @@ export const proposeLeavePlan = (input: {
     for (const r of ordered) {
         const s = byId.get(r.staffId);
         if (!s) continue;
-        const weights = leaveDayWeights(s.weeklyRestDay, r.startDate, r.endDate, input.isOpen);
+        const weights = leaveDayWeights(s.weeklyRestDay, r.startDate, r.endDate, input.isOpen, null, input.countRestDays === true);
         const days = weights.reduce((n, d) => n + d.weight, 0);
         const reasons: ProposalReason[] = [];
 

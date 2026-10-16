@@ -93,6 +93,15 @@
   "defaultDaysTitle": "Leave days per year",
   "defaultDaysHint": "For permanent and seasonal staff with no value on their card, prorated to the months of contract in the year. Empty: allowance not tracked.",
   "notTracked": "Not tracked",
+  "restDaysTitle": "Rest days",
+  "restDays": {
+    "EXCLUDED": "Excluded",
+    "INCLUDED": "Included"
+  },
+  "restDaysHint": {
+    "EXCLUDED": "The weekly rest day isn't taken from the allowance; staff without a fixed rest day pay 6 days out of 7.",
+    "INCLUDED": "Every day away counts, rest days included. Restaurant closures stay excluded."
+  },
   "priorityTitle": "Who goes first",
   "priority": {
     "FIRST_COME": "First to ask",

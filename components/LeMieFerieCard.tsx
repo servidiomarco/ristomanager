@@ -69,7 +69,7 @@ export const LeMieFerieCard: React.FC<{ open: boolean }> = ({ open }) => {
   );
   const liveDays = useMemo(() => {
     if (!isOpen || !isIsoDay(startDate) || !isIsoDay(endDate) || endDate < startDate) return null;
-    return countLeaveDays(data?.weeklyRestDay ?? null, startDate, endDate, isOpen);
+    return countLeaveDays(data?.weeklyRestDay ?? null, startDate, endDate, isOpen, null, data?.countRestDays === true);
   }, [isOpen, startDate, endDate, data]);
 
   if (!data || !data.linked) return null;

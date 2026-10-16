@@ -413,4 +413,28 @@ describe('piano ferie — 6 giorni su 7 e monte in proporzione', () => {
         });
         expect(old.body.trackingStart).toBe(`${Y}-04-01`);
     });
+
+    it('con i riposi inclusi si scala ogni giorno di assenza, chiusure escluse', async () => {
+        const rules = {
+            defaultAnnualDays: 26,
+            minimums: { SALA: { LUNCH: 0, DINNER: 0 }, CUCINA: { LUNCH: 0, DINNER: 0 } },
+            priority: 'FIRST_COME',
+        };
+        const on = await api().put('/staff/leave-settings').set(bearer(owner)).send({ ...rules, countRestDays: true });
+        expect(on.status).toBe(200);
+        expect(on.body.countRestDays).toBe(true);
+        // 14 + 3 + 7 meno la chiusura del 7 ottobre.
+        expect((await balanceOf(ids.Senzariposo)).approved).toBe(23);
+
+        // Il client di prima non lo manda: resta com'è.
+        const old = await api().put('/staff/leave-settings').set(bearer(owner)).send(rules);
+        expect(old.body.countRestDays).toBe(true);
+
+        const off = await api().put('/staff/leave-settings').set(bearer(owner)).send({ ...rules, countRestDays: false });
+        expect(off.body.countRestDays).toBe(false);
+        expect((await balanceOf(ids.Senzariposo)).approved).toBe(21);
+
+        const bad = await api().put('/staff/leave-settings').set(bearer(owner)).send({ ...rules, countRestDays: 'si' });
+        expect(bad.status).toBe(400);
+    });
 });
