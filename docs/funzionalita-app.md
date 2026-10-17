@@ -225,6 +225,7 @@ Agente conversazionale AI (ElevenLabs) che **risponde al telefono del ristorante
 - **Il nome del locale sul telefono del cliente:** la rete italiana non trasmette il nome di chi chiama. Lo vede chi ha salvato il numero: per questo conferme e promemoria portano «Salva il nostro numero» (vedi Prenotazioni).
 - Se il cliente riattacca mentre squilla il locale, la chiamata compare in Chiamate › Da ricontattare con la push «Chiamata persa».
 - Nel CRM la card «chi chiama» segue la chiamata: «Squilla il cellulare del locale» o «Squilla qui», poi «Ha risposto …» o «Sofia sta parlando con…».
+- **Nuova prenotazione dalla card:** quando al telefono c'è il locale, la card ha il tasto **Nuova prenotazione**, che apre il modulo già compilato con nome e numero del cliente: mentre squilla, quando ha risposto il cordless, un cellulare o un altro CRM, e per qualche secondo a chiamata finita. Mentre parla Sofia non c'è: prenota lei.
 - **Nota a fine chiamata:** quando il locale ha risposto, la card lascia scrivere una nota («vuole il tavolo in veranda»). La nota compare nella card la volta dopo che lo stesso numero chiama, e nel registro.
 - **Prenotazione collegata alla chiamata:** quella creata da «Nuova prenotazione» nella card, o a mano subito dopo una chiamata presa dal locale con lo stesso numero, resta legata alla chiamata.
 - L'elenco dei dispositivi accesi è nella stessa card: chi gestisce le impostazioni può spegnerli.
@@ -965,6 +966,7 @@ La **ricerca** sta accanto alle schede (sopra, sul telefono) e resta visibile me
 
 | Data | Sezione | Modifica |
 |---|---|---|
+| 2026-10-17 | Agente vocale "Sofia" | **Nuova prenotazione dalla card della telefonata** anche quando si risponde dal cordless o dal cellulare: il tasto apre il modulo con nome e numero del cliente, mentre squilla, durante la chiamata e per qualche secondo dopo. Prima c'era solo per chi rispondeva dal CRM. La prenotazione resta legata alla chiamata. |
 | 2026-10-16 | Integrazione cassa Passepartout; Pagamenti, conto al tavolo e cassa | Pagamento dal QR dei tavoli aperti in cassa: «Paga il conto» compare solo quando tutte le uscite sono partite per la cucina, o dopo il preconto. Prima si poteva pagare dal telefono a metà cena. Chi tocca il tasto mentre un'uscita è ancora in attesa legge che il conto si paga dopo l'ultima portata. |
 | 2026-10-15 | Impostazioni | Tutte le voci di Impostazioni sono card chiuse con la rotella, due per riga: anche «Chi risponde al telefono» e «Minuti di Sofia» (AI), le preferenze del Profilo, le notifiche push e le azioni del «+» (Menu). Da chiuse dicono già la scelta in uso — la regola del telefono, i minuti usati del mese, la pagina di partenza, la lingua, quante azioni sono accese — e si aprono per cambiarla. |
 | 2026-10-15 | Prenotazioni; Agente vocale "Sofia" | **«Salva il nostro numero».** Le email di conferma e promemoria, la pagina «La tua prenotazione» e il preventivo hanno un link che mette in rubrica il locale, col logo e i suoi numeri: quello con cui lo richiamate da CRM e cordless, il telefono e WhatsApp. Così il cliente vede il nome del locale quando lo chiamate: in Italia la rete fa vedere solo il numero. |
