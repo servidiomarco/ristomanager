@@ -14,7 +14,13 @@ import { ChevronRight, Settings as Cog } from 'lucide-react';
 
    La card resta un <details>: l'apertura non è stato applicativo e non deve
    passare per React, e il corpo resta nel DOM anche chiuso — è lì che lo
-   cerca la ricerca (components/settingsSearch.ts). */
+   cerca la ricerca (components/settingsSearch.ts).
+
+   Ogni funzione nuova di Impostazioni nasce da qui, chiusa e con la rotella,
+   e dice in testata (SettingsStatus o SettingsSwitch) quello che si legge
+   senza aprirla. «Chi risponde al telefono», «Minuti di Sofia», le
+   preferenze del Profilo e le azioni del «+» erano arrivate come scatole
+   sempre aperte, con una testata loro, e sono state riportate nello schema. */
 
 type IconType = React.ComponentType<{ className?: string }>;
 export type SettingsIconTone = 'neutral' | 'pending' | 'positive' | 'ai';
@@ -41,10 +47,6 @@ export const settingsCardClass = 'group overflow-hidden rounded-[var(--ds-radius
 export const settingsGridClass =
   'grid grid-cols-1 gap-3 @4xl:grid-cols-2 ' +
   '@4xl:[&>*:has(details[open])]:col-span-2 @4xl:[&>*:has([aria-expanded=true])]:col-span-2';
-
-/** Per una card che è già una lista aperta (attività, promemoria): sempre
- *  su tutta la riga. */
-export const settingsWideClass = '@4xl:col-span-2';
 
 export const SettingsSection: React.FC<{
   id?: string;
@@ -106,6 +108,47 @@ const CogMark: React.FC<{ expanded?: boolean }> = ({ expanded }) => (
   </span>
 );
 
+/** Lo stato a destra della testata, da leggere senza aprire la card: la
+ *  regola in uso, il valore scelto, «3 attive». Prende colore solo quando
+ *  chiede attenzione (minuti quasi finiti, tetto raggiunto). */
+export const SettingsStatus: React.FC<{ tone?: 'neutral' | 'pending' | 'critical'; children: React.ReactNode }> = ({ tone = 'neutral', children }) => (
+  <span
+    className={`text-[12px] font-medium tabular-nums ${
+      tone === 'critical' ? 'text-[var(--ds-critical-text)]'
+      : tone === 'pending' ? 'text-[var(--ds-pending-text)]'
+      : 'text-[var(--ds-text-secondary)]'
+    }`}
+  >
+    {children}
+  </span>
+);
+
+/** L'interruttore in testata, per le card che si accendono e spengono senza
+ *  aprirle. Ferma il click: dentro un <summary> lo aprirebbe. */
+export const SettingsSwitch: React.FC<{
+  checked: boolean;
+  onChange: () => void;
+  label: string;
+  disabled?: boolean;
+}> = ({ checked, onChange, label, disabled }) => (
+  <button
+    type="button"
+    role="switch"
+    aria-checked={checked}
+    aria-label={label}
+    disabled={disabled}
+    onClick={e => { e.preventDefault(); e.stopPropagation(); onChange(); }}
+    className={`relative inline-flex h-6 w-11 flex-shrink-0 rounded-full transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--ds-surface)] disabled:cursor-not-allowed disabled:opacity-50 ${
+      checked ? 'bg-[var(--ds-seated-solid)]' : 'border border-[var(--ds-border)] bg-[var(--ds-surface-row)]'
+    }`}
+  >
+    <span
+      aria-hidden="true"
+      className={`pointer-events-none inline-block h-5 w-5 translate-y-0.5 transform rounded-full bg-white shadow ring-0 transition-transform ${checked ? 'translate-x-5' : 'translate-x-0.5'}`}
+    />
+  </button>
+);
+
 const rowClass =
   'flex min-h-[72px] w-full cursor-pointer select-none list-none items-center gap-3 px-4 py-3 text-left transition-colors hover:bg-[var(--ds-surface-row)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--ds-border-focus)] [&::-webkit-details-marker]:hidden';
 
@@ -140,8 +183,8 @@ const SummaryBody: React.FC<{
 
 /** La testata di una card di Impostazioni, da mettere come primo figlio del
  *  suo <details className={settingsCardClass}>. `trailing` è lo stato a
- *  destra (pastiglia, interruttore): chi ci mette un bottone fermi il click
- *  (preventDefault + stopPropagation), o aprirebbe la card. */
+ *  destra (SettingsStatus, SettingsSwitch): chi ci mette un altro bottone
+ *  fermi il click (preventDefault + stopPropagation), o aprirebbe la card. */
 export const SettingsSummary: React.FC<{
   icon: IconType;
   tone?: SettingsIconTone;

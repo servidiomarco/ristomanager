@@ -283,7 +283,10 @@
     "unsupported": "Il tuo browser non supporta le notifiche push.",
     "denied": "Permesso notifiche negato. Per attivarle modifica le impostazioni del browser per questo sito.",
     "ios": "Su iPhone/iPad le notifiche push richiedono iOS 16.4+ e che l'app sia installata sulla schermata Home (Safari → Condividi → \"Aggiungi alla schermata Home\").",
-    "sendTest": "Invia notifica di test"
+    "sendTest": "Invia notifica di test",
+    "perDevice": "Valgono solo per questo dispositivo: su ogni telefono o computer si accendono a parte.",
+    "statusUnsupported": "Non supportate",
+    "statusDenied": "Bloccate"
   },
   "all": {
     "errLoad": "Errore nel caricamento delle intolleranze",
@@ -436,7 +439,7 @@
     "qrTitle": "Pagamento dal QR",
     "qrSubtitle": "I tavoli aperti in cassa si pagano dal telefono",
     "qrSend": "Paga dal QR anche i tavoli aperti in cassa",
-    "qrHint": "Il QR del tavolo mostra «Paga il conto» anche quando la comanda è solo in cassa. Al tocco il CRM legge la comanda, l'ospite paga (tutto, alla romana o per piatti, caparra già scalata) e al saldo la cassa chiude il tavolo con {{tipo}}. Se dopo il pagamento in cassa si aggiunge qualcosa, il tavolo non si chiude da solo e la cassa riceve un avviso con la differenza.",
+    "qrHint": "Il QR del tavolo mostra «Paga il conto» anche quando la comanda è solo in cassa. Al tocco il CRM legge la comanda, l'ospite paga (tutto, alla romana o per piatti, caparra già scalata) e al saldo la cassa chiude il tavolo con {{tipo}}. Se dopo il pagamento in cassa si aggiunge qualcosa, il tavolo non si chiude da solo e la cassa riceve un avviso con la differenza. Il tasto compare quando tutte le uscite sono partite per la cucina, o dopo il preconto.",
     "qrHintNoType": "Il QR del tavolo mostra «Paga il conto» anche quando la comanda è solo in cassa, e al saldo la cassa chiude il tavolo da sola.",
     "qrNeedPay": "Serve il conto al tavolo acceso: Impostazioni → Conto al tavolo.",
     "qrNeedType": "Serve il tipo di pagamento in cassa, qui sopra in «Collegamento e chiusura in cassa»: è quello con cui la cassa chiude il tavolo pagato dal QR.",

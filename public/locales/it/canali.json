@@ -383,6 +383,7 @@
     "title": "Minuti di Sofia",
     "plan": "{{price}} al mese · {{included}} minuti inclusi · poi {{overage}} al minuto",
     "used": "{{used}} / {{included}} minuti",
+    "usedShort": "{{used}}/{{included}} min",
     "projected": "A questo ritmo circa {{minutes}} minuti a fine mese",
     "noProjection": "Stima a fine mese non ancora disponibile",
     "calls": "Chiamate",
@@ -523,11 +524,13 @@
     "add": "Un altro cellulare",
     "ringFor": "Squilla per",
     "seconds": "secondi, poi Sofia",
+    "secondsOnly": "secondi",
     "save": "Salva",
     "saved": "Impostazione salvata",
     "err": "Salvataggio non riuscito",
     "primaLocale": "Prima il locale",
     "hintLocale": "Squillano insieme i dispositivi del CRM col telefono acceso e i cellulari qui sotto. Dal cellulare si sente chi chiama e si preme 1. Se nessuno risponde in tempo, risponde Sofia.",
+    "hintFallback": "Squillano solo se Sofia non è raggiungibile: i dispositivi del CRM col telefono acceso e i cellulari qui sotto. Dal cellulare si sente chi chiama e si preme 1.",
     "mobilesTitle": "Cellulari (facoltativi)",
     "here": "Questo dispositivo squilla",
     "hereOff": "Spento: qui non squilla",
@@ -562,6 +565,8 @@
     "cordlessName": "Nome del cordless",
     "cordlessAdd": "Aggiungi",
     "cordlessEmergency": "Dal cordless si chiamano solo fissi e cellulari italiani: non il 112, il 113 o il 118. Per le emergenze resta il fisso.",
-    "cordlessNoProxy": "Niente proxy in uscita: basta il server con la porta."
+    "cordlessNoProxy": "Niente proxy in uscita: basta il server con la porta.",
+    "slotsCount_one": "{{count}} fascia",
+    "slotsCount_other": "{{count}} fasce"
   }
 }

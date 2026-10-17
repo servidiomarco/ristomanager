@@ -16,6 +16,7 @@ import rateLimit from 'express-rate-limit';
 import QRCode from 'qrcode';
 import pool, { createSchema, queryWithRetry, runMigrations, tenantQuery, runWithTenantContext, runAsPlatform, withTenant } from './db.js';
 import { SocketService } from './services/socketService.js';
+import { buildContactCard, contactCardFileName, contactPhotoFromLogo, type ContactCardPhone } from './services/contactCard.js';
 import { retryOnLockContention } from './utils/lockRetry.js';
 import * as bookingTools from './services/bookingTools.js';
 import * as whatsappAgent from './services/whatsapp/agent/index.js';
@@ -94,6 +95,7 @@ import {
     passepartoutAgentSupports,
     callPassepartout,
     comandaToBillPayload,
+    usciteNonPartite,
     PassepartoutBridgeError,
     scollegaAgentePassepartout,
 } from './services/passepartoutBridge.js';
@@ -2323,10 +2325,12 @@ app.post('/webhook/t/:tenantToken/elevenlabs/post-call', async (req, res) => {
 // Il numero Twilio di Sofia punta qui invece che all'integrazione nativa di
 // ElevenLabs: ogni chiamata lascia una riga in phone_calls e apre il banner
 // «chi chiama» prima ancora che risponda qualcuno, poi Sofia la prende con
-// register-call. Se Sofia non c'è, il cliente sente un messaggio di cortesia
-// e lo staff trova la chiamata in Chiamate › Da ricontattare, con la push:
-// ad agosto 2026 175 chiamate erano cadute nel silenzio senza che nessuno lo
-// sapesse. Il path va col token del tenant: Twilio firma l'URL completo.
+// register-call. Se Sofia non c'è, squilla il locale (quando c'è qualcuno da
+// far squillare); se nessuno risponde, il cliente sente un messaggio di
+// cortesia e lo staff trova la chiamata in Chiamate › Da ricontattare, con
+// la push: ad agosto 2026 175 chiamate erano cadute nel silenzio senza che
+// nessuno lo sapesse. Il path va col token del tenant: Twilio firma l'URL
+// completo.
 
 // Solo i numeri veri vanno a register-call e in rubrica: Twilio manda
 // «anonymous» o simili per i numeri nascosti, «client:…» per il browser.
@@ -2462,12 +2466,47 @@ const voiceStepUrl = (req: express.Request, step: string, parentSid?: string): s
     `${req.protocol}://${req.get('host')}/webhook/t/${req.params.tenantToken}/voice/${step}`
     + (parentSid ? `?p=${encodeURIComponent(parentSid)}` : '');
 
-/** Passa la chiamata a Sofia con register-call. Se non si aggancia, il
- *  chiamante sente il messaggio di cortesia e la chiamata risulta persa. */
+interface LocaleRingTargets { clients: string[]; sips: string[]; mobiles: string[] }
+
+/** Chi squilla in sala. I dispositivi del CRM solo se il softphone è
+ *  configurato e se si sono fatti vivi di recente: uno spento da giorni non
+ *  serve. */
+async function localeRingTargets(tenantId: number, routing: PhoneRouting, caller: string): Promise<LocaleRingTargets> {
+    return {
+        clients: softphoneConfig() ? await ringingDeviceIdentities(tenantId) : [],
+        sips: await ringingSipUris(tenantId, caller),
+        mobiles: routing.mobiles,
+    };
+}
+
+const hasRingTargets = (t: LocaleRingTargets): boolean =>
+    t.clients.length > 0 || t.sips.length > 0 || t.mobiles.length > 0;
+
+/** Lo squillo in sala; finito il tempo Twilio chiede after-dial. */
+const ringLocaleTwiml = (
+    req: express.Request, targets: LocaleRingTargets, ringSeconds: number,
+    call: { callSid: string; caller: string; to: string },
+): string =>
+    dialLocaleTwiml({
+        ...targets,
+        ringSeconds,
+        callerId: call.to,
+        parentCallSid: call.callSid,
+        caller: call.caller,
+        afterDialUrl: voiceStepUrl(req, 'after-dial'),
+        whisperUrl: voiceStepUrl(req, 'whisper', call.callSid),
+        clientAnsweredUrl: voiceStepUrl(req, 'client-answered', call.callSid),
+    });
+
+/** Passa la chiamata a Sofia con register-call. Se non si aggancia squilla
+ *  il locale, quando `ringLocaleInstead` trova qualcuno da far squillare;
+ *  altrimenti il chiamante sente il messaggio di cortesia e la chiamata
+ *  risulta persa. */
 async function connectPhoneCallToSofia(
     tenantId: number, res: express.Response,
     call: { callSid: string; caller: string; fromRaw: string; to: string },
     announced: Promise<unknown>,
+    ringLocaleInstead?: () => Promise<string | null>,
 ): Promise<void> {
     const businessName = businessIdentity(tenantId).voiceName;
     try {
@@ -2487,6 +2526,25 @@ async function connectPhoneCallToSofia(
     } catch (err: any) {
         console.error('[Telefono] Sofia non agganciata:', err?.message || err);
         void recordAppError(tenantId, 'sofia', 'register-call', err);
+        // 13/10/2026: ElevenLabs in timeout per ore, e ogni chiamata finiva
+        // nel messaggio di cortesia con il personale in sala e i cellulari a
+        // portata di mano. Meglio farli squillare.
+        const dial = ringLocaleInstead ? await ringLocaleInstead().catch(() => null) : null;
+        if (dial) {
+            // Cambia il giro: a fine squillo after-dial non riprova Sofia, e
+            // chi riattacca mentre squilla va richiamato.
+            await queryWithRetry(
+                `UPDATE phone_calls SET routing = 'ripiego_locale' WHERE call_sid = $1 AND tenant_id = $2`,
+                [call.callSid, tenantId]
+            ).catch(e => console.warn('[Telefono] ripiego sul locale non registrato:', e?.message || e));
+            res.type('text/xml').send(dial);
+            void announced.then(() => {
+                const live = updateLiveCallStage(tenantId, call.callSid, 'ringing');
+                if (live) socketService?.broadcastToRolesRoom(tenantId, PHONE_BANNER_ROLES, 'phoneCall:updated', { id: live.id, stage: live.stage });
+            });
+            console.warn('[Telefono] Sofia non raggiungibile, squilla il locale', { call_sid: call.callSid });
+            return;
+        }
         res.type('text/xml').send(unavailableTwiml(businessName));
         void announced.then(() => recordMissedPhoneCall(tenantId, call.callSid, call.caller, 'sofia_non_disponibile'));
     }
@@ -2512,11 +2570,8 @@ async function handleTwilioVoiceInbound(tenantId: number, req: express.Request, 
     const routing = voiceOn ? await getPhoneRouting(tenantId) : DEFAULT_PHONE_ROUTING;
     // Chi risponde adesso: interruttore rapido, poi fascia oraria, poi base.
     const mode = (await phoneModeNow(tenantId, routing)).mode;
-    // I dispositivi del CRM squillano solo se il softphone è configurato e
-    // se si sono fatti vivi di recente: uno spento da giorni non serve.
-    const clients = mode === 'prima_locale' && softphoneConfig() ? await ringingDeviceIdentities(tenantId) : [];
-    const sips = mode === 'prima_locale' ? await ringingSipUris(tenantId, caller) : [];
-    const ringLocale = mode === 'prima_locale' && (clients.length > 0 || sips.length > 0 || routing.mobiles.length > 0) && !!to;
+    const targets = mode === 'prima_locale' && to ? await localeRingTargets(tenantId, routing, caller) : null;
+    const ringLocale = targets != null && hasRingTargets(targets);
 
     // Il registro per primo: anche se Sofia fallisce, la chiamata resta.
     await queryWithRetry(
@@ -2545,22 +2600,17 @@ async function handleTwilioVoiceInbound(tenantId: number, req: express.Request, 
     }
 
     if (ringLocale) {
-        res.type('text/xml').send(dialLocaleTwiml({
-            clients,
-            sips,
-            mobiles: routing.mobiles,
-            ringSeconds: routing.ring_seconds,
-            callerId: to,
-            parentCallSid: callSid,
-            caller,
-            afterDialUrl: voiceStepUrl(req, 'after-dial'),
-            whisperUrl: voiceStepUrl(req, 'whisper', callSid),
-            clientAnsweredUrl: voiceStepUrl(req, 'client-answered', callSid),
-        }));
+        res.type('text/xml').send(ringLocaleTwiml(req, targets, routing.ring_seconds, { callSid, caller, to }));
         return;
     }
 
-    await connectPhoneCallToSofia(tenantId, res, { callSid, caller, fromRaw, to }, announced);
+    // Senza Sofia squilla il locale anche con «Solo Sofia»: i cellulari
+    // salvati e i dispositivi accesi sono lì apposta.
+    await connectPhoneCallToSofia(tenantId, res, { callSid, caller, fromRaw, to }, announced, async () => {
+        if (!to) return null;
+        const fallback = await localeRingTargets(tenantId, routing, caller);
+        return hasRingTargets(fallback) ? ringLocaleTwiml(req, fallback, routing.ring_seconds, { callSid, caller, to }) : null;
+    });
 }
 
 // Fine dello squillo ai cellulari: se qualcuno ha premuto 1 la chiamata è
@@ -2572,7 +2622,7 @@ async function handleTwilioVoiceAfterDial(tenantId: number, req: express.Request
     }
     const callSid = String(req.body?.CallSid || '');
     const found = await queryWithRetry(
-        `SELECT status, from_number, to_number, ended_at FROM phone_calls WHERE call_sid = $1 AND tenant_id = $2`,
+        `SELECT status, routing, from_number, to_number, ended_at FROM phone_calls WHERE call_sid = $1 AND tenant_id = $2`,
         [callSid, tenantId]
     );
     const row = found.rows[0];
@@ -2596,6 +2646,14 @@ async function handleTwilioVoiceAfterDial(tenantId: number, req: express.Request
         return;
     }
     const fromRaw = String(row.from_number || req.body?.From || '');
+    // Squillava perché Sofia non si era agganciata: un secondo tentativo
+    // aggiungerebbe altri secondi di silenzio dopo lo squillo, quasi sempre
+    // per lo stesso errore. Messaggio di cortesia e chiamata da richiamare.
+    if (row.routing === 'ripiego_locale') {
+        res.type('text/xml').send(unavailableTwiml(businessIdentity(tenantId).voiceName));
+        void recordMissedPhoneCall(tenantId, callSid, e164OrEmpty(fromRaw), 'sofia_non_disponibile');
+        return;
+    }
     await connectPhoneCallToSofia(
         tenantId, res,
         { callSid, caller: e164OrEmpty(fromRaw), fromRaw, to: e164OrEmpty(row.to_number) },
@@ -2786,19 +2844,25 @@ function refuseOutbound(res: express.Response, text: string): void {
     res.type('text/xml').send(twimlResponse(`<Say language="it-IT">${xmlEscape(text)}</Say><Hangup/>`));
 }
 
-/** In uscita col numero del locale, dal CRM o dal cordless: solo fissi e
- *  cellulari italiani (isCallableNumber), con la riga nel registro. */
-async function dialOutFromLocale(tenantId: number, req: express.Request, res: express.Response, rawTarget: string, answeredBy: string): Promise<void> {
-    const target = e164OrEmpty(normalizeItalianPhone(rawTarget));
-    if (!target || !isCallableNumber(target)) return refuseOutbound(res, 'Numero non chiamabile da qui.');
-    // Il numero del locale è quello su cui arrivano le chiamate di Sofia.
+/** Il numero con cui il locale chiama i clienti: quello su cui arrivano le
+ *  chiamate di Sofia. Lo usano le chiamate in uscita e la scheda contatto
+ *  («Salva il nostro numero»), così il cliente salva il numero che vedrà. */
+async function localeCallerId(tenantId: number): Promise<string> {
     const line = await queryWithRetry(
         `SELECT to_number FROM phone_calls
          WHERE tenant_id = $1 AND direction = 'inbound' AND to_number IS NOT NULL
          ORDER BY started_at DESC LIMIT 1`,
         [tenantId]
     );
-    const callerId = e164OrEmpty(line.rows[0]?.to_number);
+    return e164OrEmpty(line.rows[0]?.to_number);
+}
+
+/** In uscita col numero del locale, dal CRM o dal cordless: solo fissi e
+ *  cellulari italiani (isCallableNumber), con la riga nel registro. */
+async function dialOutFromLocale(tenantId: number, req: express.Request, res: express.Response, rawTarget: string, answeredBy: string): Promise<void> {
+    const target = e164OrEmpty(normalizeItalianPhone(rawTarget));
+    if (!target || !isCallableNumber(target)) return refuseOutbound(res, 'Numero non chiamabile da qui.');
+    const callerId = await localeCallerId(tenantId);
     if (!callerId) return refuseOutbound(res, 'Il numero del locale non è ancora collegato.');
     const customer = await findCustomerByPhone(tenantId, target);
     await queryWithRetry(
@@ -2985,8 +3049,9 @@ async function handleTwilioVoiceStatus(tenantId: number, req: express.Request, r
     if (!row) return;
     // Riattaccata mentre squillava il cellulare del locale: il cliente ha
     // aspettato e non ha trovato nessuno, va richiamato (10/10: due chiamate
-    // vere chiuse così, mai finite in Da ricontattare).
-    if (row.status === 'ringing' && (row.routing === 'prima_locale' || row.routing === 'prima_cellulare')) {
+    // vere chiuse così, mai finite in Da ricontattare). Vale anche quando
+    // squillava perché Sofia non rispondeva.
+    if (row.status === 'ringing' && ['prima_locale', 'prima_cellulare', 'ripiego_locale'].includes(row.routing)) {
         await recordMissedPhoneCall(tenantId, callSid, e164OrEmpty(row.from_number), 'riattaccata_in_attesa');
         return;
     }
@@ -4185,6 +4250,7 @@ app.put('/reservations/:id', authenticate, requirePermission('reservations:full'
         ) {
             const roomName = await resolveReservationRoomName(updatedReservation);
             const manage = await guestManageLink(req.tenantId!, updatedReservation.id);
+            const contactCard = await contactCardUrl(req.tenantId!, resolveGuestLanguage(updatedReservation));
             // Canale (o canali) decisi dalla policy per fonte in Impostazioni
             // → Canali di risposta; il default riproduce la condotta storica.
             dispatchBookingNotification({
@@ -4209,7 +4275,7 @@ app.put('/reservations/:id', authenticate, requirePermission('reservations:full'
                     reservationTime: updatedReservation.reservation_time,
                     guests: updatedReservation.guests,
                     roomName,
-                    language: resolveGuestLanguage(updatedReservation), timezone: fusoMsg, manage }),
+                    language: resolveGuestLanguage(updatedReservation), timezone: fusoMsg, manage, contactCard }),
                 kind: 'confirmation',
             }).catch(err => console.error('Auto-confirmation send failed:', err));
         }
@@ -4862,12 +4928,13 @@ app.post('/reservations/:id/confirm-email', authenticate, requirePermission('res
 
         const roomName = await resolveReservationRoomName(reservation);
         const manage = await guestManageLink(req.tenantId!, reservation.id);
+        const contactCard = await contactCardUrl(req.tenantId!, reservation.language);
         const { subject, text, html } = buildBookingConfirmationEmail({
             customerName: reservation.customer_name,
             reservationTime: reservation.reservation_time,
             guests: reservation.guests,
             roomName,
-            language: reservation.language, timezone: fusoMsg, manage });
+            language: reservation.language, timezone: fusoMsg, manage, contactCard });
 
         const emailStatus = await getSmtpConfigStatus(req.tenantId!).catch(() => null);
         const emailProvider: 'smtp' | 'resend' = emailStatus?.provider === 'resend' ? 'resend' : 'smtp';
@@ -12793,6 +12860,66 @@ async function comandaGiaIncassata(tenantId: number, idComanda: number): Promise
     return rs.rows.length > 0;
 }
 
+// --- Le portate prima del conto dal QR -------------------------------------
+// Dal QR un tavolo aperto in cassa si paga solo quando tutte le uscite sono
+// partite per la cucina: prima si poteva pagare a metà cena (16/10). Le
+// regole delle righe stanno in usciteNonPartite. Il preconto in cassa vale
+// come via libera: lo stampa il cameriere quando il tavolo chiede il conto,
+// e lo stampa il tocco dal QR quando il conto nasce (segnalaRichiestaContoQr).
+
+const PORTATE_QR_FRESCHE_MS = 60_000;
+const PORTATE_QR_ATTESA_MS = 1_500;
+const portateQr = new Map<string, { at: number; inCorso: boolean }>();
+const portateQrInLettura = new Map<string, Promise<boolean>>();
+
+/** Un conto aperto sulla comanda in cassa, cioè il preconto. null = non si
+ *  sa (agente senza 'sconto-cassa', o muto). */
+async function precontoInCassa(tenantId: number, idComanda: number): Promise<boolean | null> {
+    if (!passepartoutAgentSupports(tenantId, 'sconto-cassa')) return null;
+    try {
+        return (await callPassepartout<unknown>(tenantId, 'scontoComanda', { idComanda }, 10_000)) != null;
+    } catch (err: any) {
+        console.warn('[passepartout] preconto non letto per la comanda', idComanda, err?.message ?? err);
+        return null;
+    }
+}
+
+/** true = uscite ancora da mandare e nessun preconto: dal QR non si paga.
+ *  L'esito resta in memoria per il tasto della pagina del tavolo. */
+async function portateInCorso(tenantId: number, comanda: PassepartoutComanda): Promise<boolean> {
+    const id = comanda.idGestionale;
+    let inCorso = usciteNonPartite(comanda).length > 0;
+    if (inCorso && id != null && (await precontoInCassa(tenantId, id)) === true) inCorso = false;
+    if (id != null) {
+        const adesso = Date.now();
+        for (const [k, v] of portateQr) if (adesso - v.at > 10 * PORTATE_QR_FRESCHE_MS) portateQr.delete(k);
+        portateQr.set(`${tenantId}:${id}`, { at: adesso, inCorso });
+    }
+    return inCorso;
+}
+
+/** Per il tasto della pagina del tavolo, che si ricontrolla ogni 30 s: la
+ *  lettura dell'ultimo minuto, o una nuova, una per comanda anche con più
+ *  telefoni. Se la cassa tarda il tasto resta com'era (e alla prima
+ *  lettura compare): il tocco ricontrolla comunque. */
+async function portateInCorsoPerIlTasto(tenantId: number, idComanda: number): Promise<boolean> {
+    const chiave = `${tenantId}:${idComanda}`;
+    const nota = portateQr.get(chiave);
+    if (nota && Date.now() - nota.at < PORTATE_QR_FRESCHE_MS) return nota.inCorso;
+    let lettura = portateQrInLettura.get(chiave);
+    if (!lettura) {
+        lettura = callPassepartout<PassepartoutComanda | null>(tenantId, 'comanda', { idGestionale: idComanda }, 20_000)
+            .then((comanda) => (comanda && !comanda.isPagato ? portateInCorso(tenantId, comanda) : false))
+            .catch(() => nota?.inCorso ?? false)
+            .finally(() => portateQrInLettura.delete(chiave));
+        portateQrInLettura.set(chiave, lettura);
+    }
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const tardi = new Promise<null>((resolve) => { timer = setTimeout(() => resolve(null), PORTATE_QR_ATTESA_MS); });
+    const esito = await Promise.race([lettura, tardi]).finally(() => clearTimeout(timer));
+    return esito ?? nota?.inCorso ?? false;
+}
+
 /** «Paga il conto» per la pagina del tavolo: aperto solo col pagamento al
  *  tavolo attivo e un conto con qualcosa ancora da pagare (quote in corso e
  *  incassi staff contano come a /pay). Niente righe del conto: il dettaglio
@@ -12802,14 +12929,19 @@ async function comandaGiaIncassata(tenantId: number, idComanda: number): Promise
  *  Vale per un tavolo con la comanda solo in cassa Passepartout (il conto
  *  si importa al tocco, e l'importo si sa solo allora) e per un conto
  *  importato dalla cassa che nessuno ha ancora iniziato a pagare (si
- *  riallinea, così un piatto aggiunto in cassa dopo l'import c'è). */
-async function tablePayState(tenantId: number, tableId: number): Promise<{ open: boolean; url?: string; residual_cents?: number; currency?: string; cassa?: boolean }> {
+ *  riallinea, così un piatto aggiunto in cassa dopo l'import c'è).
+ *
+ *  `portate_in_corso`: tavolo aperto in cassa con uscite non ancora partite
+ *  per la cucina e senza preconto. Il tasto non c'è; la pagina lo dice solo
+ *  a chi ha già provato a pagare. */
+async function tablePayState(tenantId: number, tableId: number): Promise<{ open: boolean; url?: string; residual_cents?: number; currency?: string; cassa?: boolean; portate_in_corso?: boolean }> {
     if (!(await isPayAtTableActive(tenantId))) return { open: false };
     const bill = await findOpenBillForTable(tenantId, tableId);
     if (!bill) {
         if (!(await qrCassaAttivo(tenantId))) return { open: false };
         const aperta = await comandaApertaSuiTavoli(tenantId, await tavoliDelQr(tenantId, tableId));
         if (!aperta || await comandaGiaIncassata(tenantId, aperta.pp_comanda_id)) return { open: false };
+        if (await portateInCorsoPerIlTasto(tenantId, aperta.pp_comanda_id)) return { open: false, portate_in_corso: true };
         return { open: true, cassa: true, currency: (await getTenantLocale(tenantId)).currency };
     }
     const claimedRs = await queryWithRetry(
@@ -13041,7 +13173,7 @@ async function annullaContoQrStantio(tenantId: number, billId: number): Promise<
     return annullato != null;
 }
 
-type EsitoQrCassa = { url: string } | { status: number; error: 'non_disponibile' | 'nessuna_comanda' | 'chiuso' };
+type EsitoQrCassa = { url: string } | { status: number; error: 'non_disponibile' | 'nessuna_comanda' | 'chiuso' | 'portate_in_corso' };
 
 /** Il conto da pagare dal QR del tavolo, preso dalla cassa: quello già
  *  aperto (riallineato alla comanda, se nessuno sta pagando) o uno nuovo
@@ -13086,6 +13218,10 @@ async function contoDalQrCassa(tenantId: number, tableId: number): Promise<Esito
         if (giro === 0) await aggiornaTavoliAperti(tenantId).catch(() => null);
     }
     if (!aperta || !comanda) return { status: 409, error: 'chiuso' };
+    // Uscite ancora da mandare in cucina: niente conto, niente preconto né
+    // avviso «vuole pagare». Solo qui, dove il conto nasce dal tocco: un
+    // conto che c'è già l'ha fatto il personale, o un tocco passato da qui.
+    if (await portateInCorso(tenantId, comanda)) return { status: 409, error: 'portate_in_corso' };
     const externalRef = `pp:comanda:${aperta.pp_comanda_id}`;
     const payload = comandaToBillPayload(comanda);
     if (payload.total_cents <= 0) return { status: 409, error: 'nessuna_comanda' };
@@ -19359,6 +19495,7 @@ const startBookingReminderScheduler = () => {
                     const language = resolveGuestLanguage(row);
                     const identity = businessIdentity(tenantId);
                     const manage = await guestManageLink(tenantId, row.id);
+                    const contactCard = await contactCardUrl(tenantId, language);
                     const msgOpts = { timezone: gate.tz, manage };
                     const outcome = await dispatchBookingNotification({
                         tenantId,
@@ -19378,6 +19515,7 @@ const startBookingReminderScheduler = () => {
                             timezone: gate.tz,
                             identity,
                             manage,
+                            contactCard,
                         }),
                         kind: 'reminder',
                     });
@@ -21389,6 +21527,122 @@ function publicBusinessCard(tenantId: number) {
     };
 }
 
+// ── «Salva il nostro numero»: la scheda contatto del locale ──────────────
+// In Italia chi riceve una chiamata vede solo il numero (services/
+// contactCard.ts). La scheda mette in rubrica il numero con cui il locale
+// richiama (CRM e cordless), il telefono pubblico e WhatsApp, così il
+// cliente vede il nome del locale quando lo chiamiamo noi.
+
+/** I numeri della scheda, in ordine: quello con cui chiamiamo, il telefono
+ *  pubblico, WhatsApp. Vuoto se il locale non ne ha nessuno. */
+async function contactCardPhones(tenantId: number, english: boolean): Promise<ContactCardPhone[]> {
+    const identity = await publicBusinessIdentity(tenantId);
+    const dialCode = (await getTenantLocale(tenantId)).dialCode;
+    const phones: ContactCardPhone[] = [];
+    const line = await localeCallerId(tenantId);
+    if (line) phones.push({ number: line, label: english ? 'Bookings' : 'Prenotazioni', kind: 'work' });
+    const fixed = e164OrEmpty(normalizePhoneE164(identity.phone, dialCode));
+    if (fixed) phones.push({ number: fixed, kind: 'work' });
+    const whatsapp = e164OrEmpty(normalizePhoneE164(identity.whatsapp, dialCode));
+    if (whatsapp) phones.push({ number: whatsapp, label: 'WhatsApp', kind: 'cell' });
+    return phones;
+}
+
+const tenantSlugById = new Map<number, { slug: string | null; at: number }>();
+
+/** Il link della scheda per messaggi e pagine pubbliche, o null (nessun
+ *  numero, backend senza indirizzo pubblico, tenant senza slug). È un URL
+ *  del BACKEND: la SPA su un path che non conosce risponde 200 con
+ *  l'index.html, e il telefono scaricherebbe una pagina invece del contatto
+ *  (stesso errore già visto con gli allegati WhatsApp). */
+async function contactCardUrl(tenantId: number, language?: string | null): Promise<string | null> {
+    const base = publicAppBaseUrl();
+    if (!base || isServiceNode) return null;
+    try {
+        const english = isEnglishGuest(language);
+        if ((await contactCardPhones(tenantId, english)).length === 0) return null;
+        let cached = tenantSlugById.get(tenantId);
+        if (!cached || Date.now() - cached.at > TENANT_TOKEN_TTL_MS) {
+            const r = await queryWithRetry('SELECT slug FROM tenants WHERE id = $1', [tenantId]);
+            cached = { slug: r.rows[0]?.slug || null, at: Date.now() };
+            tenantSlugById.set(tenantId, cached);
+        }
+        // Il path senza slug ricade sul tenant 1 (resolveTenantForPublicRequest):
+        // va bene solo per lui.
+        const cardPath = cached.slug
+            ? `/public/${encodeURIComponent(cached.slug)}/contatto.vcf`
+            : (tenantId === PUBLIC_TENANT_ID ? '/public/contatto.vcf' : null);
+        if (!cardPath) return null;
+        return `${base}${cardPath}${english ? '?lang=en' : ''}`;
+    } catch (err: any) {
+        console.warn('[contatto] link non disponibile:', err?.message || err);
+        return null;
+    }
+}
+
+/** Il logo dell'anagrafica in byte: quello caricato dalle Impostazioni
+ *  (/public/media/<token>) o il logo statico del Frantoio. */
+async function businessLogoBytes(tenantId: number, logoUrl: string): Promise<Buffer | null> {
+    const media = logoUrl.match(LOGO_MEDIA_RE);
+    if (media) {
+        const r = await queryWithRetry(
+            `SELECT bytes FROM outbound_media WHERE tenant_id = $1 AND token = $2`,
+            [tenantId, media[1]]
+        );
+        return r.rows[0]?.bytes ?? null;
+    }
+    if (logoUrl === '/prenota/logo.png') {
+        return readFileAsync(path.join(process.cwd(), 'public', 'logo-vf.png')).catch(() => null);
+    }
+    return null;
+}
+
+// La foto si ricalcola con sharp: dieci minuti di cache bastano a non
+// rifarla per ogni cliente che tocca il link, e un cambio di anagrafica
+// arriva comunque in fretta.
+const CONTACT_CARD_TTL_MS = 10 * 60 * 1000;
+const contactCardCache = new Map<string, { body: string; fileName: string; at: number }>();
+
+async function handleContactCard(tenantId: number, req: express.Request, res: express.Response): Promise<void> {
+    try {
+        const english = isEnglishGuest(typeof req.query.lang === 'string' ? req.query.lang : null);
+        const key = `${tenantId}:${english ? 'en' : 'it'}`;
+        let card = contactCardCache.get(key);
+        if (!card || Date.now() - card.at > CONTACT_CARD_TTL_MS) {
+            const phones = await contactCardPhones(tenantId, english);
+            if (phones.length === 0) {
+                res.status(404).json({ error: 'no_contact' });
+                return;
+            }
+            const identity = await publicBusinessIdentity(tenantId);
+            const logo = identity.logoUrl ? await businessLogoBytes(tenantId, identity.logoUrl).catch(() => null) : null;
+            const photoJpeg = logo ? await contactPhotoFromLogo(logo) : null;
+            card = {
+                body: buildContactCard({
+                    name: identity.name,
+                    phones,
+                    address: identity.address,
+                    websiteUrl: identity.websiteUrl,
+                    photoJpeg,
+                }),
+                fileName: contactCardFileName(identity.name),
+                at: Date.now(),
+            };
+            contactCardCache.set(key, card);
+        }
+        res.set('Cache-Control', 'public, max-age=600');
+        // inline: l'iPhone apre subito la scheda «Nuovo contatto»; Android la
+        // scarica e la apre con Contatti. Il nome del file in UTF-8 per gli
+        // accenti, con il ripiego ASCII per i browser vecchi.
+        const ascii = card.fileName.normalize('NFD').replace(/[^\x20-\x7e]/g, '').replace(/"/g, '');
+        res.set('Content-Disposition', `inline; filename="${ascii || 'contatto.vcf'}"; filename*=UTF-8''${encodeURIComponent(card.fileName)}`);
+        res.type('text/vcard; charset=utf-8').send(card.body);
+    } catch (err) {
+        console.error('GET /public/contatto.vcf error:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+}
+
 // La pagina pubblica del preventivo: composizione per uscite, tariffe e
 // totali. Niente note operative (cucina/sala/mise en place) né riferimenti
 // interni — è il documento che il cliente inoltra alla famiglia.
@@ -21434,7 +21688,7 @@ app.get('/preventivo/:token', publicPayLimiter, async (req, res) => runAsPlatfor
             : row.discount_type === 'AMOUNT' ? Math.min(gross, discountValue) : 0;
 
         res.json({
-            business: publicBusinessCard(row.tenant_id),
+            business: { ...publicBusinessCard(row.tenant_id), contact_card_url: await contactCardUrl(Number(row.tenant_id)) },
             // La valuta del ristorante: la pagina ci scrive tutti gli importi.
             currency: (await getTenantLocale(row.tenant_id)).currency,
             quote: {
@@ -26619,17 +26873,20 @@ app.post('/client-errors', authenticate, clientErrorLimiter, async (req: any, re
 });
 
 // Il banner «problema noto»: lo legge ogni utente, il WHERE sceglie quelli
-// che riguardano il suo ristorante (lista vuota = tutti).
+// che riguardano il suo ristorante (lista vuota = tutti). Quello automatico
+// di Sofia solo dove Sofia è attiva.
 app.get('/incidents/active', authenticate, async (req: any, res) => {
     try {
+        const voiceOn = await isFeatureEnabledForTenant(req.tenantId!, 'voice');
         // rls-bypass: gli avvisi vivono nel tenant di chi li scrive e si leggono da ogni ristorante; il WHERE filtra per destinatario
         const r = await runAsPlatform(() => queryWithRetry(
             `SELECT id, message, level, created_at FROM platform_incidents
               WHERE resolved_at IS NULL
                 AND (cardinality(target_tenant_ids) = 0 OR $1::bigint = ANY(target_tenant_ids))
+                AND (auto_kind IS NULL OR (auto_kind = 'sofia' AND $2::boolean))
               ORDER BY (level = 'critico') DESC, created_at DESC
               LIMIT 3`,
-            [req.tenantId!]
+            [req.tenantId!, voiceOn]
         ));
         res.json({ incidents: r.rows });
     } catch (err) {
@@ -26813,7 +27070,79 @@ const runPlatformHealthTick = async (): Promise<void> => {
         await notifyPlatformAlert(c.kind, c.tenantId, String(t.rows[0]?.name ?? `tenant ${c.tenantId}`), c.detail);
     }
     if (changed) emitHealthToPlatform();
+    // Il banner di Sofia ha la sua strada: un errore lì non ferma gli avvisi.
+    await syncSofiaOutageIncident().catch((err: any) => console.warn('[health] controllo di Sofia fallito:', err?.message || err));
 };
+
+/* ── Sofia non raggiungibile: il banner si apre e si chiude da solo ───────
+   13/10/2026: ElevenLabs in timeout per ore, e in sala nessuno sapeva
+   perché il telefono finiva nel messaggio di cortesia. Due segnali:
+   - la pagina di stato di ElevenLabs, con Conversations o Telephony in
+     disservizio;
+   - i nostri register-call: almeno due falliti nell'ultima mezz'ora, e
+     nessuna chiamata agganciata a Sofia dopo l'ultimo.
+   Uno dei due acceso apre il banner per i locali con Sofia attiva; spenti
+   tutti e due, si chiude. Una pagina di stato che non risponde non dice
+   niente su Sofia: in quel giro il banner resta com'è, salvo i nostri
+   errori. */
+
+const ELEVENLABS_STATUS_URL = process.env.ELEVENLABS_STATUS_URL || 'https://status.elevenlabs.io/api/v2/summary.json';
+const SOFIA_STATUS_COMPONENTS = /conversation|telephony/i;
+const SOFIA_OUTAGE_MESSAGE = 'Disservizio di ElevenLabs, il fornitore della voce: Sofia può non rispondere. Le chiamate perse finiscono in Chiamate › Da ricontattare.';
+
+/** I componenti di Sofia in disservizio secondo ElevenLabs ([] = tutto ok),
+ *  o null se la pagina di stato non ha risposto come ci si aspetta. */
+async function elevenLabsOutageComponents(): Promise<string[] | null> {
+    try {
+        const res = await fetch(ELEVENLABS_STATUS_URL, { signal: AbortSignal.timeout(8000) });
+        if (!res.ok) return null;
+        const body: any = await res.json();
+        if (!Array.isArray(body?.components)) return null;
+        return body.components
+            .filter((c: any) => SOFIA_STATUS_COMPONENTS.test(String(c?.name ?? '')) && ['partial_outage', 'major_outage'].includes(c?.status))
+            .map((c: any) => String(c.name));
+    } catch {
+        return null;
+    }
+}
+
+async function sofiaRegisterCallFailing(): Promise<boolean> {
+    const r = await queryWithRetry(
+        `SELECT COUNT(*)::int AS failures, MAX(e.created_at) AS last_failure,
+                (SELECT MAX(pc.answered_at) FROM phone_calls pc
+                  WHERE pc.status = 'sofia' AND pc.answered_at > now() - interval '30 minutes') AS last_ok
+           FROM app_errors e
+          WHERE e.origin = 'sofia' AND e.source = 'register-call' AND e.created_at > now() - interval '30 minutes'`
+    );
+    const row = r.rows[0];
+    if (!row || row.failures < 2) return false;
+    return !row.last_ok || new Date(row.last_ok) < new Date(row.last_failure);
+}
+
+async function syncSofiaOutageIncident(): Promise<void> {
+    const [components, failing] = await Promise.all([elevenLabsOutageComponents(), sofiaRegisterCallFailing()]);
+    const open = await queryWithRetry(`SELECT id FROM platform_incidents WHERE auto_kind = 'sofia' AND resolved_at IS NULL`);
+    const outage = failing || (components?.length ?? 0) > 0;
+    if (outage && open.rows.length === 0) {
+        // Nel ristorante di casa della piattaforma, come i banner del pannello.
+        const ins = await queryWithRetry(
+            `INSERT INTO platform_incidents (tenant_id, message, level, auto_kind)
+             VALUES ($1, $2, 'critico', 'sofia')
+             ON CONFLICT (auto_kind) WHERE resolved_at IS NULL AND auto_kind IS NOT NULL DO NOTHING
+             RETURNING id`,
+            [PUBLIC_TENANT_ID, SOFIA_OUTAGE_MESSAGE]
+        );
+        if (ins.rows.length === 0) return;
+        console.warn('[health] Sofia non raggiungibile: banner acceso', { components, register_call_failing: failing });
+    } else if (!outage && open.rows.length > 0 && components !== null) {
+        await queryWithRetry(`UPDATE platform_incidents SET resolved_at = now() WHERE auto_kind = 'sofia' AND resolved_at IS NULL`);
+        console.log('[health] Sofia di nuovo raggiungibile: banner spento');
+    } else {
+        return;
+    }
+    void broadcastIncidentChange([]);
+    emitHealthToPlatform();
+}
 
 const startPlatformHealthWatchdog = () => {
     const lockedTick = () => runSchedulerTickWithLock(SCHEDULER_LOCK_PLATFORM_HEALTH, 'platform-health', runPlatformHealthTick)
@@ -28470,8 +28799,13 @@ function escapeHtml(s: string): string {
 // place so any future number change lives in a single spot. The WhatsApp link
 // uses wa.me (works in Gmail, iOS Mail, most clients); the phone link uses
 // tel: so a tap on mobile opens the dialer.
-function contactBlockHtml(language?: string | null, identity: BusinessIdentity = businessIdentity()): string {
+function contactBlockHtml(language?: string | null, identity: BusinessIdentity = businessIdentity(), contactCard?: string | null): string {
     const english = isEnglishGuest(language);
+    // La scheda contatto (contactCardUrl): col numero in rubrica il cliente
+    // vede il nome del locale quando lo richiamiamo.
+    const saveContact = contactCard
+        ? `<br>📇 <a href="${escapeHtml(contactCard)}" style="color:#065f46;text-decoration:none;">${english ? 'Save our number' : 'Salva il nostro numero'}</a> <span style="color:#78716c;">${english ? '— so you know it\'s us when we call' : '— così ci riconosci quando ti chiamiamo'}</span>`
+        : '';
     return `
       <table role="presentation" cellpadding="0" cellspacing="0" style="width:100%;margin:0 0 16px;">
         <tr>
@@ -28481,7 +28815,7 @@ function contactBlockHtml(language?: string | null, identity: BusinessIdentity =
             &nbsp;·&nbsp;
             💬 <a href="${whatsappHref(identity.whatsapp)}" style="color:#065f46;text-decoration:none;">WhatsApp ${escapeHtml(identity.whatsapp)}</a>
             &nbsp;·&nbsp;
-            📍 <a href="${identity.mapsUrl}" style="color:#065f46;text-decoration:none;">${english ? 'Get directions' : 'Come raggiungerci'}</a>
+            📍 <a href="${identity.mapsUrl}" style="color:#065f46;text-decoration:none;">${english ? 'Get directions' : 'Come raggiungerci'}</a>${saveContact}
           </td>
         </tr>
       </table>
@@ -28726,6 +29060,8 @@ function buildBookingConfirmationEmail(params: {
     timezone?: string | null;
     /** Il link «Gestisci la prenotazione», se il locale l'ha acceso. */
     manage?: GuestManageLink | null;
+    /** La scheda contatto del locale (contactCardUrl), o null. */
+    contactCard?: string | null;
 }): { subject: string; text: string; html: string } {
     // DB-sourced confirmation time → read a bare naive string as UTC (see
     // asUtcInstant). The request email above keeps the raw web-form input (#85).
@@ -28736,12 +29072,13 @@ function buildBookingConfirmationEmail(params: {
     const name = toTitleCase(params.customerName);
     const shortConfirm = buildConfirmationMessage(params.customerName, params.reservationTime, params.guests, params.roomName ?? null, params.language, { timezone: params.timezone, manage: params.manage });
     const manageUrl = params.manage?.url ?? null;
+    const contactCard = params.contactCard ?? null;
 
     if (isEnglishGuest(params.language)) {
         const guestsLabel = guestsNum === 1 ? 'guest' : 'guests';
         const roomPart = room ? ` · ${escapeHtml(room)}` : '';
         const subject = `Booking confirmed — ${dateLabel} ${timeLabel}`;
-        const text = `${shortConfirm}\n\nNeed to change or cancel? Reply to this email or contact us:\n• Phone: ${identity.phone}\n• WhatsApp: ${identity.whatsapp}\n• Get directions: ${identity.mapsUrl}`;
+        const text = `${shortConfirm}\n\nNeed to change or cancel? Reply to this email or contact us:\n• Phone: ${identity.phone}\n• WhatsApp: ${identity.whatsapp}\n• Get directions: ${identity.mapsUrl}${contactCard ? `\n• Save our number: ${contactCard}` : ''}`;
         const detailsHtml = `
       <p style="margin:0 0 16px;font-size:15px;line-height:1.6;">${name ? `Hi ${escapeHtml(name)},` : 'Hi,'}<br>your reservation is <strong>confirmed</strong>.</p>
       <table role="presentation" cellpadding="0" cellspacing="0" class="confirm-box" style="width:100%;background:#ecfdf5;border:1px solid #a7f3d0;border-radius:12px;padding:16px;margin:0 0 16px;">
@@ -28752,7 +29089,7 @@ function buildBookingConfirmationEmail(params: {
       ${manageUrl
         ? `<p class="muted" style="margin:0 0 12px;font-size:14px;line-height:1.6;color:#57534e;">We look forward to seeing you. Something came up? You can cancel from here:</p>${guestManageButtonHtml(manageUrl, 'Manage your booking')}`
         : `<p class="muted" style="margin:0 0 8px;font-size:14px;line-height:1.6;color:#57534e;">We look forward to seeing you. If you need to change or cancel, reply to this email or contact us directly.</p>`}
-      ${contactBlockHtml(params.language)}
+      ${contactBlockHtml(params.language, identity, contactCard)}
       <p style="margin:16px 0 0;font-size:14px;">See you soon!<br><em>${escapeHtml(identity.name)}</em></p>
     `;
         const html = wrapEmailHtml(`Booking confirmed for ${dateLabel} at ${timeLabel}`, detailsHtml, params.language);
@@ -28762,7 +29099,7 @@ function buildBookingConfirmationEmail(params: {
     const persone = guestsNum === 1 ? 'persona' : 'persone';
     const roomPart = room ? ` · ${escapeHtml(room)}` : '';
     const subject = `Conferma prenotazione — ${dateLabel} ${timeLabel}`;
-    const text = `${shortConfirm}\n\nSe hai bisogno di modificare o annullare puoi rispondere a questa email oppure contattarci:\n• Telefono: ${identity.phone}\n• WhatsApp: ${identity.whatsapp}\n• Come raggiungerci: ${identity.mapsUrl}`;
+    const text = `${shortConfirm}\n\nSe hai bisogno di modificare o annullare puoi rispondere a questa email oppure contattarci:\n• Telefono: ${identity.phone}\n• WhatsApp: ${identity.whatsapp}\n• Come raggiungerci: ${identity.mapsUrl}${contactCard ? `\n• Salva il nostro numero: ${contactCard}` : ''}`;
 
     const detailsHtml = `
       <p style="margin:0 0 16px;font-size:15px;line-height:1.6;">${name ? `Ciao ${escapeHtml(name)},` : 'Ciao,'}<br>la tua prenotazione è <strong>confermata</strong>.</p>
@@ -28774,7 +29111,7 @@ function buildBookingConfirmationEmail(params: {
       ${manageUrl
         ? `<p class="muted" style="margin:0 0 12px;font-size:14px;line-height:1.6;color:#57534e;">Ti aspettiamo a tavola. Un imprevisto? Puoi annullare da qui:</p>${guestManageButtonHtml(manageUrl, 'Gestisci la prenotazione')}`
         : `<p class="muted" style="margin:0 0 8px;font-size:14px;line-height:1.6;color:#57534e;">Ti aspettiamo a tavola. Se hai bisogno di modificare o annullare, rispondi a questa email o contattaci direttamente.</p>`}
-      ${contactBlockHtml()}
+      ${contactBlockHtml(null, identity, contactCard)}
       <p style="margin:16px 0 0;font-size:14px;">A presto!<br><em>${escapeHtml(identity.name)}</em></p>
     `;
     const html = wrapEmailHtml(`Prenotazione confermata per il ${dateLabel} alle ${timeLabel}`, detailsHtml);
@@ -28795,14 +29132,18 @@ function buildBookingReminderEmail(params: {
     identity: BusinessIdentity;
     /** Il link «Gestisci la prenotazione», se il locale l'ha acceso. */
     manage?: GuestManageLink | null;
+    /** La scheda contatto del locale (contactCardUrl), o null. */
+    contactCard?: string | null;
 }): { subject: string; text: string; html: string } {
     const { identity } = params;
     const manageUrl = params.manage?.url ?? null;
+    const contactCard = params.contactCard ?? null;
     const { dateLabel, timeLabel } = formatBookingDateTime(asUtcInstant(params.reservationTime), params.timezone || 'Europe/Rome');
     const guestsNum = Math.max(1, Math.trunc(Number(params.guests) || 1));
     const room = (params.roomName || '').trim();
     const name = toTitleCase(params.customerName);
-    const text = buildReminderMessage(params.customerName, params.reservationTime, params.guests, params.roomName ?? null, params.language, { timezone: params.timezone, manage: params.manage }, identity);
+    const text = buildReminderMessage(params.customerName, params.reservationTime, params.guests, params.roomName ?? null, params.language, { timezone: params.timezone, manage: params.manage }, identity)
+        + (contactCard ? `\n\n${isEnglishGuest(params.language) ? 'Save our number' : 'Salva il nostro numero'}: ${contactCard}` : '');
 
     if (isEnglishGuest(params.language)) {
         const guestsLabel = guestsNum === 1 ? 'guest' : 'guests';
@@ -28818,7 +29159,7 @@ function buildBookingReminderEmail(params: {
       ${manageUrl
         ? `<p class="muted" style="margin:0 0 12px;font-size:14px;line-height:1.6;color:#57534e;">Will you make it? Confirm or cancel from here:</p>${guestManageButtonHtml(manageUrl, 'Manage your booking')}`
         : `<p class="muted" style="margin:0 0 8px;font-size:14px;line-height:1.6;color:#57534e;">Need to change or cancel? Reply to this email or contact us: we'll take care of it.</p>`}
-      ${contactBlockHtml(params.language, identity)}
+      ${contactBlockHtml(params.language, identity, contactCard)}
       <p style="margin:16px 0 0;font-size:14px;">See you soon!<br><em>${escapeHtml(identity.name)}</em></p>
     `;
         return { subject, text, html: wrapEmailHtml(`Your table on ${dateLabel} at ${timeLabel}`, detailsHtml, params.language) };
@@ -28837,7 +29178,7 @@ function buildBookingReminderEmail(params: {
       ${manageUrl
         ? `<p class="muted" style="margin:0 0 12px;font-size:14px;line-height:1.6;color:#57534e;">Ci sarai? Conferma o annulla da qui:</p>${guestManageButtonHtml(manageUrl, 'Gestisci la prenotazione')}`
         : `<p class="muted" style="margin:0 0 8px;font-size:14px;line-height:1.6;color:#57534e;">Per modifiche o imprevisti rispondi a questa email o contattaci: sistemiamo tutto noi.</p>`}
-      ${contactBlockHtml(params.language, identity)}
+      ${contactBlockHtml(params.language, identity, contactCard)}
       <p style="margin:16px 0 0;font-size:14px;">A presto!<br><em>${escapeHtml(identity.name)}</em></p>
     `;
     return { subject, text, html: wrapEmailHtml(`Il tuo tavolo il ${dateLabel} alle ${timeLabel}`, detailsHtml) };
@@ -33636,7 +33977,9 @@ async function guestReservationView(row: any) {
     const depositCents = guestDepositPaidCents(row);
     const today = getItalianTodayIso(now, locale.timezone);
     return {
-        business: publicBusinessCard(tenantId),
+        // Il link nudo: la pagina ha il suo selettore di lingua e aggiunge
+        // ?lang=en da sé.
+        business: { ...publicBusinessCard(tenantId), contact_card_url: await contactCardUrl(tenantId) },
         currency: locale.currency,
         reservation: {
             customer_name: toTitleCase(row.customer_name) || null,
@@ -34061,6 +34404,7 @@ app.post('/r/:token/modify', guestPageLimiter, guestActionLimiter, async (req, r
                 const manage = await guestManageLink(tenantId, id);
                 const roomName = await resolveReservationRoomName({ ...row, table_id: tableReleased ? null : row.table_id });
                 const language = resolveGuestLanguage(row);
+                const contactCard = await contactCardUrl(tenantId, language);
                 dispatchBookingNotification({
                     tenantId,
                     source: row.source,
@@ -34074,7 +34418,7 @@ app.post('/r/:token/modify', guestPageLimiter, guestActionLimiter, async (req, r
                         reservationTime: row.reservation_time,
                         guests: row.guests,
                         roomName,
-                        language, timezone: tz, manage }),
+                        language, timezone: tz, manage, contactCard }),
                     kind: 'confirmation',
                 }).catch(err => console.error('[guest-modify] conferma non inviata:', err?.message || err));
             }
@@ -38141,6 +38485,9 @@ const handlePublicReservationCreate = async (tenantId: number, req: express.Requ
         const ackManage = !depositCheckoutUrl && confirmedNow
             ? await guestManageLink(tenantId, created.id)
             : null;
+        const ackContactCard = !depositCheckoutUrl && confirmedNow
+            ? await contactCardUrl(tenantId, language)
+            : null;
         const ackText = depositCheckoutUrl
             ? buildDepositRequestMessage(
                 toTitleCase(customer_name),
@@ -38222,7 +38569,7 @@ const handlePublicReservationCreate = async (tenantId: number, req: express.Requ
                     reservationTime: created.reservation_time,
                     guests: guestsNum,
                     roomName: ackRoomName,
-                    language, timezone: fusoMsg, manage: ackManage })
+                    language, timezone: fusoMsg, manage: ackManage, contactCard: ackContactCard })
                 : buildBookingRequestEmail({
                     customerName: toTitleCase(customer_name),
                     reservationTime: reservation_time,
@@ -38249,6 +38596,7 @@ const handlePublicReservationCreate = async (tenantId: number, req: express.Requ
 app.get(['/public/availability', '/public/:slug/availability'], publicReadLimiter, withPublicTenant(handlePublicAvailability));
 app.get(['/public/rooms', '/public/:slug/rooms'], publicReadLimiter, withPublicTenant(handlePublicRooms));
 app.get(['/public/contact', '/public/:slug/contact'], publicReadLimiter, withPublicTenant(handlePublicContact));
+app.get(['/public/contatto.vcf', '/public/:slug/contatto.vcf'], publicReadLimiter, withPublicTenant(handleContactCard));
 app.post(['/public/reservations', '/public/:slug/reservations'], publicBookingLimiter, withPublicTenant(handlePublicReservationCreate));
 
 // Serve la pagina con la testa SEO di QUESTO ristorante. Vedi

@@ -28,7 +28,13 @@ import { chime } from '../../utils/chime';
    chiamata tornano sotto. Si ferma quando la chiamata finisce, e la card mostra
    l'esito per qualche secondo prima di sparire. Una chiamata presa dal locale lascia scrivere
    una nota: mentre la si scrive la card resta, e la nota torna nella card
-   la volta dopo che lo stesso numero chiama. */
+   la volta dopo che lo stesso numero chiama.
+
+   «Nuova prenotazione» sta su ogni card dove al telefono c'è il locale: mentre
+   squilla, quando ha risposto il cordless, un cellulare o un altro CRM, e a
+   chiamata presa appena finita. Prima c'era solo in linea dal CRM di questo
+   browser, e chi rispondeva dal cordless prenotava dal «+» ribattendo nome e
+   numero. Con Sofia no: prenota lei, e una a mano sarebbe un doppione. */
 
 const ENDED_VISIBLE_MS = 15_000;
 // Specchio del TTL del server: una chiamata senza post-call non resta a vita.
@@ -368,6 +374,11 @@ export const CallBanner: React.FC<{
         const HeadIcon = ended
           ? (ended.outcome === 'answered' ? PhoneCall : ended.outcome === 'missed' ? PhoneIncoming : Wand2)
           : frame === 'ring' ? PhoneIncoming : frame === 'call' ? PhoneCall : Wand2;
+        const prefill: CallPrefill = { customer_name: name || undefined, phone: customer?.phone || card.phone, phone_call_ref: call.call_sid || call.id };
+        // Squilla o si parla da questo browser: lì ci sono già Rispondi e la
+        // barra della chiamata, con la sua «Nuova prenotazione».
+        const softHere = isHere(soft.incoming, call.id) || isHere(soft.active, call.id);
+        const quickBook = !softHere && (ended ? ended.outcome === 'answered' : stage === 'ringing' || stage === 'staff');
         return (
           <div
             key={call.id}
@@ -457,7 +468,21 @@ export const CallBanner: React.FC<{
                 ))}
 
                 {!ended && isHere(soft.incoming, call.id) && ringButtons}
-                {!ended && isHere(soft.active, call.id) && inCallBar(soft.active!, { customer_name: name || undefined, phone: customer?.phone || card.phone, phone_call_ref: call.call_sid || call.id })}
+                {!ended && isHere(soft.active, call.id) && inCallBar(soft.active!, prefill)}
+                {/* A tutta larghezza e nello stesso posto mentre squilla, in
+                    linea e a chiamata finita: su telefono, accanto ad
+                    «Aggiungi una nota», si troncava. A chiamata finita la
+                    card non serve più sopra il modulo, che ha già nome e
+                    numero: si chiude. */}
+                {quickBook && (
+                  <button
+                    type="button"
+                    onClick={() => { if (ended) dismiss(call.id); onNewReservation(prefill); }}
+                    className={`${dsButton.secondary} mt-3 w-full px-3`}
+                  >
+                    <CalendarPlus className="h-4 w-4 flex-shrink-0" aria-hidden /> <span className="truncate">{t('phone.newBooking')}</span>
+                  </button>
+                )}
 
                 {/* La nota a fine chiamata, per le chiamate prese dal locale. */}
                 {ended?.outcome === 'answered' && (() => {
