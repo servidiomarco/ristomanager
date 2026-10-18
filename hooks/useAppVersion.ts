@@ -7,6 +7,31 @@ const POLL_INTERVAL_MS = 5 * 60 * 1000; // 5 minutes
 // dismissedVersion no longer matches remoteVersion and the banner returns.
 const DISMISSED_KEY = 'ristomanager_dismissed_version';
 
+// Quanto il «Ricarica» aspetta il SW nuovo: il precache scarica la shell
+// intera, su una rete lenta ci mette qualche secondo. Oltre, si ricarica
+// comunque — la navigazione passa dalla rete (pwa/sw.js, directoryIndex).
+const SW_ACTIVATION_TIMEOUT_MS = 8000;
+
+/** Si risolve quando il worker è attivo (o scartato), al più dopo timeoutMs.
+ *  Il nostro sw.js chiama skipWaiting() già all'install; il messaggio vale
+ *  per un worker rimasto in attesa. */
+const untilActivated = (worker: ServiceWorker, timeoutMs: number): Promise<void> => new Promise(resolve => {
+    const finished = () => worker.state === 'activated' || worker.state === 'redundant';
+    if (finished()) { resolve(); return; }
+    const done = () => {
+        clearTimeout(timer);
+        worker.removeEventListener('statechange', onChange);
+        resolve();
+    };
+    const onChange = () => {
+        if (worker.state === 'installed') worker.postMessage({ type: 'SKIP_WAITING' });
+        if (finished()) done();
+    };
+    const timer = setTimeout(done, timeoutMs);
+    worker.addEventListener('statechange', onChange);
+    if (worker.state === 'installed') worker.postMessage({ type: 'SKIP_WAITING' });
+});
+
 interface AppVersionState {
     // The build baked into the running bundle. 'dev' means local Vite dev
     // server — banner is disabled in that case so it doesn't fire during HMR.
@@ -73,10 +98,13 @@ export function useAppVersion(): AppVersionState {
             if (document.visibilityState === 'visible') check();
         };
         document.addEventListener('visibilitychange', onVisible);
+        // pageshow: la PWA di iOS che riprende una pagina sospesa.
+        window.addEventListener('pageshow', onVisible);
         window.addEventListener('focus', check);
         return () => {
             clearInterval(id);
             document.removeEventListener('visibilitychange', onVisible);
+            window.removeEventListener('pageshow', onVisible);
             window.removeEventListener('focus', check);
         };
     }, [currentVersion, check]);
@@ -93,12 +121,10 @@ export function useAppVersion(): AppVersionState {
     }, [remoteVersion]);
 
     const reload = useCallback(() => {
-        // If the service worker has a waiting version, activate it before
-        // reloading — otherwise the user gets the same cached bundle back.
-        // Failure is silent: worst case the SPA reloads without the SW swap,
-        // still fetching the new bundle from network because we clear the
-        // dismiss token so the banner would reappear if we ended up on the
-        // old code.
+        // Activate the new service worker before reloading — otherwise the
+        // user gets the same cached bundle back. Failure is silent: worst
+        // case the SPA reloads without the SW swap, and since we clear the
+        // dismiss token the banner reappears if we ended up on the old code.
         try { localStorage.removeItem(DISMISSED_KEY); } catch { /* ignore */ }
         (async () => {
             try {
@@ -110,9 +136,13 @@ export function useAppVersion(): AppVersionState {
                         // solo con la navigazione stessa e il reload
                         // potrebbe ripartire col precache vecchio.
                         try { await reg.update(); } catch { /* offline ecc. */ }
-                        if (reg.waiting) {
-                            reg.waiting.postMessage({ type: 'SKIP_WAITING' });
-                        }
+                        // update() si risolve appena il SW nuovo comincia a
+                        // installarsi, non quando ha finito: ricaricare lì
+                        // lasciava la pagina al SW vecchio e alla sua shell,
+                        // e il banner tornava a ogni clic finché il nuovo
+                        // non era attivo (18/10). Si aspetta che lo sia.
+                        const incoming = reg.installing ?? reg.waiting;
+                        if (incoming) await untilActivated(incoming, SW_ACTIVATION_TIMEOUT_MS);
                     }
                 }
             } catch { /* best-effort */ }

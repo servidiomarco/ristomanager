@@ -261,7 +261,6 @@
     "bookingCancelled": "Booking cancelled",
     "bookingNoShow": "Booking no-show",
     "bookingDeleted": "Booking deleted",
-    "newVersion": "A new version of the app is available",
     "connectionRestored": "Connection restored",
     "connectionLost": "Connection lost — changes will sync once it is back",
     "tableAdded": "New table added to the dining room",

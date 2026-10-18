@@ -25,7 +25,14 @@ import { registerRoute, NavigationRoute } from 'workbox-routing';
 import { NetworkFirst, CacheFirst, StaleWhileRevalidate } from 'workbox-strategies';
 import { ExpirationPlugin } from 'workbox-expiration';
 
-precacheAndRoute(self.__WB_MANIFEST);
+// directoryIndex: null — di serie Workbox risponde a «/» con l'index.html
+// precachato, e la rotta del precache viene prima della NavigationRoute qui
+// sotto: la navigazione non arrivava mai alla rete. Dopo un deploy il
+// «Ricarica» del banner riportava la shell vecchia finché il SW nuovo non
+// aveva finito di installarsi, e il banner ricompariva (18/10: due o tre
+// clic per farlo sparire). Così «/» passa dalla NetworkFirst; la shell
+// precachata resta il ripiego offline.
+precacheAndRoute(self.__WB_MANIFEST, { directoryIndex: null });
 cleanupOutdatedCaches();
 
 const navigationStrategy = new NetworkFirst({
