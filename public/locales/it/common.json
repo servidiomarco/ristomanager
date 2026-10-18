@@ -292,6 +292,8 @@
     "confirmReadNamed": "Conferma {{canale}} letta da {{nome}}",
     "confirmFailedNamed": "Conferma {{canale}} non consegnata a {{nome}}",
     "reminderSentNamed": "Promemoria inviato a {{nome}}",
+    "remindersSent_one": "Promemoria inviato a {{count}} ospite",
+    "remindersSent_other": "Promemoria inviati a {{count}} ospiti",
     "guestConfirmedNamed": "{{nome}} ha confermato la presenza",
     "guestCancelledNamed": "{{nome}} ha annullato la prenotazione",
     "bookingConfirmedNamed": "Prenotazione confermata: {{nome}}",
