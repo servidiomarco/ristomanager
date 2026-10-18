@@ -292,6 +292,8 @@
     "confirmReadNamed": "{{canale}} confirmation read by {{nome}}",
     "confirmFailedNamed": "{{canale}} confirmation not delivered to {{nome}}",
     "reminderSentNamed": "Reminder sent to {{nome}}",
+    "remindersSent_one": "Reminder sent to {{count}} guest",
+    "remindersSent_other": "Reminders sent to {{count}} guests",
     "guestConfirmedNamed": "{{nome}} confirmed they're coming",
     "guestCancelledNamed": "{{nome}} cancelled the booking",
     "bookingConfirmedNamed": "Booking confirmed: {{nome}}",
