@@ -62,6 +62,36 @@ pool.on('error', (err) => {
     console.error('Postgres pool idle client error:', err?.message || err);
 });
 
+// I lock advisory degli scheduler (runSchedulerTickWithLock, qui sotto) su
+// un pool loro. Ogni giro tiene la connessione del lock per tutta la sua
+// durata e le sue query ne chiedono un'altra: sul pool condiviso (max 10)
+// dieci giri partiti insieme si prendevano tutte le connessioni per i lock,
+// le loro query restavano in coda e dopo 5 s fallivano in blocco («timeout
+// exceeded when trying to connect»). Succedeva a ogni avvio — gli
+// scheduler partono nello stesso istante — e può ripetersi quando i loro
+// intervalli tornano a coincidere. Qui un lock non toglie mai una
+// connessione alle query. Sessioni corte e senza contesto tenant: un
+// SELECT per prendere il lock e uno per lasciarlo.
+export const schedulerLockPool = new Pool({
+    connectionString: process.env.DATABASE_URL,
+    ssl: process.env.DATABASE_URL?.includes('sslmode=require') ? {
+        rejectUnauthorized: false,
+    } : false,
+    // Uno per scheduler con lock (13 al 18/10) e margine; Postgres ne
+    // accetta 500.
+    max: 20,
+    idleTimeoutMillis: 30_000,
+    connectionTimeoutMillis: 5_000,
+    keepAlive: true,
+    keepAliveInitialDelayMillis: 10_000,
+    statement_timeout: 15_000,
+    query_timeout: 20_000,
+} as any);
+
+schedulerLockPool.on('error', (err) => {
+    console.error('Postgres scheduler-lock pool idle client error:', err?.message || err);
+});
+
 // Anchor every new pool connection to Europe/Rome so timestamptz columns are
 // interpreted consistently on both writes and reads:
 //   - Naive datetime strings (e.g. "2026-07-16T22:30") passed to INSERT/UPDATE
@@ -226,6 +256,51 @@ export const queryWithRetry = async (text: string, params?: any[]): Promise<{ ro
 // Al boot il server esegue prima createSchema (idempotente sui database
 // esistenti) e poi le migration non ancora applicate, registrate nella
 // tabella pgmigrations.
+// Un giro di scheduler sotto pg_try_advisory_lock (perché: «SCHEDULER —
+// advisory lock per replica singola» in server.ts, dove stanno gli id).
+// Il lock advisory è di SESSIONE: va preso su un client dedicato tenuto per
+// tutta la durata del tick (sul pool condiviso un'altra query potrebbe
+// girare su una connessione diversa e il lock non proteggerebbe nulla), e
+// rilasciato nel finally insieme al client. Il client viene dal pool dei
+// lock (schedulerLockPool), mai da quello delle query: vedi sopra.
+// pg_try_advisory_lock non blocca: la replica che perde la corsa non si
+// accoda, salta il giro.
+export const runSchedulerTickWithLock = async (
+    lockId: number,
+    name: string,
+    tick: () => Promise<void>
+): Promise<void> => {
+    let client;
+    try {
+        client = await schedulerLockPool.connect();
+    } catch (err: any) {
+        // Pool esaurito o DB giù: il prossimo giro ritenta, come già fanno
+        // i tick stessi sugli errori di query.
+        console.error(`[scheduler:${name}] connessione per il lock fallita:`, err?.message || err);
+        return;
+    }
+    let acquired = false;
+    try {
+        const res = await client.query('SELECT pg_try_advisory_lock($1) AS locked', [lockId]);
+        acquired = res.rows[0]?.locked === true;
+        if (!acquired) {
+            console.debug(`[scheduler:${name}] tick saltato: lock ${lockId} tenuto da un'altra replica`);
+            return;
+        }
+        // Lavoro di piattaforma dichiarato: i tick attraversano i tenant per
+        // mestiere (promemoria e riconcili di tutti i ristoranti insieme).
+        // rls-bypass: tick di scheduler cross-tenant per mestiere, ogni riga porta il suo tenant_id a valle
+        await runAsPlatform(() => tick());
+    } finally {
+        if (acquired) {
+            // Unlock esplicito prima del release: il client torna nel pool e
+            // la sessione resta viva, quindi il lock NON cadrebbe da solo.
+            try { await client.query('SELECT pg_advisory_unlock($1)', [lockId]); } catch (_) {}
+        }
+        client.release();
+    }
+};
+
 export const runMigrations = async (): Promise<void> => {
     // Client dedicato, non il pool: il runner apre una transazione per
     // migration e un lock advisory per l'intera run — non deve contendersi
