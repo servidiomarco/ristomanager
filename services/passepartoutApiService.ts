@@ -261,6 +261,8 @@ export interface TavoloApertoInCassa {
 export interface PpTavoliApertiConfig {
   enabled: boolean;
   disponibilita: boolean;
+  /** «Il tavolo X ha pagato»: modal a chi gestisce la sala. */
+  avvisoPagato: boolean;
   aperti: number;
   agente: { collegato: boolean; aggiornato: boolean };
 }
@@ -271,7 +273,7 @@ export const getTavoliAperti = (): Promise<{ tavoli: TavoloApertoInCassa[] }> =>
 export const getTavoliApertiConfig = (): Promise<PpTavoliApertiConfig> =>
   apiRequest(`${API_URL}/passepartout/tavoli-aperti/config`, { headers: getHeaders(false), cache: 'no-store' });
 
-export const setTavoliApertiConfig = (input: { enabled?: boolean; disponibilita?: boolean }): Promise<{ ok: true }> =>
+export const setTavoliApertiConfig = (input: { enabled?: boolean; disponibilita?: boolean; avvisoPagato?: boolean }): Promise<{ ok: true }> =>
   apiRequest(`${API_URL}/passepartout/tavoli-aperti/config`, { method: 'PUT', headers: getHeaders(), body: JSON.stringify(input) });
 
 export const aggiornaTavoliAperti = (): Promise<{ tavoli: TavoloApertoInCassa[] }> =>

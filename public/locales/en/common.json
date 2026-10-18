@@ -73,6 +73,17 @@
     "declined": "Declined",
     "cancelledGroup": "Cancelled"
   },
+  "tavoloPagato": {
+    "title": "Table {{tavolo}} has paid",
+    "titleNoTable": "A table has paid",
+    "coperti_one": "{{count}} cover",
+    "coperti_other": "{{count}} covers",
+    "body": "The bill is closed on the till. Free the table?",
+    "free": "Free the table",
+    "later": "Not now",
+    "more_one": "One more table has paid",
+    "more_other": "{{count}} more tables have paid"
+  },
   "tableStatus": {
     "libera": "Free",
     "attesa": "Booked",

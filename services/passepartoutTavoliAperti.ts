@@ -32,6 +32,15 @@ export interface TavoloApertoInCassa {
     libero_previsto_at: string;
 }
 
+/** Una comanda che era aperta su un tavolo abbinato e alla lettura buona
+ *  non c'è più: com'era all'ultima lettura in cui c'era. */
+export interface ComandaChiusaInCassa {
+    pp_comanda_id: number;
+    table_id: number;
+    coperti: number | null;
+    totale_cents: number;
+}
+
 export interface TavoliApertiDeps {
     /** Avvisa i client del ristorante (evento 'passepartout:tavoli-aperti'). */
     broadcast: (tenantId: number, tavoli: TavoloApertoInCassa[]) => void;
@@ -39,6 +48,10 @@ export interface TavoliApertiDeps {
      *  (chiuse in cassa): i conti nati dal QR su quelle e mai pagati nel
      *  CRM vanno annullati, o restano appesi al tavolo. */
     comandeChiuse?: (tenantId: number, idComande: number[]) => Promise<void>;
+    /** Le stesse comande col loro tavolo: se risultano pagate, chi gestisce
+     *  la sala riceve l'avviso «il tavolo ha pagato». Solo da una lettura
+     *  buona: la pulizia delle righe di un agente muto non passa di qui. */
+    tavoliChiusi?: (tenantId: number, chiuse: ComandaChiusaInCassa[]) => Promise<void>;
 }
 
 let deps: TavoliApertiDeps | null = null;
@@ -166,12 +179,21 @@ export async function aggiornaTavoliAperti(tenantId: number): Promise<TavoloAper
     // Chiuse in cassa da una lettura all'altra.
     const chiuse = await queryWithRetry(
         `DELETE FROM passepartout_tavoli_aperti WHERE tenant_id = $1 AND NOT (pp_comanda_id = ANY($2::int[]))
-         RETURNING pp_comanda_id`,
+         RETURNING pp_comanda_id, table_id, coperti, totale_cents`,
         [tenantId, viste]
     );
     if ((chiuse.rowCount ?? 0) > 0 && deps?.comandeChiuse) {
         await deps.comandeChiuse(tenantId, chiuse.rows.map((r: any) => Number(r.pp_comanda_id)))
             .catch((err) => console.error('[passepartout] conti del QR su comande chiuse:', err?.message || err));
+    }
+    if ((chiuse.rowCount ?? 0) > 0 && deps?.tavoliChiusi) {
+        // Senza attesa: la rilettura delle comande non deve frenare la sala.
+        void deps.tavoliChiusi(tenantId, chiuse.rows.map((r: any) => ({
+            pp_comanda_id: Number(r.pp_comanda_id),
+            table_id: Number(r.table_id),
+            coperti: r.coperti == null ? null : Number(r.coperti),
+            totale_cents: Number(r.totale_cents) || 0,
+        }))).catch((err) => console.error('[passepartout] avviso tavolo pagato:', err?.message || err));
     }
     const elenco = await elencoTavoliAperti(tenantId);
     const imp = impronta(elenco);
