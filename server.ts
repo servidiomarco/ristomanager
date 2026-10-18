@@ -981,10 +981,17 @@ async function handleTwilioWhatsAppStatus(tenantId: number, req: express.Request
  * whatsapp/webhooks.ts): la conferma della prenotazione, la riga
  * dell'inbox, il ripiego su SMS per gli errori WhatsApp definitivi.
  */
+/** L'ordine degli stati di consegna, per non tornare indietro. */
+const deliveryRankSql = (expr: string): string =>
+    `(CASE ${expr} WHEN 'read' THEN 3 WHEN 'delivered' THEN 2 WHEN 'failed' THEN 2 WHEN 'undelivered' THEN 2 WHEN 'sent' THEN 1 ELSE 0 END)`;
+
 async function persistDeliveryStatus(tenantId: number, MessageSid: string, rawStatus: string, ErrorCode: string | null, errText: string | null): Promise<void> {
     // Persist the delivery status on the reservation, if we tracked this SID.
-    // Twilio delivers callbacks out of order; only advance the status when the
-    // new state is meaningful (delivered/failed/undelivered), and only stamp
+    // Twilio delivers callbacks out of order and repeats them: the status only
+    // moves forward (queued → sent → delivered/failed → read), and a repeat
+    // changes nothing. Ogni riga toccata è un toast sui client: un «sent» in
+    // ritardo dopo il «delivered» riportava la card a «in attesa di
+    // consegna» e annunciava di nuovo «Conferma inviata». Only stamp
     // confirmation_delivered_at once, on the first 'delivered' event.
     try {
         const status = String(rawStatus).toLowerCase();
@@ -999,6 +1006,8 @@ async function persistDeliveryStatus(tenantId: number, MessageSid: string, rawSt
                  confirmation_error = $2
              WHERE confirmation_provider_sid = $3
                AND tenant_id = $4
+               AND (confirmation_status IS DISTINCT FROM $1::text OR confirmation_error IS DISTINCT FROM $2::text)
+               AND ${deliveryRankSql('$1::text')} >= ${deliveryRankSql('confirmation_status')}
              RETURNING *`,
             [status, errText, MessageSid, tenantId]
         );
@@ -3402,17 +3411,17 @@ async function broadcastReservationsUpdatedByIds(ids: number[]): Promise<void> {
 }
 
 /** L'esito di un messaggio all'ospite (conferma inviata, consegnata, letta;
- *  promemoria partito) cambia l'icona sulla card, non la prenotazione. Il
- *  18/10 una prenotazione appena creata ha dato quattro «Prenotazione
- *  aggiornata» in mezzo minuto — l'invio, poi sent/delivered/read di Twilio
- *  — e a 3–4 s l'uno dall'altro sfuggivano al dedup dei toast, impilati.
- *  Qui la riga parte come reservation:synced (patch muta) e arricchita: la
- *  riga nuda del RETURNING spegneva il badge VIP fino al ricaricamento. Nel
- *  log di replica l'evento è quiet, così anche il nodo lo rigioca muto. */
-async function broadcastReservationDeliveryChange(tenantId: number, updatedRow: any): Promise<void> {
+ *  promemoria partito). La riga parte arricchita: quella nuda del RETURNING
+ *  toglieva al client il join della GET, e il badge VIP spariva fino al
+ *  ricaricamento. La frase del toast la sceglie il client dal confronto
+ *  (utils/reservationNotice: «Conferma WhatsApp consegnata a …»). `quiet`
+ *  per i promemoria: reservation:synced, patch muta — il bottone ha già il
+ *  suo toast, e il giro automatico ne darebbe uno per prenotazione. Nel log
+ *  di replica l'evento resta quiet, così il nodo lo rigioca muto. */
+async function broadcastReservationDeliveryChange(tenantId: number, updatedRow: any, opts: { quiet?: boolean } = {}): Promise<void> {
     const id = Number(updatedRow?.id);
     if (!Number.isInteger(id) || id <= 0) return;
-    await logReservationChanged(null, tenantId, id, { quiet: true });
+    await logReservationChanged(null, tenantId, id, { quiet: opts.quiet });
     if (!socketService) return;
     let row = updatedRow;
     try {
@@ -3420,8 +3429,10 @@ async function broadcastReservationDeliveryChange(tenantId: number, updatedRow: 
     } catch (err) {
         console.warn('[sync] esito messaggio: rilettura fallita, parte la riga nuda:', err);
     }
-    try { socketService.broadcastReservationSynced(tenantId, row); }
-    catch (err) { console.warn('[sync] esito messaggio non trasmesso:', err); }
+    try {
+        if (opts.quiet) socketService.broadcastReservationSynced(tenantId, row);
+        else socketService.broadcastReservationUpdated(tenantId, row);
+    } catch (err) { console.warn('[sync] esito messaggio non trasmesso:', err); }
 }
 
 /** Le prenotazioni con l'arricchimento della GET /reservations (VIP, tavolo
@@ -4581,7 +4592,7 @@ app.post('/reservations/:id/send-reminder', authenticate, requirePermission('res
             `UPDATE reservations SET reminder_sent = true WHERE id = $1 AND tenant_id = $2 RETURNING *`,
             [id, req.tenantId!]
         );
-        if (upd.rows[0]) await broadcastReservationDeliveryChange(req.tenantId!, upd.rows[0]);
+        if (upd.rows[0]) await broadcastReservationDeliveryChange(req.tenantId!, upd.rows[0], { quiet: true });
         res.json({ ok: true, channel: sendResult.channel });
     } catch (err: any) {
         console.error('POST /reservations/:id/send-reminder error:', err);
@@ -19484,7 +19495,7 @@ const startBookingReminderScheduler = () => {
                     // reminder_sent): replica al nodo e broadcast muto come fa
                     // il bottone manuale — un toast per ogni promemoria del
                     // giro sarebbe una raffica.
-                    if (updated && status === 'sent') await broadcastReservationDeliveryChange(tenantId, updated);
+                    if (updated && status === 'sent') await broadcastReservationDeliveryChange(tenantId, updated, { quiet: true });
                 };
 
                 try {

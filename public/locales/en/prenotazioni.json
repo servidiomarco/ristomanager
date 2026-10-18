@@ -181,6 +181,7 @@
   "bookedAtUnknown": "Booking date not available",
   "bookedOn": "Booked on {{data}} at {{ora}}",
   "confirmDelivered": "{{canale}} delivered on {{quando}}",
+  "confirmRead": "{{canale}} read (delivered on {{quando}})",
   "confirmFailed": "{{canale}}: delivery failed{{errore}}",
   "confirmSent": "{{canale}} sent on {{quando}} — awaiting delivery",
   "reminderSent": "Reminder sent",

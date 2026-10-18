@@ -181,6 +181,7 @@
   "bookedAtUnknown": "Data di prenotazione non disponibile",
   "bookedOn": "Prenotata il {{data}} alle {{ora}}",
   "confirmDelivered": "{{canale}} consegnato il {{quando}}",
+  "confirmRead": "{{canale}} letto (consegnato il {{quando}})",
   "confirmFailed": "{{canale}}: consegna fallita{{errore}}",
   "confirmSent": "{{canale}} inviato il {{quando}} — in attesa di consegna",
   "reminderSent": "Reminder inviato",
