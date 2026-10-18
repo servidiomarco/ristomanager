@@ -109,6 +109,7 @@ import {
 } from './services/passepartoutConti.js';
 import {
     startPassepartoutTavoliApertiSync, elencoTavoliAperti, aggiornaTavoliAperti, comandaApertaSuiTavoli,
+    type ComandaChiusaInCassa,
 } from './services/passepartoutTavoliAperti.js';
 import { accodaSpecchio, avviaSpecchio, startPassepartoutSpecchioSync } from './services/passepartoutSpecchio.js';
 import { avviaComandeVive, lavoraComandeVive, righeDallaCassa, riprovaComandaViva, startPassepartoutComandeVive, statiComandeVive, uscitaPerCassa } from './services/passepartoutComandeVive.js';
@@ -6389,12 +6390,13 @@ app.get('/passepartout/tavoli-aperti/config', authenticate, requirePermission('s
     try {
         const tenantId = req.tenantId!;
         const cfg = await queryWithRetry(
-            `SELECT tavoli_aperti_enabled, tavoli_aperti_disponibilita FROM passepartout_config WHERE tenant_id = $1`,
+            `SELECT tavoli_aperti_enabled, tavoli_aperti_disponibilita, tavolo_pagato_avviso FROM passepartout_config WHERE tenant_id = $1`,
             [tenantId]
         );
         res.json({
             enabled: cfg.rows[0]?.tavoli_aperti_enabled === true,
             disponibilita: cfg.rows[0]?.tavoli_aperti_disponibilita !== false,
+            avvisoPagato: cfg.rows[0]?.tavolo_pagato_avviso !== false,
             aperti: (await elencoTavoliAperti(tenantId)).length,
             agente: {
                 collegato: getPassepartoutAgentStatus(tenantId).connected,
@@ -6413,15 +6415,17 @@ app.put('/passepartout/tavoli-aperti/config', authenticate, requirePermission('s
         const body = req.body ?? {};
         const enabled = typeof body.enabled === 'boolean' ? body.enabled : null;
         const disponibilita = typeof body.disponibilita === 'boolean' ? body.disponibilita : null;
-        if (enabled == null && disponibilita == null) return res.status(400).json({ error: 'Niente da salvare' });
+        const avvisoPagato = typeof body.avvisoPagato === 'boolean' ? body.avvisoPagato : null;
+        if (enabled == null && disponibilita == null && avvisoPagato == null) return res.status(400).json({ error: 'Niente da salvare' });
         await queryWithRetry(
-            `INSERT INTO passepartout_config (tenant_id, tavoli_aperti_enabled, tavoli_aperti_disponibilita, updated_at)
-             VALUES ($1, COALESCE($2, false), COALESCE($3, true), now())
+            `INSERT INTO passepartout_config (tenant_id, tavoli_aperti_enabled, tavoli_aperti_disponibilita, tavolo_pagato_avviso, updated_at)
+             VALUES ($1, COALESCE($2, false), COALESCE($3, true), COALESCE($4, true), now())
              ON CONFLICT (tenant_id) DO UPDATE SET
                 tavoli_aperti_enabled = COALESCE($2, passepartout_config.tavoli_aperti_enabled),
                 tavoli_aperti_disponibilita = COALESCE($3, passepartout_config.tavoli_aperti_disponibilita),
+                tavolo_pagato_avviso = COALESCE($4, passepartout_config.tavolo_pagato_avviso),
                 updated_at = now()`,
-            [tenantId, enabled, disponibilita]
+            [tenantId, enabled, disponibilita, avvisoPagato]
         );
         // Spento: la sala smette subito di vedere i tavoli della cassa.
         if (enabled === false) socketService?.broadcastToAll(tenantId, 'passepartout:tavoli-aperti', { tavoli: [] });
@@ -6429,7 +6433,7 @@ app.put('/passepartout/tavoli-aperti/config', authenticate, requirePermission('s
             LogService.logActivity(
                 tenantId, req.user.userId, req.user.email, req.user.email,
                 ActivityAction.UPDATE, ResourceType.SETTINGS, undefined, 'Passepartout: tavoli aperti in cassa',
-                { ...(enabled != null ? { enabled } : {}), ...(disponibilita != null ? { disponibilita } : {}) }
+                { ...(enabled != null ? { enabled } : {}), ...(disponibilita != null ? { disponibilita } : {}), ...(avvisoPagato != null ? { avvisoPagato } : {}) }
             );
         }
         res.json({ ok: true });
@@ -13139,6 +13143,80 @@ async function segnalaRichiestaContoQr(
         await pushSendToRoles(tenantId, ['WAITER'], { ...payload, url: '/?view=COMANDE' });
     } catch (err: any) {
         console.warn('[passepartout] avviso «vuole pagare dal QR» non inviato per il conto', billId, err?.message ?? err);
+    }
+}
+
+/** «Il tavolo X ha pagato»: una comanda è sparita dalla lettura dei tavoli
+ *  aperti e, riletta in cassa, risulta pagata. Il modal arriva a chi
+ *  gestisce la sala da un punto fisso (scelta dell'utente del 18/10: non ai
+ *  palmari dei camerieri) e propone di liberare il tavolo. Prima nessuno lo
+ *  faceva: al 18/10, 13 prenotazioni su 49 dell'ultima settimana erano
+ *  rimaste «sedute». Si propone soltanto: la scrittura parte dal client
+ *  (PATCH /reservations/:id/service), che col servizio in sala va al nodo. */
+const RUOLI_AVVISO_TAVOLO_PAGATO = ['OWNER', 'GENERAL_MANAGER', 'MANAGER', 'RECEPTION'];
+
+async function avvisaTavoliPagati(tenantId: number, chiuse: ComandaChiusaInCassa[]): Promise<void> {
+    if (!socketService || chiuse.length === 0) return;
+    const cfg = await queryWithRetry(
+        `SELECT (tavoli_aperti_enabled AND tavolo_pagato_avviso) AS acceso FROM passepartout_config WHERE tenant_id = $1`,
+        [tenantId]
+    );
+    if (cfg.rows[0]?.acceso !== true) return;
+    for (const c of chiuse) {
+        // Si rilegge: una comanda annullata, o sparita per una lettura
+        // storta, non è un pagamento (lo stesso controllo di chiuseInCassa).
+        let comanda: PassepartoutComanda | null = null;
+        try {
+            comanda = await callPassepartout<PassepartoutComanda | null>(tenantId, 'comanda', { idGestionale: c.pp_comanda_id }, 30_000);
+        } catch (err: any) {
+            console.warn(`[passepartout] tavolo pagato: comanda ${c.pp_comanda_id} non riletta:`, err?.message || err);
+            continue;
+        }
+        if (!comanda?.isPagato) continue;
+
+        // La prenotazione: quella del planning da cui la cassa ha aperto il
+        // tavolo, se c'è (anche se nessuno l'ha segnata arrivata); se no la
+        // seduta su quel tavolo o sulla sua unione, la più recente. Una
+        // finestra di 12 ore e non la data: la cena che paga dopo mezzanotte
+        // è ancora quella cena.
+        let viaPlanning: number | null = null;
+        if (comanda.idPrenotazione) {
+            const pr = await queryWithRetry(
+                `SELECT reservation_id FROM passepartout_prenotazioni WHERE tenant_id = $1 AND pp_id = $2 LIMIT 1`,
+                [tenantId, comanda.idPrenotazione]
+            );
+            viaPlanning = pr.rows[0]?.reservation_id != null ? Number(pr.rows[0].reservation_id) : null;
+        }
+        const tavoli = await tavoliDelQr(tenantId, c.table_id);
+        const rs = await queryWithRetry(
+            `SELECT r.id, r.customer_name, r.guests
+               FROM reservations r
+              WHERE r.tenant_id = $1
+                AND COALESCE(r.reservation_status, 'CONFIRMED') = 'CONFIRMED'
+                AND r.reservation_time > now() - interval '12 hours'
+                AND r.reservation_time < now() + interval '2 hours'
+                AND CASE WHEN $2::int IS NOT NULL
+                         THEN r.id = $2 AND COALESCE(r.arrival_status, 'WAITING') <> 'DEPARTED'
+                         ELSE r.table_id = ANY($3::int[]) AND r.arrival_status IN ('ARRIVED', 'DEPARTING') END
+              ORDER BY r.reservation_time DESC
+              LIMIT 1`,
+            [tenantId, viaPlanning, tavoli]
+        );
+        const r = rs.rows[0];
+        // Un walk-in senza prenotazione: in sala il tavolo è già libero.
+        if (!r) continue;
+        const tab = await queryWithRetry(`SELECT name FROM tables WHERE id = $1 AND tenant_id = $2`, [c.table_id, tenantId]);
+        socketService.broadcastToRolesRoom(tenantId, RUOLI_AVVISO_TAVOLO_PAGATO, 'passepartout:tavolo-pagato', {
+            pp_comanda_id: c.pp_comanda_id,
+            reservation_id: Number(r.id),
+            table_id: c.table_id,
+            tavolo: tab.rows[0]?.name ?? null,
+            customer_name: r.customer_name,
+            guests: r.guests == null ? null : Number(r.guests),
+            coperti: c.coperti,
+            totale_cents: c.totale_cents,
+        });
+        console.log(`[passepartout] tavolo pagato (tenant ${tenantId}, comanda ${c.pp_comanda_id}, prenotazione ${r.id})`);
     }
 }
 
@@ -46683,6 +46761,9 @@ const startServer = async () => {
                                 );
                                 for (const r of rs.rows) await annullaContoQrStantio(t, Number(r.id));
                             },
+                            // Comanda pagata in cassa: «il tavolo X ha pagato»,
+                            // con la proposta di liberarlo.
+                            tavoliChiusi: avvisaTavoliPagati,
                         });
                         // I conti del CRM copiati in cassa (comanda specchio).
                         startPassepartoutSpecchioSync({

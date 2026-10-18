@@ -431,6 +431,8 @@
     "apertiHint": "Every minute the CRM reads the till's open orders: those tables show as busy on the floor plan, at reception and on the bookings map, even without a booking.",
     "apertiDisp": "Count them for availability",
     "apertiDispHint": "Sofia and online booking don't offer a table open on the till until it frees up (estimate: opening plus the shift length). Staff assigning by hand see the table busy and decide.",
+    "apertiPagato": "Alert when a table pays",
+    "apertiPagatoHint": "When a bill is paid on the till, owner, managers and reception see “Table X has paid” with the option to free the booking's table. It arrives within a minute of payment.",
     "apertiNow_one": "{{count}} table open now",
     "apertiNow_other": "{{count}} tables open now",
     "apertiRefresh": "Refresh now",

@@ -133,7 +133,8 @@ import { SUPPORTED_LANGUAGES } from './i18n/config';
 import { sortRooms } from './utils/roomOrder';
 import { toTitleCase } from './utils/text';
 import { reservationUpdateNotice } from './utils/reservationNotice';
-import { reservationStateLabel } from './components/reservationState';
+import { reservationStateLabel, reservationStatePatch } from './components/reservationState';
+import { AvvisoTavoloPagato } from './components/passepartout/AvvisoTavoloPagato';
 import { datePart } from './utils/displayTime';
 
 // Il servizio «di adesso», come lo intende il server (resolveService in
@@ -2428,6 +2429,15 @@ const App: React.FC = () => {
           porta il claim impersonated_by; il bottone ripristina la sessione
           del platform admin e ricarica. */}
       <ImpersonationBanner />
+      {/* «Il tavolo X ha pagato» dalla cassa Passepartout, con la proposta
+          di liberarlo: su ogni vista, solo per chi gestisce la sala (lo
+          decide il server, che manda l'evento a quei ruoli). Il cambio
+          passa da handleUpdateReservation: col servizio in sala va al nodo. */}
+      <AvvisoTavoloPagato
+        enabled={isAuthenticated && !isPanelSession}
+        reservations={reservations}
+        onFree={(r) => { handleUpdateReservation({ ...r, ...reservationStatePatch('freed') }).catch(() => {}); }}
+      />
       {/* Chi chiama mentre Sofia è al telefono: fisso sopra ogni vista,
           anche dove la testata è nascosta. */}
       <CallBanner

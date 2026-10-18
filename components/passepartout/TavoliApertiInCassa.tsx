@@ -15,7 +15,9 @@ import { InterruttorePassepartout, SchedaPassepartout } from './SchedaPasseparto
    prenotazioni. Con «Considera nella disponibilità» Sofia e le prenotazioni
    online non li propongono finché non si liberano (stima: apertura + durata
    del turno). Lo staff che assegna a mano vede il tavolo occupato e decide
-   lui: il gruppo di prima può star pagando.
+   lui: il gruppo di prima può star pagando. Con «Avvisa quando un tavolo
+   paga» chi gestisce la sala riceve «Il tavolo X ha pagato» e la proposta
+   di liberarlo (components/passepartout/AvvisoTavoloPagato.tsx).
    ========================================================================= */
 
 interface Props {
@@ -39,7 +41,7 @@ export const TavoliApertiInCassa: React.FC<Props> = ({ showToast }) => {
     return () => { cancelled = true; };
   }, []);
 
-  const salva = async (patch: { enabled?: boolean; disponibilita?: boolean }) => {
+  const salva = async (patch: { enabled?: boolean; disponibilita?: boolean; avvisoPagato?: boolean }) => {
     if (!stato || busy) return;
     setBusy('salva');
     try {
@@ -110,6 +112,20 @@ export const TavoliApertiInCassa: React.FC<Props> = ({ showToast }) => {
                     label={t('pp.apertiDisp')}
                     disabled={busy != null}
                     onToggle={() => salva({ disponibilita: !stato.disponibilita })}
+                  />
+                }
+              >
+                {null}
+              </Field>
+              <Field
+                label={t('pp.apertiPagato')}
+                hint={t('pp.apertiPagatoHint')}
+                aside={
+                  <InterruttorePassepartout
+                    checked={stato.avvisoPagato}
+                    label={t('pp.apertiPagato')}
+                    disabled={busy != null}
+                    onToggle={() => salva({ avvisoPagato: !stato.avvisoPagato })}
                   />
                 }
               >

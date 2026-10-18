@@ -73,6 +73,17 @@
     "declined": "Non confermata",
     "cancelledGroup": "Annullate"
   },
+  "tavoloPagato": {
+    "title": "Il tavolo {{tavolo}} ha pagato",
+    "titleNoTable": "Un tavolo ha pagato",
+    "coperti_one": "{{count}} coperto",
+    "coperti_other": "{{count}} coperti",
+    "body": "Il conto è chiuso in cassa. Liberi il tavolo?",
+    "free": "Libera il tavolo",
+    "later": "Non ora",
+    "more_one": "Un altro tavolo ha pagato",
+    "more_other": "Altri {{count}} tavoli hanno pagato"
+  },
   "tableStatus": {
     "libera": "Libero",
     "attesa": "Prenotato",
