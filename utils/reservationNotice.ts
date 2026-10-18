@@ -1,4 +1,5 @@
 import type { Reservation } from '../types';
+import { getReservationState, type ReservationStateKey } from '../components/reservationState';
 
 // Che cosa dice il toast di un reservation:updated. Prima ogni modifica era
 // «Prenotazione aggiornata: NOME», anche gli stati del messaggio di
@@ -6,7 +7,7 @@ import type { Reservation } from '../types';
 // mezzo minuto (invio, poi sent/delivered/read di Twilio), uguali e
 // impilati. Qui il confronto con la riga che il client ha già sceglie la
 // frase di quello che è cambiato davvero; null = la card si aggiorna e
-// basta. Nessun import a runtime: si prova da tests/api senza browser.
+// basta. Si prova da tests/api, senza browser.
 
 export interface ReservationNotice {
   /** Chiave sotto common:toast; il nome dell'ospite lo aggiunge chi chiama. */
@@ -15,6 +16,8 @@ export interface ReservationNotice {
   tone?: 'info' | 'error';
   /** ms; un errore senza durata resta finché non lo si chiude. */
   duration?: number;
+  /** Per stateChangedNamed: lo stato di cui chi chiama mette il nome. */
+  state?: ReservationStateKey;
 }
 
 // L'esito dei messaggi all'ospite: da solo non è la prenotazione.
@@ -62,19 +65,11 @@ const STAGE_KEY: Record<DeliveryStage, string> = {
   failed: 'confirmFailedNamed',
 };
 
-const STATUS_KEY: Record<string, string> = {
-  CONFIRMED: 'bookingConfirmedNamed',
-  CANCELLED: 'bookingCancelledNamed',
-  DECLINED: 'bookingDeclinedNamed',
-  NO_SHOW: 'bookingNoShowNamed',
-};
-
-const ARRIVAL_KEY: Record<string, string> = {
-  WAITING: 'arrivalWaitingNamed',
-  ARRIVED: 'arrivalArrivedNamed',
-  DEPARTING: 'arrivalDepartingNamed',
-  DEPARTED: 'arrivalDepartedNamed',
-};
+// Un cambio di stato (arrivato, in uscita, no-show, annullata…) porta con
+// sé al più il tavolo (annullata e rifiutata lo staccano) e la durata
+// (Arrivato su un tavolo in ritardo la allunga): il resto è un'altra modifica.
+const STATE_FIELDS = new Set(['reservation_status', 'arrival_status']);
+const STATE_COMPANIONS = new Set(['table_id', 'duration_minutes']);
 
 const GENERIC: ReservationNotice = { key: 'bookingUpdatedNamed' };
 
@@ -91,11 +86,11 @@ export function reservationUpdateNotice(prev: Reservation | undefined, next: Res
   if (!prev.guest_cancelled_at && next.guest_cancelled_at) return { key: 'guestCancelledNamed' };
   if (!prev.guest_confirmed_at && next.guest_confirmed_at) return { key: 'guestConfirmedNamed' };
 
-  if (booking.length === 1 && booking[0] === 'reservation_status' && next.reservation_status && STATUS_KEY[next.reservation_status]) {
-    return { key: STATUS_KEY[next.reservation_status] };
-  }
-  if (booking.length === 1 && booking[0] === 'arrival_status' && next.arrival_status && ARRIVAL_KEY[next.arrival_status]) {
-    return { key: ARRIVAL_KEY[next.arrival_status] };
+  // La frase è quella del picker di stato («Rossi Giulia: stato →
+  // Arrivato»): chi cambia lo stato vede il suo toast e l'eco, uguali, e il
+  // dedup li fonde.
+  if (booking.some(k => STATE_FIELDS.has(k)) && booking.every(k => STATE_FIELDS.has(k) || STATE_COMPANIONS.has(k))) {
+    return { key: 'stateChangedNamed', state: getReservationState(next) };
   }
   if (booking.length > 0) return GENERIC;
 

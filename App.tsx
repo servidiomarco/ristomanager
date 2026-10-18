@@ -133,6 +133,7 @@ import { SUPPORTED_LANGUAGES } from './i18n/config';
 import { sortRooms } from './utils/roomOrder';
 import { toTitleCase } from './utils/text';
 import { reservationUpdateNotice } from './utils/reservationNotice';
+import { reservationStateLabel } from './components/reservationState';
 import { datePart } from './utils/displayTime';
 
 // Il servizio «di adesso», come lo intende il server (resolveService in
@@ -1662,8 +1663,9 @@ const App: React.FC = () => {
       // conferma consegnata o letta non è «Prenotazione aggiornata».
       const notice = reservationUpdateNotice(previous, reservation);
       if (notice) {
+        const stato = notice.state ? reservationStateLabel(notice.state, (k, d) => t(k, d)) : undefined;
         addToast(
-          t(`toast.${notice.key}`, { nome: toTitleCase(reservation.customer_name), ...notice.vars }),
+          t(`toast.${notice.key}`, { nome: toTitleCase(reservation.customer_name), stato, ...notice.vars }),
           notice.tone ?? 'info',
           notice.duration ? { duration: notice.duration } : undefined,
         );

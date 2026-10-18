@@ -55,10 +55,17 @@ describe('quale toast per un reservation:updated', () => {
     });
 
     it("stato, arrivo e risposte dell'ospite hanno la loro frase", () => {
+        // La frase del picker di stato («…: stato → Arrivato»), che l'eco
+        // ripete identica a chi ha cambiato lo stato: il dedup le fonde.
         expect(reservationUpdateNotice(riga({ reservation_status: 'PENDING' as Reservation['reservation_status'] }), riga()))
-            .toEqual({ key: 'bookingConfirmedNamed' });
+            .toEqual({ key: 'stateChangedNamed', state: 'waiting' });
         expect(reservationUpdateNotice(riga(), riga({ arrival_status: 'ARRIVED' as Reservation['arrival_status'] })))
-            .toEqual({ key: 'arrivalArrivedNamed' });
+            .toEqual({ key: 'stateChangedNamed', state: 'arrived' });
+        // Arrivato su un tavolo in ritardo allunga la durata; annullata stacca il tavolo.
+        expect(reservationUpdateNotice(riga({ table_id: 4 }), riga({ table_id: 4, arrival_status: 'ARRIVED' as Reservation['arrival_status'], duration_minutes: 150 })))
+            .toEqual({ key: 'stateChangedNamed', state: 'arrived' });
+        expect(reservationUpdateNotice(riga({ table_id: 4 }), riga({ reservation_status: 'CANCELLED' as Reservation['reservation_status'] })))
+            .toEqual({ key: 'stateChangedNamed', state: 'cancelled' });
         expect(reservationUpdateNotice(riga(), riga({ guest_confirmed_at: '2026-10-18T12:00:00.000Z' })))
             .toEqual({ key: 'guestConfirmedNamed' });
         // L'annullamento dell'ospite si porta dietro lo stato: vince la frase dell'ospite.
