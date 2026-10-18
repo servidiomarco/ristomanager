@@ -1925,6 +1925,9 @@ export const ReservationList: React.FC<ReservationListProps> = ({
       patch.duration_minutes = extendedDurationMin(res, nowTick);
     }
     onUpdateReservation({ ...res, ...patch });
+    // Il modal aperto sulla stessa prenotazione segue il cambio: senza, un
+    // Salva dopo spargerebbe il formData vecchio e riporterebbe lo stato.
+    setFormData(prev => prev.id === res.id ? { ...prev, ...patch } : prev);
     showToast(tv('toast.stateChanged', { chi: toTitleCase(res.customer_name), stato: stateLabel(state) }), 'success');
   };
 
@@ -3179,6 +3182,13 @@ export const ReservationList: React.FC<ReservationListProps> = ({
   const openRooms = formHasBanquet ? rooms : rooms.filter(r => !isRoomClosed(r));
   const displayedRooms = modalRoomFilter === 'ALL' ? openRooms : openRooms.filter(r => r.id === modalRoomFilter);
   const selectedTableObj = displayTables.find(t => t.id === formData.table_id);
+  // Lo stato si cambia dal modal sulla riga della lista, non su formData:
+  // lì l'orario è riscritto per i campi e le note sono smontate nei chip,
+  // e il PUT le salverebbe così. Senza la riga (nuova prenotazione) niente
+  // tasto.
+  const modalReservation = isEditing && formData.id != null
+    ? reservations.find(r => r.id === formData.id)
+    : undefined;
 
   // Calculate Free Tables for the form header
   // Helper to check if a table is merged into another table (and thus should be hidden)
@@ -5661,6 +5671,18 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                                         <span className="font-semibold text-[var(--ds-seated-text)]">{freeTablesCount} tavoli liberi</span> su {totalTablesInFilter}
                                     </p>
                                 </div>
+                                {/* Lo stato al tavolo (arrivato, in uscita, liberato…), lo
+                                    stesso chip e lo stesso picker della card: il cambio
+                                    parte subito, non aspetta il Salva. */}
+                                {canEdit && modalReservation && (
+                                    <DsStatusChip
+                                        state={isViewingToday ? getTimedReservationState(modalReservation, nowTick) : getReservationState(modalReservation)}
+                                        onClick={() => setStateChangeReservation(modalReservation)}
+                                        title={tv('row.changeState')}
+                                        trailing={<ChevronDown className="h-3.5 w-3.5 opacity-60" />}
+                                        className="h-9 flex-shrink-0"
+                                    />
+                                )}
                                 {selectedTableObj && (
                                     /* Solid pill: table name, its capacity, and a clear action.
                                        Green rather than near-black — near-black is this system's
@@ -7058,8 +7080,9 @@ export const ReservationList: React.FC<ReservationListProps> = ({
           ? ['waiting', 'declined']
           : ['pending', 'waiting', 'arrived', 'departing', 'freed', 'noshow', 'cancelled', 'declined'];
         const title = isPending ? tv('replyToGuest') : 'Cambia stato';
+        // z-[60]: si apre anche dal modal della prenotazione (ModalShell z-50).
         return createPortal(
-          <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-[rgba(15,23,42,0.5)] dark:bg-[rgba(0,0,0,0.7)] sm:px-4" onClick={() => setStateChangeReservation(null)}>
+          <div className="fixed inset-0 z-[60] flex items-end sm:items-center justify-center bg-[rgba(15,23,42,0.5)] dark:bg-[rgba(0,0,0,0.7)] sm:px-4" onClick={() => setStateChangeReservation(null)}>
  <div className="bg-[var(--ds-surface)] w-full sm:max-w-sm rounded-t-[var(--ds-radius)] sm:rounded-[var(--ds-radius)] shadow-[var(--ds-shadow-raised)] border border-[var(--ds-border)] overflow-hidden duration-200 pb-[env(safe-area-inset-bottom)] sm:pb-0"onClick={(e) => e.stopPropagation()}>
               {/* Drag handle (mobile only) */}
               <div className="flex justify-center pt-3 pb-1 sm:hidden">
@@ -7125,7 +7148,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
       {declineReservation && (() => {
         const res = declineReservation;
         return createPortal(
-          <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-[rgba(15,23,42,0.5)] dark:bg-[rgba(0,0,0,0.7)] sm:px-4" onClick={() => setDeclineReservation(null)}>
+          <div className="fixed inset-0 z-[60] flex items-end sm:items-center justify-center bg-[rgba(15,23,42,0.5)] dark:bg-[rgba(0,0,0,0.7)] sm:px-4" onClick={() => setDeclineReservation(null)}>
  <div className="bg-[var(--ds-surface)] w-full sm:max-w-sm rounded-t-[var(--ds-radius)] sm:rounded-[var(--ds-radius)] shadow-[var(--ds-shadow-raised)] border border-[var(--ds-border)] overflow-hidden duration-200 pb-[env(safe-area-inset-bottom)] sm:pb-0"onClick={(e) => e.stopPropagation()}>
               <div className="flex justify-center pt-3 pb-1 sm:hidden">
                 <div className="w-8 h-1 rounded-full bg-[var(--ds-text-subtle)]" />

@@ -133,6 +133,7 @@ import { SUPPORTED_LANGUAGES } from './i18n/config';
 import { sortRooms } from './utils/roomOrder';
 import { toTitleCase } from './utils/text';
 import { reservationUpdateNotice } from './utils/reservationNotice';
+import { reservationStateLabel } from './components/reservationState';
 import { datePart } from './utils/displayTime';
 
 // Il servizio «di adesso», come lo intende il server (resolveService in
@@ -1630,8 +1631,9 @@ const App: React.FC = () => {
       // conferma consegnata o letta non è «Prenotazione aggiornata».
       const notice = reservationUpdateNotice(previous, reservation);
       if (notice) {
+        const stato = notice.state ? reservationStateLabel(notice.state, (k, d) => t(k, d)) : undefined;
         addToast(
-          t(`toast.${notice.key}`, { nome: toTitleCase(reservation.customer_name), ...notice.vars }),
+          t(`toast.${notice.key}`, { nome: toTitleCase(reservation.customer_name), stato, ...notice.vars }),
           notice.tone ?? 'info',
           notice.duration ? { duration: notice.duration } : undefined,
         );
@@ -1645,6 +1647,13 @@ const App: React.FC = () => {
       // mittente (riga autoritativa lato server), quindi questo toast arriva
       // pure a chi ha eliminato — niente doppione nel handler locale.
       addToast(deleted ? t('toast.bookingDeletedNamed', { nome: toTitleCase(deleted.customer_name) }) : t('toast.bookingDeleted'), 'info');
+    });
+
+    // Il giro dei promemoria automatici: le righe arrivano mute
+    // (reservation:synced), qui un toast solo per tutto il giro.
+    socket.on('bookingReminders:sent', (payload: { count?: number }) => {
+      const count = Number(payload?.count) || 0;
+      if (count > 0) addToast(t('toast.remindersSent', { count }), 'info');
     });
 
     // Silent patch — a denormalized field (e.g. customer_name/phone from a
@@ -1839,6 +1848,7 @@ const App: React.FC = () => {
       socket.off('reservation:updated');
       socket.off('reservation:deleted');
       socket.off('reservation:synced');
+      socket.off('bookingReminders:sent');
       socket.off('table:created');
       socket.off('table:updated');
       socket.off('table:deleted');

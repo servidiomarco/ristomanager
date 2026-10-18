@@ -48,6 +48,9 @@ export const DOMAIN_EVENTS: Record<string, DomainEventSpec> = {
     'reservation:service-updated': spec('service'),
     'reservation:deleted': spec('cloud'),
     'reservation:synced': spec('cloud'),
+    // Il riepilogo del giro dei promemoria automatici, un toast solo: i
+    // promemoria li manda il cloud.
+    'bookingReminders:sent': spec('cloud'),
     'tableAssignmentSuggestion:created': spec('service'),
     'tableAssignmentSuggestion:resolved': spec('service'),
 
