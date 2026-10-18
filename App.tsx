@@ -132,6 +132,7 @@ import { useTranslation } from 'react-i18next';
 import { SUPPORTED_LANGUAGES } from './i18n/config';
 import { sortRooms } from './utils/roomOrder';
 import { toTitleCase } from './utils/text';
+import { reservationUpdateNotice } from './utils/reservationNotice';
 import { datePart } from './utils/displayTime';
 
 // Il servizio «di adesso», come lo intende il server (resolveService in
@@ -1653,10 +1654,20 @@ const App: React.FC = () => {
     });
 
     socket.on('reservation:updated', (reservation: Reservation) => {
+      const previous = reservationsRef.current.find(r => r.id === reservation.id);
       setReservations(prev =>
         prev.map(r => r.id === reservation.id ? reservation : r)
       );
-      addToast(t('toast.bookingUpdatedNamed', { nome: toTitleCase(reservation.customer_name) }), 'info');
+      // Il toast dice che cosa è cambiato (utils/reservationNotice): la
+      // conferma consegnata o letta non è «Prenotazione aggiornata».
+      const notice = reservationUpdateNotice(previous, reservation);
+      if (notice) {
+        addToast(
+          t(`toast.${notice.key}`, { nome: toTitleCase(reservation.customer_name), ...notice.vars }),
+          notice.tone ?? 'info',
+          notice.duration ? { duration: notice.duration } : undefined,
+        );
+      }
     });
 
     socket.on('reservation:deleted', (id: number) => {

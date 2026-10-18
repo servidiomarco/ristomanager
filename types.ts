@@ -345,8 +345,9 @@ export interface Reservation {
   language?: string | null;
 }
 
-export type ConfirmationStatus = 'queued' | 'sent' | 'delivered' | 'failed' | 'undelivered';
-export type ConfirmationChannel = 'sms' | 'whatsapp';
+// 'read' arriva da WhatsApp (Twilio e Meta), 'email' dalla conferma via mail.
+export type ConfirmationStatus = 'queued' | 'sent' | 'delivered' | 'read' | 'failed' | 'undelivered';
+export type ConfirmationChannel = 'sms' | 'whatsapp' | 'email';
 
 export type PaymentRequestStatus = 'PENDING' | 'AUTHORISED' | 'COMPLETED' | 'CANCELLED' | 'FAILED' | 'EXPIRED';
 

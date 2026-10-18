@@ -53,6 +53,7 @@ import { ConfirmDeleteModal } from './ConfirmDeleteModal';
 import { DateNavigator } from './DateNavigator';
 import { useAuth } from '../contexts/AuthContext';
 import { isWebSource } from '../utils/reservationSource';
+import { deliveryChannelLabel } from '../utils/reservationNotice';
 import { moneySymbol } from '../utils/displayMoney';
 import { money } from '../utils/displayMoney';
 
@@ -245,17 +246,19 @@ const formatConfirmationTs = (iso: string | null | undefined): string => {
 // message (SMS or WhatsApp). Twilio's StatusCallback drives the state; we
 // mirror it here as a small icon:
 //   - queued / sent  → Send (grey)   tooltip: "Inviato il ..."
-//   - delivered      → CheckCheck (green) tooltip: "Consegnato il ..."
+//   - delivered / read → CheckCheck (green) tooltip: "Consegnato/Letto ..."
 //   - failed / undelivered → AlertOctagon (red) tooltip: "Consegna fallita"
 // Renders nothing when we never sent a confirmation for this reservation.
+// 'read' cadeva nel ramo «in attesa di consegna»: la conferma letta
+// tornava grigia dopo essere stata verde.
 const renderConfirmationIcon = (res: Reservation, tv: (k: string, o?: Record<string, unknown>) => string): React.ReactNode => {
   const status = res.confirmation_status;
   if (!status) return null;
-  const channelLabel = res.confirmation_channel === 'sms' ? 'SMS' : 'WhatsApp';
+  const channelLabel = deliveryChannelLabel(res.confirmation_channel);
 
-  if (status === 'delivered') {
+  if (status === 'delivered' || status === 'read') {
     const ts = formatConfirmationTs(res.confirmation_delivered_at);
-    const title = tv('confirmDelivered', { canale: channelLabel, quando: ts });
+    const title = tv(status === 'read' ? 'confirmRead' : 'confirmDelivered', { canale: channelLabel, quando: ts });
     return (
       <span className={`${ATTR_BADGE} bg-[var(--ds-seated-tint)] text-[var(--ds-seated-text)]`} title={title} aria-label={title}>
         <CheckCheck className="h-3.5 w-3.5" />
