@@ -14,7 +14,7 @@ import cors from 'cors';
 import compression from 'compression';
 import rateLimit from 'express-rate-limit';
 import QRCode from 'qrcode';
-import pool, { createSchema, queryWithRetry, runMigrations, tenantQuery, runWithTenantContext, runAsPlatform, withTenant } from './db.js';
+import pool, { createSchema, queryWithRetry, runMigrations, tenantQuery, runWithTenantContext, runAsPlatform, withTenant, runSchedulerTickWithLock } from './db.js';
 import { SocketService } from './services/socketService.js';
 import { buildContactCard, contactCardFileName, contactPhotoFromLogo, type ContactCardPhone } from './services/contactCard.js';
 import { retryOnLockContention } from './utils/lockRetry.js';
@@ -18582,46 +18582,8 @@ const SCHEDULER_LOCK_BOOKING_REMINDERS = 761011;
 const SCHEDULER_LOCK_WHATSAPP_AGENT = 761012;
 const SCHEDULER_LOCK_WHATSAPP_CAMPAIGNS = 761013;
 
-// Il lock advisory è di SESSIONE: va preso su un client dedicato tenuto per
-// tutta la durata del tick (sul pool condiviso un'altra query potrebbe
-// girare su una connessione diversa e il lock non proteggerebbe nulla), e
-// rilasciato nel finally insieme al client. pg_try_advisory_lock non
-// blocca: la replica che perde la corsa non si accoda, salta il giro.
-const runSchedulerTickWithLock = async (
-    lockId: number,
-    name: string,
-    tick: () => Promise<void>
-): Promise<void> => {
-    let client;
-    try {
-        client = await pool.connect();
-    } catch (err: any) {
-        // Pool esaurito o DB giù: il prossimo giro ritenta, come già fanno
-        // i tick stessi sugli errori di query.
-        console.error(`[scheduler:${name}] connessione per il lock fallita:`, err?.message || err);
-        return;
-    }
-    let acquired = false;
-    try {
-        const res = await client.query('SELECT pg_try_advisory_lock($1) AS locked', [lockId]);
-        acquired = res.rows[0]?.locked === true;
-        if (!acquired) {
-            console.debug(`[scheduler:${name}] tick saltato: lock ${lockId} tenuto da un'altra replica`);
-            return;
-        }
-        // Lavoro di piattaforma dichiarato: i tick attraversano i tenant per
-        // mestiere (promemoria e riconcili di tutti i ristoranti insieme).
-        // rls-bypass: tick di scheduler cross-tenant per mestiere, ogni riga porta il suo tenant_id a valle
-        await runAsPlatform(() => tick());
-    } finally {
-        if (acquired) {
-            // Unlock esplicito prima del release: il client torna nel pool e
-            // la sessione resta viva, quindi il lock NON cadrebbe da solo.
-            try { await client.query('SELECT pg_advisory_unlock($1)', [lockId]); } catch (_) {}
-        }
-        client.release();
-    }
-};
+// runSchedulerTickWithLock vive in db.ts, col pool dedicato ai lock: sul
+// pool delle query, dieci giri partiti insieme si affamavano a vicenda.
 
 // Pay-at-table reconcile: every 60s scans CLAIMED splits whose 5-min TTL
 // has elapsed and either (a) polls the gateway to see if a webhook was
