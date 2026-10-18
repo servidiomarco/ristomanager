@@ -1002,11 +1002,7 @@ async function persistDeliveryStatus(tenantId: number, MessageSid: string, rawSt
              RETURNING *`,
             [status, errText, MessageSid, tenantId]
         );
-        if (updated.rows[0]) await logReservationChanged(null, tenantId, updated.rows[0].id);
-        if (updated.rows[0] && socketService) {
-            try { socketService.broadcastReservationUpdated(tenantId, updated.rows[0]); }
-            catch (err) { console.warn('[Twilio] status broadcast failed:', err); }
-        }
+        if (updated.rows[0]) await broadcastReservationDeliveryChange(tenantId, updated.rows[0]);
 
         // Also update the outbound_messages log so the SMS section in the
         // conversation modal reflects the final delivery state.
@@ -3405,6 +3401,29 @@ async function broadcastReservationsUpdatedByIds(ids: number[]): Promise<void> {
     }
 }
 
+/** L'esito di un messaggio all'ospite (conferma inviata, consegnata, letta;
+ *  promemoria partito) cambia l'icona sulla card, non la prenotazione. Il
+ *  18/10 una prenotazione appena creata ha dato quattro «Prenotazione
+ *  aggiornata» in mezzo minuto — l'invio, poi sent/delivered/read di Twilio
+ *  — e a 3–4 s l'uno dall'altro sfuggivano al dedup dei toast, impilati.
+ *  Qui la riga parte come reservation:synced (patch muta) e arricchita: la
+ *  riga nuda del RETURNING spegneva il badge VIP fino al ricaricamento. Nel
+ *  log di replica l'evento è quiet, così anche il nodo lo rigioca muto. */
+async function broadcastReservationDeliveryChange(tenantId: number, updatedRow: any): Promise<void> {
+    const id = Number(updatedRow?.id);
+    if (!Number.isInteger(id) || id <= 0) return;
+    await logReservationChanged(null, tenantId, id, { quiet: true });
+    if (!socketService) return;
+    let row = updatedRow;
+    try {
+        row = (await selectEnrichedReservations([id]))[0] ?? updatedRow;
+    } catch (err) {
+        console.warn('[sync] esito messaggio: rilettura fallita, parte la riga nuda:', err);
+    }
+    try { socketService.broadcastReservationSynced(tenantId, row); }
+    catch (err) { console.warn('[sync] esito messaggio non trasmesso:', err); }
+}
+
 /** Le prenotazioni con l'arricchimento della GET /reservations (VIP, tavolo
  *  preferito, ultimo pagamento): la forma che i client si aspettano in un
  *  reservation:updated. Il client SOSTITUISCE la riga: una riga nuda
@@ -4562,10 +4581,7 @@ app.post('/reservations/:id/send-reminder', authenticate, requirePermission('res
             `UPDATE reservations SET reminder_sent = true WHERE id = $1 AND tenant_id = $2 RETURNING *`,
             [id, req.tenantId!]
         );
-        if (upd.rows[0]) await logReservationChanged(null, req.tenantId!, upd.rows[0].id);
-        if (upd.rows[0] && socketService) {
-            try { socketService.broadcastReservationUpdated(req.tenantId!, upd.rows[0]); } catch (_) {}
-        }
+        if (upd.rows[0]) await broadcastReservationDeliveryChange(req.tenantId!, upd.rows[0]);
         res.json({ ok: true, channel: sendResult.channel });
     } catch (err: any) {
         console.error('POST /reservations/:id/send-reminder error:', err);
@@ -4982,11 +4998,7 @@ app.post('/reservations/:id/confirm-email', authenticate, requirePermission('res
              RETURNING *`,
             [sent.messageId || null, reservation.id, req.tenantId!]
         );
-        if (updated.rows[0]) await logReservationChanged(null, req.tenantId!, updated.rows[0].id);
-        if (updated.rows[0] && socketService) {
-            try { socketService.broadcastReservationUpdated(req.tenantId!, updated.rows[0]); }
-            catch (err) { console.warn('[confirmation] email broadcast failed:', err); }
-        }
+        if (updated.rows[0]) await broadcastReservationDeliveryChange(req.tenantId!, updated.rows[0]);
 
         console.log(`[Email] ✅ Confirmation sent for reservation ${id} to ${reservation.email}`);
         // Same PENDING → CONFIRMED promotion as the SMS/WhatsApp branch: the
@@ -16914,13 +16926,16 @@ async function logReplicaChange(
 // esito dei messaggi di conferma, promemoria, lingua, rinomina a cascata
 // dalla rubrica restavano broadcast diretti che il nodo non vedeva mai. Sul
 // nodo è un no-op: la prenotazione è del cloud, e il nodo scrive solo
-// tavolo e arrivo (reservation:service-updated).
-async function logReservationChanged(client: OutboxClient | null, tenantId: number, ids: number | number[]): Promise<void> {
+// tavolo e arrivo (reservation:service-updated). `quiet`: il cambio è solo
+// l'esito di un messaggio, e il nodo lo rigioca senza toast
+// (broadcastReservationDeliveryChange).
+async function logReservationChanged(client: OutboxClient | null, tenantId: number, ids: number | number[], opts: { quiet?: boolean } = {}): Promise<void> {
     if (isServiceNode) return;
     for (const id of Array.isArray(ids) ? ids : [ids]) {
         const n = Number(id);
         if (!Number.isInteger(n) || n <= 0) continue;
-        await logReplicaChange(client, tenantId, 'reservation:updated', `reservation:${n}`, { reservation_id: n });
+        await logReplicaChange(client, tenantId, 'reservation:updated', `reservation:${n}`,
+            opts.quiet ? { reservation_id: n, quiet: 1 } : { reservation_id: n });
     }
 }
 
@@ -19466,12 +19481,10 @@ const startBookingReminderScheduler = () => {
                 const mark = async (status: Parameters<typeof finishBookingReminder>[2], channel: string | null = null, error: string | null = null) => {
                     const updated = await finishBookingReminder(tenantId, row.id, status, channel, error);
                     // Solo l'invio cambia qualcosa che si vede (la campanella
-                    // reminder_sent): replica al nodo e broadcast come fa il
-                    // bottone manuale.
-                    if (updated && status === 'sent') {
-                        await logReservationChanged(null, tenantId, Number(updated.id));
-                        try { socketService?.broadcastReservationUpdated(tenantId, updated as any); } catch (_) {}
-                    }
+                    // reminder_sent): replica al nodo e broadcast muto come fa
+                    // il bottone manuale — un toast per ogni promemoria del
+                    // giro sarebbe una raffica.
+                    if (updated && status === 'sent') await broadcastReservationDeliveryChange(tenantId, updated);
                 };
 
                 try {
@@ -29464,11 +29477,7 @@ async function recordConfirmationSent(
          RETURNING *`,
         [initialStatus, result.channel, result.sid ?? null, reservationId, tenantId]
     );
-    if (updated.rows[0]) await logReservationChanged(null, tenantId, updated.rows[0].id);
-    if (updated.rows[0] && socketService) {
-        try { socketService.broadcastReservationUpdated(tenantId, updated.rows[0]); }
-        catch (err) { console.warn('[confirmation] broadcast failed:', err); }
-    }
+    if (updated.rows[0]) await broadcastReservationDeliveryChange(tenantId, updated.rows[0]);
 }
 
 // ============================================
@@ -46789,7 +46798,11 @@ const startServer = async () => {
                             const id = Number(payload?.reservation_id);
                             if (!Number.isFinite(id)) return;
                             const [row] = await selectEnrichedReservations([id]);
-                            if (row) socketService?.broadcastReservationUpdated(tenantId, row);
+                            if (!row) return;
+                            // quiet = solo l'esito di un messaggio: patch muta,
+                            // come sul cloud (broadcastReservationDeliveryChange).
+                            if (payload?.quiet) socketService?.broadcastReservationSynced(tenantId, row);
+                            else socketService?.broadcastReservationUpdated(tenantId, row);
                         };
                         outboxRegister('reservation:updated', rebroadcastReservationUpdate);
                         outboxRegister('reservation:service-updated', rebroadcastReservationUpdate);
