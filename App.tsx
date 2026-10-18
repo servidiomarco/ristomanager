@@ -1681,6 +1681,13 @@ const App: React.FC = () => {
       addToast(deleted ? t('toast.bookingDeletedNamed', { nome: toTitleCase(deleted.customer_name) }) : t('toast.bookingDeleted'), 'info');
     });
 
+    // Il giro dei promemoria automatici: le righe arrivano mute
+    // (reservation:synced), qui un toast solo per tutto il giro.
+    socket.on('bookingReminders:sent', (payload: { count?: number }) => {
+      const count = Number(payload?.count) || 0;
+      if (count > 0) addToast(t('toast.remindersSent', { count }), 'info');
+    });
+
     // Silent patch — a denormalized field (e.g. customer_name/phone from a
     // customer rename or merge) changed on these reservations. Update the
     // cards in place with no toast/notification: the user made that edit
@@ -1873,6 +1880,7 @@ const App: React.FC = () => {
       socket.off('reservation:updated');
       socket.off('reservation:deleted');
       socket.off('reservation:synced');
+      socket.off('bookingReminders:sent');
       socket.off('table:created');
       socket.off('table:updated');
       socket.off('table:deleted');

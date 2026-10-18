@@ -19407,6 +19407,26 @@ const startReviewRequestScheduler = () => {
 // presa in carico non si ritenta mai — le regole sono quelle della
 // richiesta di recensione qui sopra, nate dall'incidente del 18-19/09.
 
+/** I promemoria partiti in un giro, in un toast solo («Promemoria inviati
+ *  a 12 ospiti») a chi gestisce le prenotazioni, come l'avviso dei falliti
+ *  (cucina e cassa le vedono soltanto): ogni riga del giro va ai
+ *  client muta (broadcastReservationDeliveryChange quiet), e un toast per
+ *  prenotazione sarebbe una raffica. Non lancia mai. */
+async function announceBookingRemindersSent(tenantId: number, count: number): Promise<void> {
+    if (!socketService || count <= 0) return;
+    try {
+        const roles = await queryWithRetry(
+            `SELECT DISTINCT role FROM role_permissions
+              WHERE tenant_id = $1 AND permission = 'reservations:full'`,
+            [tenantId]
+        );
+        const roleList = roles.rows.map((r: any) => String(r.role));
+        if (roleList.length > 0) socketService.broadcastToRolesRoom(tenantId, roleList, 'bookingReminders:sent', { count });
+    } catch (err: any) {
+        console.warn('[booking-reminder] riepilogo non trasmesso:', err?.message || err);
+    }
+}
+
 /** I promemoria falliti OGGI, in un avviso solo a chi gestisce le
  *  prenotazioni: sono ospiti da chiamare a mano. Stesso tag per tutta la
  *  giornata, come per le recensioni. Non lancia mai. */
@@ -19454,6 +19474,7 @@ const startBookingReminderScheduler = () => {
 
             const gates = new Map<number, { policy: BookingReminderPolicy; tz: string }>();
             const failedTenants = new Set<number>();
+            const sentByTenant = new Map<number, number>();
             const gateFor = async (tenantId: number) => {
                 let gate = gates.get(tenantId);
                 if (!gate) {
@@ -19545,6 +19566,7 @@ const startBookingReminderScheduler = () => {
                     });
                     if (outcome.delivered) {
                         await mark('sent', outcome.channel);
+                        sentByTenant.set(tenantId, (sentByTenant.get(tenantId) ?? 0) + 1);
                         console.log(`🔔 Promemoria inviato (tenant ${tenantId}, prenotazione ${row.id}, canale ${outcome.channel})`);
                     } else {
                         await mark('failed', null, outcome.error || 'invio non riuscito');
@@ -19559,6 +19581,9 @@ const startBookingReminderScheduler = () => {
             // Un avviso per ristorante a fine giro, non uno per promemoria.
             for (const tenantId of failedTenants) {
                 await notifyBookingReminderFailures(tenantId, gates.get(tenantId)?.tz ?? 'Europe/Rome');
+            }
+            for (const [tenantId, count] of sentByTenant) {
+                await announceBookingRemindersSent(tenantId, count);
             }
         } catch (err) {
             console.error('Booking reminder scheduler error:', err);
