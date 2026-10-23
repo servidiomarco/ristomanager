@@ -725,7 +725,10 @@ Modulo a parte (si attiva con l'abbonamento «recensioni»).
 ## Inventario
 
 - Prodotti con categoria, unità di misura, quantità e **soglia di scorta**; **aree di conservazione** (celle, ripiani — Cucina / Sala / Bar) con quantità distribuite per area.
-- Movimenti di carico, scarico, rettifica e trasferimento.
+- Movimenti di carico, scarico, rettifica e trasferimento. **Come si carica e scarica:**
+  - nella vista **Totale** ogni prodotto ha **−** e **+** accanto alla quantità: aprono una scheda con Carica / Scarica già scelto, la quantità da scrivere (Invio conferma) e la cella, proposta quella dove il prodotto c'è già;
+  - nella vista di una **cella** (Cella 1, Dispensa…) **−** e **+** tolgono e aggiungono uno per tocco, e nel numero in mezzo si scrive la quantità contata (nello storico è un «conteggio»);
+  - con **Scansiona** (codici a barre, vedi sotto) e con le **fatture fornitori**.
 - **Chi, quando e quanto**: sotto ogni prodotto c'è l'ultimo movimento («+10 kg · oggi 18:40 · Marco S.», con «conteggio» o «da fattura» quando non è un tocco su + e −). Toccandolo si apre lo **storico del prodotto**, giorno per giorno: ora, carico o scarico, quantità, persona e cella. Dal menu Gestisci, **Movimenti** mostra lo stesso storico per tutta l'area. Entrambi si filtrano per Carichi / Scarichi e **per persona** (chi ha fatto almeno un movimento lì, anche un collega che non ha più l'account). I tocchi di fila su + e − della stessa persona contano come un movimento solo (dieci tocchi su + sono «+10»; un tocco sbagliato e corretto subito non compare). Lo vede chi vede il magazzino.
 - **Avviso automatico sotto scorta** (push ai responsabili e alla cucina) e riquadro in Dashboard. L'avviso si chiude per tutti appena il prodotto viene ricaricato sopra soglia o eliminato, e si riapre se ci ricade.
 - Categorie e aree riordinabili; stampa dell'inventario con distribuzione per area.
@@ -969,6 +972,7 @@ La **ricerca** sta accanto alle schede (sopra, sul telefono) e resta visibile me
 
 | Data | Sezione | Modifica |
 |---|---|---|
+| 2026-10-23 | Inventario | Nella vista **Totale** ogni prodotto ha **−** e **+** accanto alla quantità: si apre la scheda per caricare o scaricare, con la quantità da scrivere e la cella già proposta. Prima si poteva solo dalla vista di una cella. |
 | 2026-10-23 | Inventario | **Codici a barre.** Ogni prodotto può avere i suoi codici a barre, e il tasto **Scansiona** apre la fotocamera del telefono: si inquadra la confezione, si sceglie Carica o Scarica e si conferma, poi si passa alla prossima. Ripassando lo stesso articolo la quantità sale di uno; un codice nuovo si associa a un prodotto con due tocchi. Sul computer la ricerca trova i prodotti anche per codice. |
 | 2026-10-23 | Inventario | Nello storico dei movimenti, del prodotto o di tutta l'area, c'è il **filtro per persona**: si sceglie un nome e restano solo i suoi carichi e scarichi. |
 | 2026-10-23 | Inventario | **Chi ha caricato e scaricato.** Sotto ogni prodotto c'è l'ultimo movimento: quanto, quando e chi («+10 kg · oggi 18:40 · Marco S.»). Toccandolo si apre lo storico del prodotto; da Gestisci → **Movimenti** c'è quello di tutta l'area, con il filtro Carichi / Scarichi. I tocchi di fila su + e − valgono un movimento solo. |

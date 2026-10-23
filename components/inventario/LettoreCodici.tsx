@@ -12,8 +12,9 @@ import {
 import { addInventoryProductBarcode, getInventoryProducts, lookupInventoryBarcode } from '../../services/apiService';
 import { normalizeBarcode } from '../../utils/barcode';
 import { toTitleCase } from '../../utils/text';
-import { Callout, SearchField, SegmentedControl, StatusPill, dsButton, dsInput, dsSelect } from '../ds';
-import { dateLocale, formatDelta, formatQuantity } from './Movimenti';
+import { Callout, SearchField, StatusPill, dsButton, dsInput } from '../ds';
+import { dateLocale, formatDelta } from './Movimenti';
+import { SchedaMovimento, parseQty, proposeCell, rememberCell, type Direction } from './SchedaMovimento';
 
 /* ── Il lettore ────────────────────────────────────────────────────────────
    La fotocamera del telefono legge il codice a barre; la scheda che sale dal
@@ -170,21 +171,6 @@ const vibrate = (pattern: number | number[]) => {
   try { navigator.vibrate?.(pattern); } catch { /* non tutti i telefoni */ }
 };
 
-const CELL_KEY = (area: InventoryArea) => `inventario.lettore.cella.${area}`;
-const readCell = (area: InventoryArea): number | null => {
-  try {
-    const v = Number(localStorage.getItem(CELL_KEY(area)));
-    return Number.isInteger(v) && v > 0 ? v : null;
-  } catch {
-    return null;
-  }
-};
-const writeCell = (area: InventoryArea, id: number) => {
-  try { localStorage.setItem(CELL_KEY(area), String(id)); } catch { /* navigazione privata */ }
-};
-
-type Direction = 'in' | 'out';
-
 type Phase =
   | { kind: 'scan' }
   | { kind: 'lookup'; code: string }
@@ -244,13 +230,8 @@ export const LettoreCodici: React.FC<Props> = ({
       if (phaseRef.current.kind !== 'lookup' || phaseRef.current.code !== code) return;
       const locations = Array.isArray(res.locations) ? res.locations : [];
       const stock = Array.isArray(res.stock) ? res.stock : [];
-      // La cella proposta: quella che la pagina sta contando; poi quella dove
-      // il prodotto c'è già (il riso sta in dispensa, non dove è finito il
-      // prodotto scansionato prima); poi l'ultima usata col lettore; poi la prima.
       const pageCell = res.product.area === activeArea && activeLocationId != null ? activeLocationId : null;
-      const home = [...stock].filter(s => s.quantity > 0).sort((a, b) => b.quantity - a.quantity)[0]?.location_id ?? null;
-      const remembered = readCell(res.product.area);
-      const pick = [pageCell, home, remembered].find(id => id != null && locations.some(l => l.id === id)) ?? locations[0]?.id ?? null;
+      const pick = proposeCell(res.product.area, locations, stock, pageCell);
       setCellId(pick);
       setQty('1');
       setPhase({ kind: 'found', code: res.barcode ?? code, product: res.product, locations, stock });
@@ -351,7 +332,7 @@ export const LettoreCodici: React.FC<Props> = ({
 
   const confirm = async () => {
     if (phase.kind !== 'found' || cellId == null || !onMove) return;
-    const n = Number(qty.replace(',', '.'));
+    const n = parseQty(qty);
     if (!Number.isFinite(n) || n <= 0) {
       setError(t('lettore.invalidQty', 'Quantità non valida'));
       return;
@@ -363,7 +344,7 @@ export const LettoreCodici: React.FC<Props> = ({
     const ok = await onMove(phase.product, cellId, delta, reason);
     setSaving(false);
     if (!ok) return;
-    writeCell(phase.product.area, cellId);
+    rememberCell(phase.product.area, cellId);
     const cell = phase.locations.find(l => l.id === cellId);
     setDone(`${formatDelta(delta, phase.product.unit, locale)} · ${phase.product.name}${cell ? ` · ${toTitleCase(cell.name)}` : ''}`);
     // Il codice appena confermato è ancora inquadrato: lastSeen lo tiene
@@ -417,18 +398,6 @@ export const LettoreCodici: React.FC<Props> = ({
 
   if (!open) return null;
 
-  const stockIn = (p: { stock: InventoryStockRow[] }, locationId: number | null) =>
-    locationId == null ? 0 : p.stock.find(s => s.location_id === locationId)?.quantity ?? 0;
-  const stockTotal = (p: { stock: InventoryStockRow[] }) => p.stock.reduce((sum, s) => sum + (s.quantity ?? 0), 0);
-
-  const qtyNumber = Number(qty.replace(',', '.'));
-  const qtyValid = Number.isFinite(qtyNumber) && qtyNumber > 0;
-  const stepQty = (d: number) => setQty(q => {
-    const n = Number(q.replace(',', '.'));
-    const next = (Number.isFinite(n) ? n : 0) + d;
-    return String(Math.max(1, Math.round(next * 1000) / 1000));
-  });
-
   const cameraMessage =
     status === 'denied' ? t('lettore.denied', 'La fotocamera non è permessa. Consentila nelle impostazioni del browser, o scrivi il codice.')
     : status === 'unavailable' ? t('lettore.unavailable', 'Fotocamera non disponibile su questo dispositivo. Scrivi il codice.')
@@ -457,10 +426,10 @@ export const LettoreCodici: React.FC<Props> = ({
     </form>
   );
 
-  // Il piede delle due schede (carico e codice sconosciuto): Annulla largo
-  // quanto la sua parola, l'azione principale prende il resto. A metà e metà
-  // «Associa a un prodotto» andava a capo dentro un tasto alto 44px; su un
-  // telefono più stretto si accorcia con i puntini invece di spezzarsi.
+  // Il piede della scheda «codice sconosciuto», lo stesso di SchedaMovimento:
+  // Annulla largo quanto la sua parola, l'azione principale prende il resto.
+  // A metà e metà «Associa a un prodotto» andava a capo dentro un tasto alto
+  // 44px; su un telefono più stretto si accorcia con i puntini.
   const footerRow = 'flex gap-2';
   const footerCancel = `${dsButton.secondary} flex-none`;
   const footerMain = `${dsButton.primary} min-w-0 flex-1 whitespace-nowrap`;
@@ -468,118 +437,24 @@ export const LettoreCodici: React.FC<Props> = ({
   // ---- Il pannello in basso, per fase ----------------------------------
   let panel: React.ReactNode;
   if (phase.kind === 'found') {
-    const p = phase.product;
-    const here = stockIn(phase, cellId);
-    const total = stockTotal(phase);
-    const unit = p.unit?.trim() || '';
-    const cell = phase.locations.find(l => l.id === cellId) ?? null;
     panel = (
-      <div className="space-y-3">
-        <div className="flex items-start gap-3">
-          <div className="min-w-0 flex-1">
-            <div className="text-[18px] font-semibold leading-tight text-[var(--ds-text-primary)]">{p.name}</div>
-            <div className="mt-0.5 flex flex-wrap items-center gap-x-2 text-[13px] text-[var(--ds-text-muted)]">
-              {p.area !== activeArea && <StatusPill tone="info">{areaLabel(p.area)}</StatusPill>}
-              <span className="tabular-nums">
-                {p.category_name ? `${p.category_name} · ` : ''}
-                {cell
-                  ? t('lettore.stockHere', {
-                      cell: toTitleCase(cell.name),
-                      qty: formatQuantity(here, unit, locale),
-                      total: formatQuantity(total, unit, locale),
-                      defaultValue: '{{qty}} in {{cell}} · {{total}} in tutto',
-                    })
-                  : t('lettore.stockTotal', { total: formatQuantity(total, unit, locale), defaultValue: '{{total}} in tutto' })}
-              </span>
-            </div>
-          </div>
-        </div>
-
-        {phase.locations.length === 0 ? (
-          <Callout tone="pending">
-            {t('lettore.noCells', { area: areaLabel(p.area), defaultValue: 'Nessuna cella in {{area}}: creala da Gestisci celle e aree.' })}
-          </Callout>
-        ) : (
-          <>
-            <SegmentedControl<Direction>
-              value={direction}
-              onChange={setDirection}
-              options={[
-                { value: 'in', label: t('lettore.in', 'Carica') },
-                { value: 'out', label: t('lettore.out', 'Scarica') },
-              ]}
-              ariaLabel={t('lettore.direction', 'Carica o scarica')}
-            />
-            <div className="flex items-center gap-2">
-              {phase.locations.length > 1 && (
-                <select
-                  value={cellId ?? ''}
-                  onChange={e => setCellId(Number(e.target.value))}
-                  aria-label={t('lettore.cell', 'Cella')}
-                  className={`${dsSelect} min-w-0 flex-1`}
-                >
-                  {phase.locations.map(l => (
-                    <option key={l.id} value={l.id}>{toTitleCase(l.name)}</option>
-                  ))}
-                </select>
-              )}
-              <div className={`flex flex-shrink-0 items-center gap-1.5 ${phase.locations.length > 1 ? '' : 'ml-auto'}`} role="group" aria-label={t('lettore.qty', 'Quantità')}>
-                <button
-                  type="button"
-                  onClick={() => stepQty(-1)}
-                  aria-label={t('lettore.less', 'Uno in meno')}
-                  className="inline-flex h-11 w-11 items-center justify-center rounded-[var(--ds-radius-control)] bg-[var(--ds-surface-row)] text-[20px] font-medium leading-none text-[var(--ds-text-primary)] transition-colors hover:bg-[var(--ds-border)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
-                >
-                  −
-                </button>
-                <input
-                  type="text"
-                  inputMode="decimal"
-                  value={qty}
-                  onChange={e => setQty(e.target.value)}
-                  onFocus={e => e.currentTarget.select()}
-                  aria-label={t('lettore.qty', 'Quantità')}
-                  className="h-11 w-[68px] rounded-[var(--ds-radius-control)] bg-[var(--ds-surface-row)] px-2 text-center text-[17px] font-semibold tabular-nums text-[var(--ds-text-primary)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
-                />
-                <button
-                  type="button"
-                  onClick={() => stepQty(1)}
-                  aria-label={t('lettore.more', 'Uno in più')}
-                  className="inline-flex h-11 w-11 items-center justify-center rounded-[var(--ds-radius-control)] bg-[var(--ds-surface-row)] text-[20px] font-medium leading-none text-[var(--ds-text-primary)] transition-colors hover:bg-[var(--ds-border)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
-                >
-                  +
-                </button>
-              </div>
-            </div>
-          </>
-        )}
-
-        <div className={footerRow}>
-          <button
-            type="button"
-            onClick={() => { setPhase({ kind: 'scan' }); setError(null); }}
-            className={footerCancel}
-          >
-            {t('lettore.cancel', 'Annulla')}
-          </button>
-          <button
-            type="button"
-            onClick={confirm}
-            disabled={saving || !qtyValid || cellId == null}
-            className={footerMain}
-          >
-            {saving && <Loader2 className="h-4 w-4 flex-shrink-0 animate-spin" aria-hidden />}
-            <span className="truncate">
-              {direction === 'in'
-                ? t('lettore.confirmIn', { qty: qtyValid ? formatQuantity(qtyNumber, unit, locale) : '', defaultValue: 'Carica {{qty}}' })
-                : t('lettore.confirmOut', { qty: qtyValid ? formatQuantity(qtyNumber, unit, locale) : '', defaultValue: 'Scarica {{qty}}' })}
-            </span>
-          </button>
-        </div>
-        <p className="text-center text-[12px] text-[var(--ds-text-muted)]">
-          {t('lettore.againHint', 'Ripassa lo stesso codice per aggiungerne uno')}
-        </p>
-      </div>
+      <SchedaMovimento
+        product={phase.product}
+        locations={phase.locations}
+        stock={phase.stock}
+        direction={direction}
+        onDirection={setDirection}
+        qty={qty}
+        onQty={setQty}
+        cellId={cellId}
+        onCell={setCellId}
+        saving={saving}
+        onConfirm={confirm}
+        onCancel={() => { setPhase({ kind: 'scan' }); setError(null); }}
+        areaBadge={phase.product.area !== activeArea ? areaLabel(phase.product.area) : null}
+        areaLabel={areaLabel}
+        footnote={t('lettore.againHint', 'Ripassa lo stesso codice per aggiungerne uno')}
+      />
     );
   } else if (phase.kind === 'unknown') {
     panel = (
