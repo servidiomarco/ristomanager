@@ -30534,7 +30534,9 @@ app.post('/webhook/fatture-email', (req, res) => {
         return;
     }
     res.status(200).json({ ok: true });
-    void runAsPlatform(() => gestisciWebhookFatture(req.body, cfg, fattureFornitoriDeps))
+    // Niente runAsPlatform: fuori da un locale si legge solo tenants (senza
+    // RLS) per trovarlo dal token; il resto gira in runWithTenantContext.
+    void gestisciWebhookFatture(req.body, cfg, fattureFornitoriDeps)
         .catch((err: any) => console.error('[fatture-email] webhook:', err?.message || err));
 });
 
