@@ -135,6 +135,8 @@
     "in": "In",
     "out": "Out",
     "filter": "Show",
+    "person": "Person",
+    "everyone": "Everyone",
     "loading": "Loading movements…",
     "loadError": "Could not load movements",
     "empty": "No movements",
