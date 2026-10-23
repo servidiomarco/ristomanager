@@ -11,6 +11,7 @@ import { onSocketEvent } from '../../services/socketEvents';
 import { formatMoneyMinor } from '../../utils/money';
 import { Callout, EmptyState, SegmentedControl, StatusPill, dsButton, type PillTone } from '../ds';
 import { FatturaDettaglio } from './FatturaDettaglio';
+import { RiceviPerEmail } from './RiceviPerEmail';
 
 interface Props {
   showToast: (message: string, type?: 'success' | 'error' | 'info') => void;
@@ -133,6 +134,8 @@ export const FattureFornitori: React.FC<Props> = ({ showToast, onBack, onContegg
           onChange={e => { const files = Array.from(e.target.files ?? []); e.target.value = ''; void caricaFile(files); }}
         />
       </div>
+
+      <RiceviPerEmail showToast={showToast} />
 
       {sopra && (
         <div className="rounded-[var(--ds-radius)] border-2 border-dashed border-[var(--ds-border-focus)] bg-[var(--ds-surface)] px-6 py-10 text-center text-[15px] font-medium text-[var(--ds-text-primary)]">

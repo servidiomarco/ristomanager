@@ -54,6 +54,8 @@ export const FatturaDettaglio: React.FC<Props> = ({ id, onBack, showToast }) => 
   const [categoriaAltre, setCategoriaAltre] = useState<CategoriaSpesa>('altro');
   const [conferma, setConferma] = useState<'annulla' | 'elimina' | null>(null);
   const [altreAperte, setAltreAperte] = useState(false);
+  // «Le prossime di questo fornitore caricale da sole»: parte da com'è adesso.
+  const [autoProssime, setAutoProssime] = useState(false);
 
   const carica = useCallback(async () => {
     try {
@@ -74,6 +76,7 @@ export const FatturaDettaglio: React.FC<Props> = ({ id, onBack, showToast }) => 
   }, [id, t]);
 
   useEffect(() => { void carica(); }, [carica]);
+  useEffect(() => { setAutoProssime(f?.caricoAutomatico?.attivo === true); }, [f?.id, f?.caricoAutomatico?.attivo]);
   useEffect(() => onSocketEvent<{ id?: number }>('fatture:changed', p => { if (!p?.id || p.id === id) void carica(); }), [carica, id]);
 
   // Per ogni area la prima cella, se nessuno ne ha scelta un'altra.
@@ -155,12 +158,18 @@ export const FatturaDettaglio: React.FC<Props> = ({ id, onBack, showToast }) => 
   const caricaInMagazzino = () => esegui('carica', async () => {
     const ubicazioni: Partial<Record<InventoryArea, number>> = {};
     for (const a of areeDelCarico) if (celleScelte[a]) ubicazioni[a] = celleScelte[a];
-    const r = await fattureFornitoriApi.caricaInMagazzino(f.id, ubicazioni);
+    // Un server di prima non conosce il carico automatico: il campo non si manda.
+    const auto = f.caricoAutomatico === undefined ? undefined : autoProssime;
+    const r = await fattureFornitoriApi.caricaInMagazzino(f.id, ubicazioni, auto);
     setF(r.fattura);
     const righe = t('caricata.righe', '{{count}} righe in magazzino', { count: r.caricate });
     const prezzi = r.prezzi > 0 ? t('caricata.prezzi', '{{count}} prezzi aggiornati', { count: r.prezzi }) : '';
     showToast(prezzi ? `${righe}, ${prezzi}` : righe, 'success');
     for (const a of r.avvisi) showToast(a, 'info');
+  });
+
+  const spegniAuto = () => esegui('auto', async () => {
+    setF(await fattureFornitoriApi.impostaCaricoAutomatico(f.id, false));
   });
 
   const annulla = () => esegui('annulla', async () => {
@@ -314,6 +323,15 @@ export const FatturaDettaglio: React.FC<Props> = ({ id, onBack, showToast }) => 
           {f.caricataAt
             ? t('caricataIl', 'Caricata il {{d}}{{chi}}', { d: dataBreve(f.caricataAt), chi: f.caricataDa ? ` · ${f.caricataDa}` : '' })
             : t('stato.caricata', 'Caricata')}
+          {f.caricoAutomatico?.attivo && (
+            <span className="mt-1 flex flex-wrap items-center gap-x-2 text-[13px]">
+              {t('auto.attivo', 'Le prossime fatture di questo fornitore si caricano da sole.')}
+              <button type="button" onClick={spegniAuto} disabled={lavoro != null}
+                className="inline-flex min-h-[44px] items-center font-medium underline">
+                {t('auto.spegni', 'Spegni')}
+              </button>
+            </span>
+          )}
         </Callout>
       )}
 
@@ -405,6 +423,17 @@ export const FatturaDettaglio: React.FC<Props> = ({ id, onBack, showToast }) => 
         // Appiccicato in fondo alla pagina che scorre (il riquadro del
         // Magazzino), così con 49 righe il tasto resta sotto il pollice.
         <div className="sticky bottom-0 z-10 rounded-[var(--ds-radius)] bg-[var(--ds-surface)] px-4 py-3 shadow-[var(--ds-shadow-raised)]">
+          {/* Il carico automatico nasce qui, al primo carico a mano: le
+              celle sono quelle appena scelte. Vale per le fatture che
+              arrivano per email con tutte le righe già note. Su una riga sua:
+              accanto ai comandi andava a capo in tre. */}
+          {f.caricoAutomatico !== undefined && inMagazzino.length > 0 && (
+            <label className="mb-1 flex min-h-[44px] cursor-pointer items-center gap-2.5 text-[13px] text-[var(--ds-text-primary)]">
+              <input type="checkbox" checked={autoProssime} onChange={e => setAutoProssime(e.target.checked)}
+                className="h-4 w-4 flex-shrink-0 rounded" />
+              {t('auto.prossime', 'Le prossime di questo fornitore caricale da sole')}
+            </label>
+          )}
           <div className="flex flex-col gap-3 md:flex-row md:items-end">
             {areeDelCarico.map(area => (
               <Field key={area} label={t('cella', 'Cella {{area}}', { area: t(`area.${area}`, area.toLowerCase()) })} className="md:w-48">

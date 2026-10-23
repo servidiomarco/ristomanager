@@ -157,5 +157,33 @@
   "vuoto": {
     "altre": "Nessuna fattura qui.",
     "daControllare": "Nessuna fattura da controllare. Carica gli XML, i p7m o lo zip del commercialista."
+  },
+  "email": {
+    "titolo": "Ricevi per email",
+    "spiegazione": "Le email inoltrate a questo indirizzo con l'XML, il p7m o lo zip entrano da sole fra le fatture da controllare.",
+    "copia": "Copia",
+    "copiato": "Copiato",
+    "copiaErrore": "Copia non riuscita: seleziona l'indirizzo",
+    "ultime": "Ultime email ({{n}})",
+    "nascondi": "Nascondi le email",
+    "cambia": "Cambia indirizzo",
+    "cambiaTitolo": "Cambiare indirizzo?",
+    "cambiaTesto": "Il vecchio indirizzo smette subito di funzionare: quello nuovo va dato a chi inoltra le fatture.",
+    "rigenerato": "Indirizzo cambiato: dallo a chi inoltra le fatture",
+    "sconosciuto": "Mittente sconosciuto",
+    "esito": {
+      "daControllare_one": "{{count}} da controllare",
+      "daControllare_other": "{{count}} da controllare",
+      "caricate_one": "{{count}} caricata da sola",
+      "caricate_other": "{{count}} caricate da sole",
+      "doppioni_one": "{{count}} già presente",
+      "doppioni_other": "{{count}} già presenti",
+      "niente": "Nessuna fattura"
+    }
+  },
+  "auto": {
+    "prossime": "Le prossime di questo fornitore caricale da sole",
+    "attivo": "Le prossime fatture di questo fornitore si caricano da sole.",
+    "spegni": "Spegni"
   }
 }

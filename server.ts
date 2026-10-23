@@ -338,7 +338,8 @@ import { formatMoneyMinor } from './utils/money.js';
 import { createScheduledTasksRouter, scheduledTasksTick, syncBanquetScheduledTasks, TODO_FULL_SELECT, type ScheduledTaskDeps } from './services/scheduledTasks.js';
 import { createHaccpRouter, haccpSensorWatchTick, runHaccpExpiryReminder, runHaccpMissingReminder, type HaccpDeps } from './services/haccpRoutes.js';
 import { createFoodCostRouter } from './services/foodCostRoutes.js';
-import { createFattureFornitoriRouter } from './services/fattureFornitoriRoutes.js';
+import { createFattureFornitoriRouter, type FattureFornitoriDeps } from './services/fattureFornitoriRoutes.js';
+import { createFattureEmailRouter, fattureEmailConfig, gestisciWebhookFatture } from './services/fattureEmail.js';
 import { configureRestaurantInfo } from './services/restaurantInfo.js';
 import { configureGuestUpdates } from './services/reservationGuestUpdates.js';
 import { shoppingReminderBody } from './utils/shoppingReminder.js';
@@ -30495,7 +30496,7 @@ app.use('/whatsapp', createWhatsAppRouter());
 // prezzi del food cost. Le rotte stanno in services/fattureFornitoriRoutes.ts;
 // da qui il socket, l'entitlement del food cost, la P.IVA del locale e la
 // chiusura delle push «scorta bassa» quando un carico le risolve.
-app.use('/fatture-fornitori', createFattureFornitoriRouter({
+const fattureFornitoriDeps: FattureFornitoriDeps = {
     broadcast: (tenantId, event, data, excludeSocketId) => {
         socketService?.broadcastToAll(tenantId, event, data, excludeSocketId);
     },
@@ -30507,7 +30508,37 @@ app.use('/fatture-fornitori', createFattureFornitoriRouter({
             .map(v => lowStockTag(v.productId));
         if (tags.length) await markSharedNotificationsRead(tenantId, tags);
     },
-}));
+};
+// L'indirizzo email del locale prima delle fatture: «/email» non è un id.
+app.use('/fatture-fornitori/email', createFattureEmailRouter());
+app.use('/fatture-fornitori', createFattureFornitoriRouter(fattureFornitoriDeps));
+
+// Le fatture arrivate per email (services/fattureEmail.ts): Resend chiama con
+// `email.received`, firmato Svix col segreto di piattaforma. Un solo webhook
+// per tutti i locali: il locale si trova dall'indirizzo fra i destinatari.
+// Si risponde subito e si lavora dopo, come per l'altro webhook di Resend.
+app.post('/webhook/fatture-email', (req, res) => {
+    const cfg = fattureEmailConfig();
+    if (!cfg) {
+        res.status(503).json({ error: 'fatture_email_not_configured' });
+        return;
+    }
+    const rawBody = (req as any).rawBody as Buffer | undefined;
+    if (!rawBody) {
+        res.status(400).json({ error: 'missing_body' });
+        return;
+    }
+    if (!verifySvixSignature(rawBody, req.headers as any, cfg.webhookSecret)) {
+        console.warn('[fatture-email] firma non valida, scartato');
+        res.status(401).json({ error: 'invalid_signature' });
+        return;
+    }
+    res.status(200).json({ ok: true });
+    // Niente runAsPlatform: fuori da un locale si legge solo tenants (senza
+    // RLS) per trovarlo dal token; il resto gira in runWithTenantContext.
+    void gestisciWebhookFatture(req.body, cfg, fattureFornitoriDeps)
+        .catch((err: any) => console.error('[fatture-email] webhook:', err?.message || err));
+});
 
 // I sensori HACCP che tacciono: ogni dieci minuti, una replica sola.
 const startHaccpSensorWatch = () => {
