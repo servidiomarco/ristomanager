@@ -1,4 +1,4 @@
-import { Reservation, Table, Room, Dish, DishComponent, Modifier, ModifierGroup, RestaurantMenu, BanquetMenu, BanquetPayment, BanquetStatus, TableMerge, TableHiddenOverride, RoomClosedOverride, Shift, Customer, InventoryArea, InventoryLocation, InventoryProduct, InventoryStockRow, InventoryMovement, InventoryMovementReason, InventoryCategory, PaymentRequest, TableAssignmentSuggestion } from '../types';
+import { Reservation, Table, Room, Dish, DishComponent, Modifier, ModifierGroup, RestaurantMenu, BanquetMenu, BanquetPayment, BanquetStatus, TableMerge, TableHiddenOverride, RoomClosedOverride, Shift, Customer, InventoryArea, InventoryLocation, InventoryProduct, InventoryStockRow, InventoryMovement, InventoryMovementEntry, InventoryMovementReason, InventoryCategory, PaymentRequest, TableAssignmentSuggestion } from '../types';
 import { socketClient } from './socketClient';
 import { authApiService } from './authApiService';
 import { buildApiError } from './apiError';
@@ -1225,6 +1225,32 @@ export const postInventoryMovement = async (move: {
     method: 'POST',
     headers: getHeaders(),
     body: JSON.stringify(move),
+  });
+};
+
+// Storico dei movimenti. `before` è il cursore opaco della pagina prima: porta
+// un «+02» che nella query string, non codificato, diventerebbe uno spazio.
+export const getInventoryMovements = async (filter: {
+  area?: InventoryArea;
+  product_id?: number;
+  kind?: 'in' | 'out';
+  before?: string | null;
+}): Promise<{ entries: InventoryMovementEntry[]; next_before: string | null }> => {
+  const q = new URLSearchParams();
+  if (filter.area) q.set('area', filter.area);
+  if (filter.product_id != null) q.set('product_id', String(filter.product_id));
+  if (filter.kind) q.set('kind', filter.kind);
+  if (filter.before) q.set('before', filter.before);
+  return apiRequest<{ entries: InventoryMovementEntry[]; next_before: string | null }>(
+    `${API_URL}/inventory/movements?${q.toString()}`,
+    { headers: getHeaders(false) }
+  );
+};
+
+// La voce più recente di ogni prodotto dell'area.
+export const getInventoryLatestMovements = async (area: InventoryArea): Promise<InventoryMovementEntry[]> => {
+  return apiRequest<InventoryMovementEntry[]>(`${API_URL}/inventory/movements/latest?area=${area}`, {
+    headers: getHeaders(false),
   });
 };
 

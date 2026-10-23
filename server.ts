@@ -342,6 +342,7 @@ import { createFattureFornitoriRouter } from './services/fattureFornitoriRoutes.
 import { configureRestaurantInfo } from './services/restaurantInfo.js';
 import { configureGuestUpdates } from './services/reservationGuestUpdates.js';
 import { shoppingReminderBody } from './utils/shoppingReminder.js';
+import { groupMovements, type MovementEntry, type RawMovement } from './utils/inventoryMovements.js';
 import { describeShiftChanges, shiftDayLabel, type ShiftDayChange } from './utils/staffShiftChange.js';
 import { buildEReceiptPayload, buildFatturaPaXml, getFiscalDriver, type FiscalSeller, type InvoiceBuyer } from './services/fiscalService.js';
 import {
@@ -21142,9 +21143,14 @@ app.post('/inventory/movements', authenticate, requirePermission('inventory:full
         );
 
         const movement = await client.query(
+            // user_name è la firma che resta se l'utente viene cancellato: il
+            // nome com'era quel giorno, non l'email (che nello storico si
+            // leggeva «chi ha caricato: m.rossi@…»).
             `INSERT INTO inventory_movements (tenant_id, product_id, location_id, delta, reason, notes, user_id, user_name)
-             VALUES ($8, $1, $2, $3, $4, $5, $6, $7)
-             RETURNING id, product_id, location_id, delta::float AS delta, reason, notes, user_id, user_name, created_at`,
+             VALUES ($8, $1, $2, $3, $4, $5, $6,
+                     COALESCE(NULLIF(TRIM((SELECT full_name FROM users WHERE id = $6)), ''), $7))
+             RETURNING id, product_id, location_id, delta::float AS delta, reason, notes, user_id, user_name, created_at,
+                       (fattura_riga_id IS NOT NULL) AS from_invoice`,
             [
                 productId,
                 locationId,
@@ -21203,6 +21209,133 @@ app.post('/inventory/movements', authenticate, requirePermission('inventory:full
         res.status(500).json({ error: 'Internal server error' });
     } finally {
         client.release();
+    }
+});
+
+// ── Storico dei movimenti ────────────────────────────────────────────────────
+// Chi ha caricato o scaricato cosa, quando e quanto. I movimenti grezzi
+// passano da groupMovements (utils/inventoryMovements.ts): i tocchi di fila su
+// + e − diventano una voce sola.
+//
+// Il nome è quello attuale dell'utente quando esiste ancora, altrimenti la
+// firma salvata sul movimento (prima del 23/10/2026 era l'email).
+const MOVEMENT_COLUMNS = `
+    m.id, m.product_id, m.location_id, m.delta::float AS delta, m.reason, m.notes, m.user_id,
+    COALESCE(NULLIF(TRIM(u.full_name), ''), m.user_name) AS user_name,
+    m.created_at, (m.fattura_riga_id IS NOT NULL) AS from_invoice`;
+
+const toRawMovement = (r: any): RawMovement => ({
+    id: Number(r.id),
+    product_id: Number(r.product_id),
+    location_id: Number(r.location_id),
+    delta: Number(r.delta),
+    reason: r.reason,
+    notes: r.notes ?? null,
+    user_id: r.user_id == null ? null : Number(r.user_id),
+    user_name: r.user_name ?? null,
+    created_at: new Date(r.created_at).toISOString(),
+    from_invoice: r.from_invoice === true,
+});
+
+// Una pagina dello storico sono le ultime MOVEMENTS_PAGE righe grezze, già
+// raggruppate. Il cursore è la
+// coppia (created_at, id) dell'ultima riga letta, con created_at nel testo di
+// Postgres: un ISO di JavaScript perde i microsecondi, e le righe di un carico
+// da fattura hanno tutte lo stesso created_at (l'ora della transazione).
+// Una voce a cavallo di due pagine esce spezzata in due: succede solo al
+// confine, e ognuna delle due resta vera.
+const MOVEMENTS_PAGE = 400;
+
+// GET /inventory/movements?area=CUCINA[&product_id=][&kind=in|out][&before=cursore]
+// Voci dalla più recente; `next_before` porta alla pagina dopo (null = finite).
+// kind=in tiene ciò che è entrato, out ciò che è uscito, comunque sia stato
+// registrato (tocco, conteggio, fattura).
+app.get('/inventory/movements', authenticate, requirePermission('inventory:view'), async (req, res) => {
+    try {
+        const { area, product_id, kind, before } = req.query as Record<string, string | undefined>;
+        const params: any[] = [req.tenantId!];
+        let where = 'WHERE m.tenant_id = $1';
+        if (area) {
+            if (!ALLOWED_INVENTORY_AREAS.has(area)) return res.status(400).json({ error: 'Invalid area' });
+            params.push(area);
+            where += ` AND p.area = $${params.length}`;
+        }
+        if (product_id != null) {
+            const id = Number(product_id);
+            if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ error: 'Invalid product_id' });
+            params.push(id);
+            where += ` AND m.product_id = $${params.length}`;
+        }
+        if (!area && product_id == null) return res.status(400).json({ error: 'area or product_id is required' });
+        if (kind != null && kind !== 'in' && kind !== 'out') return res.status(400).json({ error: 'Invalid kind' });
+        if (before != null) {
+            const sep = before.lastIndexOf('|');
+            const at = sep > 0 ? before.slice(0, sep) : '';
+            const id = Number(before.slice(sep + 1));
+            // La forma del testo di Postgres («2026-10-23 18:40:12.123456+02»):
+            // un cursore storpiato è un 400, non un errore di cast nel log.
+            if (!/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}(\.\d{1,6})?[+-]\d{2}(:\d{2})?$/.test(at) || !Number.isInteger(id)) {
+                return res.status(400).json({ error: 'Invalid before' });
+            }
+            params.push(at, id);
+            where += ` AND (m.created_at, m.id) < ($${params.length - 1}::timestamptz, $${params.length}::int)`;
+        }
+
+        const result = await queryWithRetry(
+            `SELECT ${MOVEMENT_COLUMNS}, m.created_at::text AS cursor_at
+             FROM inventory_movements m
+             JOIN inventory_products p ON p.id = m.product_id AND p.tenant_id = m.tenant_id
+             LEFT JOIN users u ON u.id = m.user_id
+             ${where}
+             ORDER BY m.created_at DESC, m.id DESC
+             LIMIT ${MOVEMENTS_PAGE}`,
+            params
+        );
+        let entries = groupMovements(result.rows.map(toRawMovement));
+        if (kind === 'in') entries = entries.filter(e => e.delta > 0);
+        if (kind === 'out') entries = entries.filter(e => e.delta < 0);
+        const last = result.rows[result.rows.length - 1];
+        res.json({
+            entries,
+            next_before: result.rows.length === MOVEMENTS_PAGE ? `${last.cursor_at}|${last.id}` : null,
+        });
+    } catch (err) {
+        console.error('GET /inventory/movements error:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+// GET /inventory/movements/latest?area=CUCINA — per ogni prodotto la sua voce
+// più recente: la riga «+10 kg · oggi 18:40 · Marco» sotto il nome. Una
+// lettura per prodotto sull'indice (product_id, created_at DESC), con un
+// tetto che basta a ricomporre anche una voce fatta di molti tocchi.
+app.get('/inventory/movements/latest', authenticate, requirePermission('inventory:view'), async (req, res) => {
+    try {
+        const { area } = req.query as { area?: string };
+        if (!area || !ALLOWED_INVENTORY_AREAS.has(area)) return res.status(400).json({ error: 'Invalid area' });
+        const result = await queryWithRetry(
+            `SELECT r.*
+             FROM inventory_products p
+             CROSS JOIN LATERAL (
+                 SELECT ${MOVEMENT_COLUMNS}
+                 FROM inventory_movements m
+                 LEFT JOIN users u ON u.id = m.user_id
+                 WHERE m.product_id = p.id AND m.tenant_id = p.tenant_id
+                 ORDER BY m.created_at DESC, m.id DESC
+                 LIMIT 100
+             ) r
+             WHERE p.tenant_id = $1 AND p.area = $2
+             ORDER BY r.created_at DESC, r.id DESC`,
+            [req.tenantId!, area]
+        );
+        const latest = new Map<number, MovementEntry>();
+        for (const g of groupMovements(result.rows.map(toRawMovement))) {
+            if (!latest.has(g.product_id)) latest.set(g.product_id, g);
+        }
+        res.json([...latest.values()]);
+    } catch (err) {
+        console.error('GET /inventory/movements/latest error:', err);
+        res.status(500).json({ error: 'Internal server error' });
     }
 });
 

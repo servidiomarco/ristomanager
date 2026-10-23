@@ -1433,6 +1433,25 @@ export interface InventoryMovement {
   user_id?: number | null;
   user_name?: string | null;
   created_at: string;
+  /** Assente sui server di prima del 23/10/2026. */
+  from_invoice?: boolean;
+}
+
+// Una voce dello storico: i tocchi di fila su + e − sommati in una sola
+// (utils/inventoryMovements.ts). `at` è il tocco più recente, `first_at` il primo.
+export interface InventoryMovementEntry {
+  id: number;
+  product_id: number;
+  location_id: number;
+  delta: number;
+  reason: InventoryMovementReason;
+  notes: string | null;
+  user_id: number | null;
+  user_name: string | null;
+  at: string;
+  first_at: string;
+  count: number;
+  from_invoice: boolean;
 }
 
 // L'assenza di un collega vista senza il permesso staff:leave: il server

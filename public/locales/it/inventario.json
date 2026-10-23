@@ -128,5 +128,31 @@
   },
   "supplierInvoices": "Fatture fornitori",
   "invoicesToCheck_one": "fattura",
-  "invoicesToCheck_other": "fatture"
+  "invoicesToCheck_other": "fatture",
+  "movimenti": {
+    "title": "Movimenti",
+    "all": "Tutti",
+    "in": "Carichi",
+    "out": "Scarichi",
+    "filter": "Mostra",
+    "loading": "Carico i movimenti…",
+    "loadError": "Errore caricamento movimenti",
+    "empty": "Nessun movimento",
+    "emptyIn": "Nessun carico",
+    "emptyOut": "Nessuno scarico",
+    "loadMore": "Carica altri",
+    "today": "Oggi",
+    "yesterday": "Ieri",
+    "todayAt": "oggi {{time}}",
+    "yesterdayAt": "ieri {{time}}",
+    "openFor": "Movimenti di {{product}}",
+    "reason": {
+      "CARICO": "Carico",
+      "SCARICO": "Scarico",
+      "RETTIFICA": "Conteggio",
+      "TRASFERIMENTO": "Trasferimento",
+      "invoiceIn": "Da fattura",
+      "invoiceOut": "Fattura annullata"
+    }
+  }
 }
