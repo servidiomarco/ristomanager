@@ -135,6 +135,8 @@
     "in": "Carichi",
     "out": "Scarichi",
     "filter": "Mostra",
+    "person": "Persona",
+    "everyone": "Tutte le persone",
     "loading": "Carico i movimenti…",
     "loadError": "Errore caricamento movimenti",
     "empty": "Nessun movimento",
