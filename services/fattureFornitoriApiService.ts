@@ -92,6 +92,24 @@ export interface FfDettaglio extends FfTestata {
   /** L'unità del food cost di ogni prodotto che ne ha una (assente da un server di prima). */
   unitaCostoProdotti?: Record<number, UnitaCosto>;
   righe: FfRiga[];
+  /** Le prossime fatture di questo fornitore si caricano da sole (assente da un server di prima). */
+  caricoAutomatico?: { attivo: boolean; ubicazioni: Partial<Record<'CUCINA' | 'SALA' | 'BAR', number>> } | null;
+}
+
+export interface FfEmailRicevuta {
+  id: number;
+  mittente: string | null;
+  oggetto: string | null;
+  allegati: number;
+  esito: (FfEsitoFile & { caricata?: boolean; nonCaricata?: string })[];
+  ricevutaAt: string;
+}
+
+/** L'indirizzo a cui inoltrare le fatture. attivo=false: la piattaforma non riceve ancora. */
+export interface FfEmail {
+  attivo: boolean;
+  indirizzo: string | null;
+  ricevute: FfEmailRicevuta[];
 }
 
 export interface FfEsitoFile {
@@ -184,13 +202,24 @@ class FattureFornitoriApiService {
   decidiRiga(id: number, rigaId: number, decisione: FfDecisione): Promise<FfRiga> {
     return send('PUT', `/${id}/righe/${rigaId}`, decisione);
   }
-  caricaInMagazzino(id: number, ubicazioni: Partial<Record<'CUCINA' | 'SALA' | 'BAR', number>>): Promise<{
+  /** caricoAutomatico: le prossime fatture del fornitore si caricano da sole
+   *  nelle stesse celle (undefined = non si tocca). */
+  caricaInMagazzino(id: number, ubicazioni: Partial<Record<'CUCINA' | 'SALA' | 'BAR', number>>, caricoAutomatico?: boolean): Promise<{
     caricate: number;
     prezzi: number;
     avvisi: string[];
     fattura: FfDettaglio;
   }> {
-    return send('POST', `/${id}/carica`, { ubicazioni });
+    return send('POST', `/${id}/carica`, caricoAutomatico === undefined ? { ubicazioni } : { ubicazioni, caricoAutomatico });
+  }
+  impostaCaricoAutomatico(id: number, attivo: boolean): Promise<FfDettaglio> {
+    return send('PUT', `/${id}/carico-automatico`, { attivo });
+  }
+  email(): Promise<FfEmail> {
+    return request('/email', { headers: headers(false) });
+  }
+  rigeneraEmail(): Promise<{ indirizzo: string }> {
+    return send('POST', '/email/rigenera');
   }
   annullaCarico(id: number): Promise<FfDettaglio> {
     return send('POST', `/${id}/annulla`);

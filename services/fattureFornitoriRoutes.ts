@@ -428,6 +428,7 @@ export function createFattureFornitoriRouter(deps: FattureFornitoriDeps): expres
             deps.partitaIvaLocale(tenantId).catch(() => ''),
         ]);
         const foodCost = await deps.foodCostAttivo(tenantId).catch(() => false);
+        const auto = await leggiCaricoAutomatico(tenantId, f.chiave_fornitore);
         const unita = foodCost
             ? await queryWithRetry(`SELECT id, unita_costo FROM inventory_products WHERE tenant_id = $1 AND unita_costo IS NOT NULL`, [tenantId])
             : { rows: [] as any[] };
@@ -452,6 +453,8 @@ export function createFattureFornitoriRouter(deps: FattureFornitoriDeps): expres
             // nuova vede subito se il prezzo della fattura ci può andare.
             unitaCostoProdotti: Object.fromEntries(unita.rows.map((p: any) => [p.id, p.unita_costo])),
             righe: (righe.rows as RigaDb[]).map(rigaJson),
+            // Le prossime fatture di questo fornitore si caricano da sole?
+            caricoAutomatico: auto ? { attivo: auto.attivo, ubicazioni: auto.ubicazioni } : null,
         };
     };
 
@@ -716,6 +719,12 @@ export function createFattureFornitoriRouter(deps: FattureFornitoriDeps): expres
             const esito = await caricaFattura(tenantId, id, ubicazioni, chi, req.user?.userId ?? null, req.user?.email ?? null, foodCost);
             await deps.dopoCarico(tenantId, esito.variazioni).catch(err =>
                 console.warn('[fatture-fornitori] chiusura scorte basse:', err?.message || err));
+            // «Le prossime di questo fornitore caricale da sole»: con le celle
+            // appena usate, che sono quelle giuste per la sua merce.
+            if (typeof req.body?.caricoAutomatico === 'boolean') {
+                const f = await leggiTestata(tenantId, id);
+                await salvaCaricoAutomatico(tenantId, f.chiave_fornitore, req.body.caricoAutomatico, ubicazioni, chi);
+            }
             changed(req, 'carico', id);
             if (esito.prezzi > 0) {
                 try {
@@ -727,6 +736,33 @@ export function createFattureFornitoriRouter(deps: FattureFornitoriDeps): expres
             res.json({ caricate: esito.caricate, prezzi: esito.prezzi, avvisi: esito.avvisi, fattura: await dettaglio(tenantId, id) });
         } catch (err) {
             fail(res, err, 'POST /:id/carica');
+        }
+    });
+
+    // L'interruttore del fornitore dal dettaglio di una sua fattura. Acceso
+    // senza celle nuove tiene quelle già salvate; la prima volta servono.
+    router.put('/:id/carico-automatico', ...guard, async (req, res) => {
+        try {
+            const tenantId = req.tenantId!;
+            const id = parseId(req.params.id);
+            if (!id) throw new FattureError(400, { error: 'id non valido' });
+            if (typeof req.body?.attivo !== 'boolean') throw new FattureError(400, { error: 'attivo mancante' });
+            const ubicazioni: Record<string, number> = {};
+            for (const area of AREE) {
+                const v = parseId(req.body?.ubicazioni?.[area]);
+                if (v) ubicazioni[area] = v;
+            }
+            const f = await leggiTestata(tenantId, id);
+            const prima = await leggiCaricoAutomatico(tenantId, f.chiave_fornitore);
+            const celle = Object.keys(ubicazioni).length ? ubicazioni : prima?.ubicazioni ?? {};
+            if (req.body.attivo && Object.keys(celle).length === 0) {
+                throw new FattureError(400, { error: 'Scegli le celle in cui caricare', code: 'celle' });
+            }
+            await salvaCaricoAutomatico(tenantId, f.chiave_fornitore, req.body.attivo, celle, await autore(req));
+            changed(req, 'carico-automatico', id);
+            res.json(await dettaglio(tenantId, id));
+        } catch (err) {
+            fail(res, err, 'PUT /:id/carico-automatico');
         }
     });
 
@@ -843,6 +879,93 @@ export function createFattureFornitoriRouter(deps: FattureFornitoriDeps): expres
     });
 
     return router;
+}
+
+// ---- Carico automatico (fatture arrivate per email) ------------------------------
+// L'interruttore è per fornitore (chiave_fornitore, come la memoria) e porta
+// le celle in cui caricare, una per area: quelle dell'ultimo carico a mano.
+
+export async function leggiCaricoAutomatico(
+    tenantId: number,
+    chiave: string,
+): Promise<{ attivo: boolean; ubicazioni: Record<string, number> } | null> {
+    const r = await queryWithRetry(
+        `SELECT attivo, ubicazioni FROM fornitori_carico_automatico WHERE tenant_id = $1 AND chiave_fornitore = $2`,
+        [tenantId, chiave],
+    );
+    if (!r.rowCount) return null;
+    const ubicazioni: Record<string, number> = {};
+    for (const [area, id] of Object.entries(r.rows[0].ubicazioni ?? {})) {
+        if ((AREE as readonly string[]).includes(area) && Number.isInteger(Number(id))) ubicazioni[area] = Number(id);
+    }
+    return { attivo: r.rows[0].attivo === true, ubicazioni };
+}
+
+async function salvaCaricoAutomatico(
+    tenantId: number,
+    chiave: string,
+    attivo: boolean,
+    ubicazioni: Record<string, number>,
+    chi: string | null,
+): Promise<void> {
+    // Le celle devono essere del ristorante e dell'area: una cella cancellata
+    // fra un carico e l'altro fa saltare il carico automatico, non scrive altrove.
+    const ids = Object.values(ubicazioni);
+    if (ids.length) {
+        const l = await queryWithRetry(`SELECT id, area FROM inventory_locations WHERE tenant_id = $1 AND id = ANY($2::int[])`, [tenantId, ids]);
+        for (const [area, id] of Object.entries(ubicazioni)) {
+            if (!l.rows.some((x: any) => x.id === id && x.area === area)) throw new FattureError(400, { error: 'Cella non valida', code: 'cella' });
+        }
+    }
+    await queryWithRetry(
+        `INSERT INTO fornitori_carico_automatico (tenant_id, chiave_fornitore, attivo, ubicazioni, updated_by, updated_at)
+         VALUES ($1, $2, $3, $4, $5, now())
+         ON CONFLICT (tenant_id, chiave_fornitore)
+         DO UPDATE SET attivo = EXCLUDED.attivo,
+                       ubicazioni = CASE WHEN EXCLUDED.ubicazioni = '{}'::jsonb THEN fornitori_carico_automatico.ubicazioni ELSE EXCLUDED.ubicazioni END,
+                       updated_by = EXCLUDED.updated_by, updated_at = now()`,
+        [tenantId, chiave, attivo, JSON.stringify(ubicazioni), chi?.slice(0, 255) ?? null],
+    );
+}
+
+/**
+ * Una fattura appena arrivata si carica da sola se il fornitore ha il carico
+ * automatico acceso e tutte le righe di merce sono già decise dalla memoria.
+ * Altrimenti resta «da controllare» e il motivo finisce nella push.
+ */
+export async function caricaAutomaticamente(
+    tenantId: number,
+    fatturaId: number,
+    deps: Pick<FattureFornitoriDeps, 'foodCostAttivo' | 'dopoCarico'>,
+): Promise<{ caricata: boolean; motivo?: string }> {
+    try {
+        const f = await queryWithRetry(
+            `SELECT chiave_fornitore, tipo_documento, stato FROM fatture_fornitori WHERE tenant_id = $1 AND id = $2`,
+            [tenantId, fatturaId],
+        );
+        if (!f.rowCount || f.rows[0].stato !== 'DA_CONTROLLARE' || f.rows[0].tipo_documento === 'TD04') return { caricata: false };
+        const auto = await leggiCaricoAutomatico(tenantId, f.rows[0].chiave_fornitore);
+        if (!auto?.attivo) return { caricata: false };
+        const righe = await queryWithRetry(
+            `SELECT r.esito, p.area FROM fatture_fornitori_righe r
+               LEFT JOIN inventory_products p ON p.id = r.product_id AND p.tenant_id = r.tenant_id
+              WHERE r.tenant_id = $1 AND r.fattura_id = $2 AND r.tipo = 'merce'`,
+            [tenantId, fatturaId],
+        );
+        if (!righe.rowCount) return { caricata: false };
+        const nuove = righe.rows.filter((r: any) => r.esito == null).length;
+        if (nuove > 0) return { caricata: false, motivo: `${nuove} ${nuove === 1 ? 'riga nuova' : 'righe nuove'}` };
+        const aree = new Set<string>(righe.rows.filter((r: any) => r.esito === 'CARICO' && r.area).map((r: any) => r.area));
+        const manca = [...aree].find(a => !auto.ubicazioni[a]);
+        if (manca) return { caricata: false, motivo: `manca la cella per ${manca.toLowerCase()}` };
+        const foodCost = await deps.foodCostAttivo(tenantId).catch(() => false);
+        const esito = await caricaFattura(tenantId, fatturaId, auto.ubicazioni, 'Carico automatico', null, null, foodCost);
+        await deps.dopoCarico(tenantId, esito.variazioni).catch(() => {});
+        return { caricata: true };
+    } catch (err: any) {
+        console.warn(`[fatture-fornitori] carico automatico ${fatturaId}:`, err?.message || err);
+        return { caricata: false, motivo: err?.message || 'carico non riuscito' };
+    }
 }
 
 // ---- Il carico vero ------------------------------------------------------------

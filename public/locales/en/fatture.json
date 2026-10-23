@@ -157,5 +157,33 @@
   "vuoto": {
     "altre": "No invoices here.",
     "daControllare": "No invoices to review. Upload the XML, p7m or the accountant's zip."
+  },
+  "email": {
+    "titolo": "Receive by email",
+    "spiegazione": "Emails forwarded to this address with the XML, p7m or zip go straight into the invoices to check.",
+    "copia": "Copy",
+    "copiato": "Copied",
+    "copiaErrore": "Copy failed: select the address",
+    "ultime": "Latest emails ({{n}})",
+    "nascondi": "Hide emails",
+    "cambia": "Change address",
+    "cambiaTitolo": "Change the address?",
+    "cambiaTesto": "The old address stops working right away: give the new one to whoever forwards the invoices.",
+    "rigenerato": "Address changed: give it to whoever forwards the invoices",
+    "sconosciuto": "Unknown sender",
+    "esito": {
+      "daControllare_one": "{{count}} to check",
+      "daControllare_other": "{{count}} to check",
+      "caricate_one": "{{count}} loaded automatically",
+      "caricate_other": "{{count}} loaded automatically",
+      "doppioni_one": "{{count}} already there",
+      "doppioni_other": "{{count}} already there",
+      "niente": "No invoice"
+    }
+  },
+  "auto": {
+    "prossime": "Load this supplier's next invoices automatically",
+    "attivo": "This supplier's next invoices load automatically.",
+    "spegni": "Turn off"
   }
 }

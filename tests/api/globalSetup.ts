@@ -163,6 +163,13 @@ export default async function globalSetup(): Promise<() => Promise<void>> {
             // token della verifica dell'indirizzo e la chiave che cifra i
             // token dei locali nel database.
             META_GRAPH_URL: `http://127.0.0.1:${port + 14}`,
+            // Fatture via email (PR 3): Resend su uno stub che il test delle
+            // fatture via email accende da sé (porta del server + 15), il
+            // dominio d'arrivo e il segreto Svix con cui il test firma il webhook.
+            FATTURE_EMAIL_DOMAIN: 'fatture.test.local',
+            RESEND_FATTURE_API_KEY: 'test-resend-fatture-key',
+            RESEND_FATTURE_WEBHOOK_SECRET: `whsec_${Buffer.from('test-fatture-webhook-secret').toString('base64')}`,
+            RESEND_FATTURE_API_URL: `http://127.0.0.1:${port + 15}`,
             META_APP_SECRET: 'test-meta-app-secret',
             META_WEBHOOK_VERIFY_TOKEN: 'test-meta-verify-token',
             INTEGRATION_SECRETS_KEY: '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef',
