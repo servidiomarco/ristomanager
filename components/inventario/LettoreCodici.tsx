@@ -457,6 +457,14 @@ export const LettoreCodici: React.FC<Props> = ({
     </form>
   );
 
+  // Il piede delle due schede (carico e codice sconosciuto): Annulla largo
+  // quanto la sua parola, l'azione principale prende il resto. A metà e metà
+  // «Associa a un prodotto» andava a capo dentro un tasto alto 44px; su un
+  // telefono più stretto si accorcia con i puntini invece di spezzarsi.
+  const footerRow = 'flex gap-2';
+  const footerCancel = `${dsButton.secondary} flex-none`;
+  const footerMain = `${dsButton.primary} min-w-0 flex-1 whitespace-nowrap`;
+
   // ---- Il pannello in basso, per fase ----------------------------------
   let panel: React.ReactNode;
   if (phase.kind === 'found') {
@@ -472,8 +480,8 @@ export const LettoreCodici: React.FC<Props> = ({
             <div className="text-[18px] font-semibold leading-tight text-[var(--ds-text-primary)]">{p.name}</div>
             <div className="mt-0.5 flex flex-wrap items-center gap-x-2 text-[13px] text-[var(--ds-text-muted)]">
               {p.area !== activeArea && <StatusPill tone="info">{areaLabel(p.area)}</StatusPill>}
-              {p.category_name && <span>{p.category_name}</span>}
               <span className="tabular-nums">
+                {p.category_name ? `${p.category_name} · ` : ''}
                 {cell
                   ? t('lettore.stockHere', {
                       cell: toTitleCase(cell.name),
@@ -546,11 +554,11 @@ export const LettoreCodici: React.FC<Props> = ({
           </>
         )}
 
-        <div className="flex gap-2">
+        <div className={footerRow}>
           <button
             type="button"
             onClick={() => { setPhase({ kind: 'scan' }); setError(null); }}
-            className={`${dsButton.secondary} flex-1`}
+            className={footerCancel}
           >
             {t('lettore.cancel', 'Annulla')}
           </button>
@@ -558,12 +566,14 @@ export const LettoreCodici: React.FC<Props> = ({
             type="button"
             onClick={confirm}
             disabled={saving || !qtyValid || cellId == null}
-            className={`${dsButton.primary} flex-[2]`}
+            className={footerMain}
           >
-            {saving && <Loader2 className="h-4 w-4 animate-spin" aria-hidden />}
-            {direction === 'in'
-              ? t('lettore.confirmIn', { qty: qtyValid ? formatQuantity(qtyNumber, unit, locale) : '', defaultValue: 'Carica {{qty}}' })
-              : t('lettore.confirmOut', { qty: qtyValid ? formatQuantity(qtyNumber, unit, locale) : '', defaultValue: 'Scarica {{qty}}' })}
+            {saving && <Loader2 className="h-4 w-4 flex-shrink-0 animate-spin" aria-hidden />}
+            <span className="truncate">
+              {direction === 'in'
+                ? t('lettore.confirmIn', { qty: qtyValid ? formatQuantity(qtyNumber, unit, locale) : '', defaultValue: 'Carica {{qty}}' })
+                : t('lettore.confirmOut', { qty: qtyValid ? formatQuantity(qtyNumber, unit, locale) : '', defaultValue: 'Scarica {{qty}}' })}
+            </span>
           </button>
         </div>
         <p className="text-center text-[12px] text-[var(--ds-text-muted)]">
@@ -578,21 +588,25 @@ export const LettoreCodici: React.FC<Props> = ({
           <div className="text-[18px] font-semibold text-[var(--ds-text-primary)]">{t('lettore.unknownTitle', 'Codice non trovato')}</div>
           <div className="mt-0.5 text-[14px] tabular-nums text-[var(--ds-text-muted)]">{phase.code}</div>
         </div>
-        <div className="flex flex-col gap-2 sm:flex-row">
-          <button type="button" onClick={openPick} className={`${dsButton.primary} flex-1`}>
-            <Link2 className="h-4 w-4" aria-hidden />
-            {t('lettore.associate', 'Associa a un prodotto')}
+        {/* Lo stesso piede della scheda del carico: Annulla a sinistra,
+            l'azione che si cerca a destra e piena. «Nuovo prodotto» sta sopra,
+            a tutta larghezza: è la strada meno frequente. Niente flex-1 in una
+            colonna: lì schiaccia l'altezza (base 0) e il tasto perde i 44px. */}
+        {onCreateProduct && (
+          <button type="button" onClick={() => onCreateProduct(phase.code)} className={`${dsButton.secondary} w-full`}>
+            <Plus className="h-4 w-4" aria-hidden />
+            {t('lettore.newProduct', 'Nuovo prodotto')}
           </button>
-          {onCreateProduct && (
-            <button type="button" onClick={() => onCreateProduct(phase.code)} className={`${dsButton.secondary} flex-1`}>
-              <Plus className="h-4 w-4" aria-hidden />
-              {t('lettore.newProduct', 'Nuovo prodotto')}
-            </button>
-          )}
+        )}
+        <div className={footerRow}>
+          <button type="button" onClick={() => setPhase({ kind: 'scan' })} className={footerCancel}>
+            {t('lettore.cancel', 'Annulla')}
+          </button>
+          <button type="button" onClick={openPick} className={footerMain}>
+            <Link2 className="h-4 w-4 flex-shrink-0" aria-hidden />
+            <span className="truncate">{t('lettore.associate', 'Associa a un prodotto')}</span>
+          </button>
         </div>
-        <button type="button" onClick={() => setPhase({ kind: 'scan' })} className={`${dsButton.quiet} w-full`}>
-          {t('lettore.scanAnother', 'Leggi un altro codice')}
-        </button>
       </div>
     );
   } else if (phase.kind === 'pick') {
@@ -680,7 +694,10 @@ export const LettoreCodici: React.FC<Props> = ({
         {/* La fotocamera */}
         {/* Nella scelta del prodotto la fotocamera è spenta e resta solo la
             striscia in alto, con il titolo e la chiusura. */}
-        <div className={`relative ${phase.kind === 'pick' ? 'h-[76px] flex-none' : 'min-h-0 flex-1'}`}>
+        {/* overflow-hidden: l'ombra larga 9999px attorno al riquadro scurisce
+            la fotocamera, e senza questo scuriva anche il pannello sotto (sul
+            telefono le schede uscivano grigie e spente). */}
+        <div className={`relative overflow-hidden ${phase.kind === 'pick' ? 'h-[76px] flex-none' : 'min-h-0 flex-1'}`}>
           <video ref={videoRef} className="absolute inset-0 h-full w-full object-cover" muted playsInline aria-hidden />
           {status === 'running' && phase.kind !== 'pick' && (
             // Il riquadro dice dove mettere il codice; il resto dell'immagine
