@@ -21424,13 +21424,14 @@ const toRawMovement = (r: any): RawMovement => ({
 // confine, e ognuna delle due resta vera.
 const MOVEMENTS_PAGE = 400;
 
-// GET /inventory/movements?area=CUCINA[&product_id=][&kind=in|out][&before=cursore]
+// GET /inventory/movements?area=CUCINA[&product_id=][&kind=in|out][&user_id=|&user_name=][&before=cursore]
 // Voci dalla più recente; `next_before` porta alla pagina dopo (null = finite).
 // kind=in tiene ciò che è entrato, out ciò che è uscito, comunque sia stato
-// registrato (tocco, conteggio, fattura).
+// registrato (tocco, conteggio, fattura). user_id tiene una persona;
+// user_name chi non ha più un utente (cancellato: resta la firma).
 app.get('/inventory/movements', authenticate, requirePermission('inventory:view'), async (req, res) => {
     try {
-        const { area, product_id, kind, before } = req.query as Record<string, string | undefined>;
+        const { area, product_id, kind, before, user_id, user_name } = req.query as Record<string, string | undefined>;
         const params: any[] = [req.tenantId!];
         let where = 'WHERE m.tenant_id = $1';
         if (area) {
@@ -21446,6 +21447,19 @@ app.get('/inventory/movements', authenticate, requirePermission('inventory:view'
         }
         if (!area && product_id == null) return res.status(400).json({ error: 'area or product_id is required' });
         if (kind != null && kind !== 'in' && kind !== 'out') return res.status(400).json({ error: 'Invalid kind' });
+        // Il filtro per persona sta nella query, non dopo il raggruppamento:
+        // chi ha fatto tre movimenti in un mese li trova nella prima pagina,
+        // invece che sparsi in pagine piene di colleghi.
+        if (user_id != null) {
+            const id = Number(user_id);
+            if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ error: 'Invalid user_id' });
+            params.push(id);
+            where += ` AND m.user_id = $${params.length}`;
+        } else if (user_name != null) {
+            if (!user_name.trim() || user_name.length > 255) return res.status(400).json({ error: 'Invalid user_name' });
+            params.push(user_name);
+            where += ` AND m.user_id IS NULL AND m.user_name = $${params.length}`;
+        }
         if (before != null) {
             const sep = before.lastIndexOf('|');
             const at = sep > 0 ? before.slice(0, sep) : '';
@@ -21479,6 +21493,52 @@ app.get('/inventory/movements', authenticate, requirePermission('inventory:view'
         });
     } catch (err) {
         console.error('GET /inventory/movements error:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+// GET /inventory/movements/people?area=CUCINA | ?product_id= — chi ha fatto
+// almeno un movimento lì: le voci del filtro per persona dello storico, dalla
+// più recente. Chi non ha più un utente compare con la firma salvata e
+// user_id null (si filtra con user_name).
+app.get('/inventory/movements/people', authenticate, requirePermission('inventory:view'), async (req, res) => {
+    try {
+        const { area, product_id } = req.query as Record<string, string | undefined>;
+        const params: any[] = [req.tenantId!];
+        let where = 'WHERE m.tenant_id = $1';
+        if (area) {
+            if (!ALLOWED_INVENTORY_AREAS.has(area)) return res.status(400).json({ error: 'Invalid area' });
+            params.push(area);
+            where += ` AND p.area = $${params.length}`;
+        }
+        if (product_id != null) {
+            const id = Number(product_id);
+            if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ error: 'Invalid product_id' });
+            params.push(id);
+            where += ` AND m.product_id = $${params.length}`;
+        }
+        if (!area && product_id == null) return res.status(400).json({ error: 'area or product_id is required' });
+        const result = await queryWithRetry(
+            `SELECT m.user_id,
+                    MAX(COALESCE(NULLIF(TRIM(u.full_name), ''), m.user_name)) AS user_name,
+                    MAX(m.created_at) AS last_at
+             FROM inventory_movements m
+             JOIN inventory_products p ON p.id = m.product_id AND p.tenant_id = m.tenant_id
+             LEFT JOIN users u ON u.id = m.user_id
+             ${where}
+             GROUP BY m.user_id, CASE WHEN m.user_id IS NULL THEN m.user_name END
+             ORDER BY last_at DESC`,
+            params
+        );
+        res.json(result.rows
+            .filter(r => typeof r.user_name === 'string' && r.user_name.trim() !== '')
+            .map(r => ({
+                user_id: r.user_id == null ? null : Number(r.user_id),
+                user_name: r.user_name,
+                last_at: new Date(r.last_at).toISOString(),
+            })));
+    } catch (err) {
+        console.error('GET /inventory/movements/people error:', err);
         res.status(500).json({ error: 'Internal server error' });
     }
 });

@@ -5,13 +5,14 @@ import {
   InventoryArea,
   InventoryLocation,
   InventoryMovementEntry,
+  InventoryMovementPerson,
   InventoryMovementReason,
   InventoryProduct,
 } from '../../types';
-import { getInventoryMovements } from '../../services/apiService';
+import { getInventoryMovementPeople, getInventoryMovements } from '../../services/apiService';
 import { getRomeDatePart, getRomeTimePart } from '../../utils/reservationTime';
 import { toTitleCase } from '../../utils/text';
-import { ModalShell, Sheet, SegmentedControl, SectionHeader, EmptyState, Callout, dsButton } from '../ds';
+import { ModalShell, Sheet, SegmentedControl, SectionHeader, EmptyState, Callout, dsButton, dsSelect } from '../ds';
 
 type TFn = (key: string, opts?: any) => string;
 
@@ -118,6 +119,16 @@ export const dateLocale = (language: string | undefined): string =>
 
 type Kind = 'all' | 'in' | 'out';
 
+// Il valore del filtro per persona: '' tutti, «u:12» un utente, «n:Firma» chi
+// non ha più un utente (resta solo la firma sui suoi movimenti).
+const personKey = (p: { user_id: number | null; user_name: string }): string =>
+  p.user_id != null ? `u:${p.user_id}` : `n:${p.user_name}`;
+
+const personFilter = (key: string): { user_id?: number; user_name?: string } =>
+  key.startsWith('u:') ? { user_id: Number(key.slice(2)) }
+  : key.startsWith('n:') ? { user_name: key.slice(2) }
+  : {};
+
 // Una pagina filtrata può non avere nessuna voce (400 righe tutte di scarichi
 // guardando i carichi): si va avanti da soli qualche pagina prima di arrendersi
 // e chiedere «Carica altri».
@@ -140,6 +151,8 @@ export const Movimenti: React.FC<Props> = ({ open, onClose, area, areaLabel, pro
   const locale = dateLocale(i18n.language);
 
   const [kind, setKind] = useState<Kind>('all');
+  const [person, setPerson] = useState('');
+  const [people, setPeople] = useState<InventoryMovementPerson[]>([]);
   const [entries, setEntries] = useState<InventoryMovementEntry[]>([]);
   const [next, setNext] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
@@ -152,7 +165,26 @@ export const Movimenti: React.FC<Props> = ({ open, onClose, area, areaLabel, pro
 
   // Ogni apertura riparte da «Tutti»: il filtro di ieri sera non è la domanda
   // di stamattina. Alla chiusura, così la prima lettura è già quella giusta.
-  useEffect(() => { if (!open) setKind('all'); }, [open]);
+  useEffect(() => {
+    if (open) return;
+    setKind('all');
+    setPerson('');
+  }, [open]);
+
+  // Chi ha mosso qualcosa qui, in ordine di nome. Se la lettura non riesce il
+  // filtro semplicemente non compare: lo storico resta leggibile.
+  useEffect(() => {
+    if (!open) return undefined;
+    let stop = false;
+    setPeople([]);
+    getInventoryMovementPeople(productId != null ? { product_id: productId } : { area })
+      .then(rows => {
+        if (stop || !Array.isArray(rows)) return;
+        setPeople([...rows].sort((a, b) => a.user_name.localeCompare(b.user_name, locale)));
+      })
+      .catch(() => {});
+    return () => { stop = true; };
+  }, [open, productId, area]);
 
   const load = async (before: string | null) => {
     const mine = request.current;
@@ -166,6 +198,7 @@ export const Movimenti: React.FC<Props> = ({ open, onClose, area, areaLabel, pro
         const page = await getInventoryMovements({
           ...(productId != null ? { product_id: productId } : { area }),
           kind: kind === 'all' ? undefined : kind,
+          ...personFilter(person),
           before: cursor,
         });
         if (cancelled()) return;
@@ -188,7 +221,7 @@ export const Movimenti: React.FC<Props> = ({ open, onClose, area, areaLabel, pro
     setEntries([]);
     setNext(null);
     load(null);
-  }, [open, productId, area, kind]);
+  }, [open, productId, area, kind, person]);
 
   const productById = useMemo(() => new Map(products.map(p => [p.id, p])), [products]);
   const locationById = useMemo(() => new Map(locations.map(l => [l.id, l])), [locations]);
@@ -215,7 +248,8 @@ export const Movimenti: React.FC<Props> = ({ open, onClose, area, areaLabel, pro
   const renderEntry = (e: InventoryMovementEntry, first: boolean) => {
     const p = product ?? productById.get(e.product_id) ?? null;
     const cell = locationById.get(e.location_id);
-    const who = authorName(e.user_name);
+    // Filtrando una persona il suo nome su ogni riga non direbbe niente.
+    const who = person ? '' : authorName(e.user_name);
     // Nello storico di un prodotto il titolo è cosa è successo; in quello
     // dell'area è il prodotto, e cosa è successo scende nella riga sotto.
     const title = product ? movementLabel(e, t) : (p?.name ?? t('product'));
@@ -301,12 +335,29 @@ export const Movimenti: React.FC<Props> = ({ open, onClose, area, areaLabel, pro
   const title = product ? product.name : t('movimenti.title', 'Movimenti');
   const subtitle = product ? t('movimenti.title', 'Movimenti') : areaLabel;
   const filter = (
-    <SegmentedControl<Kind>
-      value={kind}
-      onChange={setKind}
-      options={kindOptions}
-      ariaLabel={t('movimenti.filter', 'Mostra')}
-    />
+    <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+      <div className="min-w-0 sm:flex-1">
+        <SegmentedControl<Kind>
+          value={kind}
+          onChange={setKind}
+          options={kindOptions}
+          ariaLabel={t('movimenti.filter', 'Mostra')}
+        />
+      </div>
+      {people.length > 0 && (
+        <select
+          value={person}
+          onChange={e => setPerson(e.target.value)}
+          aria-label={t('movimenti.person', 'Persona')}
+          className={`${dsSelect} sm:w-[220px] sm:flex-shrink-0`}
+        >
+          <option value="">{t('movimenti.everyone', 'Tutte le persone')}</option>
+          {people.map(p => (
+            <option key={personKey(p)} value={personKey(p)}>{authorName(p.user_name)}</option>
+          ))}
+        </select>
+      )}
+    </div>
   );
 
   if (isWide) {

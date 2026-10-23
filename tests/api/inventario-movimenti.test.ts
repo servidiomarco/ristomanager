@@ -9,6 +9,7 @@ import { api, ownerToken, bearer } from './helpers';
 const dbUrl = () => process.env.DATABASE_URL || 'postgresql://localhost/ristotest_api';
 const WAITER_EMAIL = 'cameriere.movimenti@test.local';
 const WAITER_PASSWORD = 'Movimenti-Test-2026!';
+const COOK_EMAIL = 'cuoco.movimenti@test.local';
 
 describe('magazzino · storico dei movimenti', () => {
     let owner = '';
@@ -16,6 +17,9 @@ describe('magazzino · storico dei movimenti', () => {
     let ownerEmail = '';
     let waiter = '';
     let waiterId = 0;
+    let cook = '';
+    let cookId = 0;
+    let ownerId = 0;
     let locationId = 0;
     let productId = 0;
     let bulkProductId = 0;
@@ -40,6 +44,17 @@ describe('magazzino · storico dei movimenti', () => {
         expect(session.status).toBe(200);
         waiter = session.body.accessToken;
 
+        // La cucina carica e scarica (inventory:full): è il secondo nome nel
+        // filtro per persona.
+        const cookUser = await api().post('/auth/users').set(bearer(owner))
+            .send({ email: COOK_EMAIL, password: WAITER_PASSWORD, full_name: 'Cuoco Movimenti', role: 'KITCHEN' });
+        expect(cookUser.status).toBe(201);
+        cookId = cookUser.body.id;
+        const cookSession = await api().post('/auth/login').send({ email: COOK_EMAIL, password: WAITER_PASSWORD });
+        expect(cookSession.status).toBe(200);
+        cook = cookSession.body.accessToken;
+        ownerId = me.body.id ?? me.body.user?.id;
+
         const loc = await api().post('/inventory/locations').set(bearer(owner))
             .send({ area: 'BAR', name: 'Frigo movimenti test', sort_order: 9 });
         expect(loc.status).toBe(201);
@@ -62,7 +77,7 @@ describe('magazzino · storico dei movimenti', () => {
             await db.query(`DELETE FROM inventory_products WHERE id = ANY($1::int[])`, [[productId, bulkProductId]]);
             await db.query(`DELETE FROM inventory_locations WHERE id = $1`, [locationId]);
             await db.query(`DELETE FROM notifications WHERE tag LIKE 'low-stock-%'`);
-            if (waiterId) await db.query(`DELETE FROM users WHERE id = $1`, [waiterId]);
+            await db.query(`DELETE FROM users WHERE id = ANY($1::int[])`, [[waiterId, cookId].filter(Boolean)]);
         } finally {
             await db.end();
         }
@@ -170,6 +185,49 @@ describe('magazzino · storico dei movimenti', () => {
         expect(new Set(ids).size).toBe(405);
     });
 
+    it('per persona: chi c\'è, e solo le sue voci', async () => {
+        const cookMove = await api().post('/inventory/movements').set(bearer(cook))
+            .send({ product_id: productId, location_id: locationId, delta: -1, reason: 'SCARICO' });
+        expect(cookMove.status).toBe(201);
+        // Un collega che non ha più l'utente: resta la firma.
+        await db.query(
+            `INSERT INTO inventory_movements (tenant_id, product_id, location_id, delta, reason, user_id, user_name, created_at)
+             VALUES (1, $1, $2, 2, 'CARICO', NULL, 'Ex collega', NOW() - interval '1 day')`,
+            [productId, locationId]
+        );
+
+        const people = await api().get('/inventory/movements/people').set(bearer(waiter)).query({ product_id: productId });
+        expect(people.status).toBe(200);
+        // Dal più recente.
+        expect(people.body.map((p: any) => [p.user_id, p.user_name])).toEqual([
+            [cookId, 'Cuoco Movimenti'],
+            [ownerId, ownerName],
+            [null, 'Ex collega'],
+        ]);
+        const bar = await api().get('/inventory/movements/people').set(bearer(owner)).query({ area: 'BAR' });
+        expect(bar.body.map((p: any) => p.user_name)).toEqual(expect.arrayContaining(['Cuoco Movimenti', ownerName, 'Ex collega']));
+        const cucina = await api().get('/inventory/movements/people').set(bearer(owner)).query({ area: 'CUCINA' });
+        expect(cucina.body.some((p: any) => p.user_id === cookId)).toBe(false);
+
+        const soloCuoco = await api().get('/inventory/movements').set(bearer(owner))
+            .query({ product_id: productId, user_id: cookId });
+        expect(soloCuoco.body.entries.map((e: any) => [e.user_name, e.delta])).toEqual([['Cuoco Movimenti', -1]]);
+
+        const soloTitolare = await api().get('/inventory/movements').set(bearer(owner))
+            .query({ area: 'BAR', user_id: ownerId, kind: 'out' });
+        expect(soloTitolare.body.entries.length).toBeGreaterThan(0);
+        expect(soloTitolare.body.entries.every((e: any) => e.user_name === ownerName && e.delta < 0)).toBe(true);
+
+        const exCollega = await api().get('/inventory/movements').set(bearer(owner))
+            .query({ product_id: productId, user_name: 'Ex collega' });
+        expect(exCollega.body.entries.map((e: any) => [e.user_name, e.delta])).toEqual([['Ex collega', 2]]);
+        // La firma vale solo per chi non ha più l'utente: col nome di un
+        // utente attivo non si pesca niente.
+        const perNome = await api().get('/inventory/movements').set(bearer(owner))
+            .query({ product_id: productId, user_name: 'Cuoco Movimenti' });
+        expect(perNome.body.entries).toEqual([]);
+    });
+
     it('parametri sbagliati: 400', async () => {
         const get = (query: Record<string, string>) =>
             api().get('/inventory/movements').set(bearer(owner)).query(query);
@@ -178,6 +236,9 @@ describe('magazzino · storico dei movimenti', () => {
         expect((await get({ product_id: 'abc' })).status).toBe(400);
         expect((await get({ area: 'BAR', kind: 'tutto' })).status).toBe(400);
         expect((await get({ area: 'BAR', before: 'ieri|3' })).status).toBe(400);
+        expect((await get({ area: 'BAR', user_id: 'marco' })).status).toBe(400);
+        expect((await get({ area: 'BAR', user_name: ' ' })).status).toBe(400);
+        expect((await api().get('/inventory/movements/people').set(bearer(owner))).status).toBe(400);
         expect((await api().get('/inventory/movements/latest').set(bearer(owner))).status).toBe(400);
     });
 });

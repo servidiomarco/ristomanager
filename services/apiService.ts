@@ -1,4 +1,4 @@
-import { Reservation, Table, Room, Dish, DishComponent, Modifier, ModifierGroup, RestaurantMenu, BanquetMenu, BanquetPayment, BanquetStatus, TableMerge, TableHiddenOverride, RoomClosedOverride, Shift, Customer, InventoryArea, InventoryLocation, InventoryProduct, InventoryStockRow, InventoryMovement, InventoryMovementEntry, InventoryMovementReason, InventoryCategory, PaymentRequest, TableAssignmentSuggestion } from '../types';
+import { Reservation, Table, Room, Dish, DishComponent, Modifier, ModifierGroup, RestaurantMenu, BanquetMenu, BanquetPayment, BanquetStatus, TableMerge, TableHiddenOverride, RoomClosedOverride, Shift, Customer, InventoryArea, InventoryLocation, InventoryProduct, InventoryStockRow, InventoryMovement, InventoryMovementEntry, InventoryMovementPerson, InventoryMovementReason, InventoryCategory, PaymentRequest, TableAssignmentSuggestion } from '../types';
 import { socketClient } from './socketClient';
 import { authApiService } from './authApiService';
 import { buildApiError } from './apiError';
@@ -1258,17 +1258,35 @@ export const getInventoryMovements = async (filter: {
   area?: InventoryArea;
   product_id?: number;
   kind?: 'in' | 'out';
+  /** Una persona: per id, o per firma se l'utente non c'è più. */
+  user_id?: number;
+  user_name?: string;
   before?: string | null;
 }): Promise<{ entries: InventoryMovementEntry[]; next_before: string | null }> => {
   const q = new URLSearchParams();
   if (filter.area) q.set('area', filter.area);
   if (filter.product_id != null) q.set('product_id', String(filter.product_id));
   if (filter.kind) q.set('kind', filter.kind);
+  if (filter.user_id != null) q.set('user_id', String(filter.user_id));
+  else if (filter.user_name) q.set('user_name', filter.user_name);
   if (filter.before) q.set('before', filter.before);
   return apiRequest<{ entries: InventoryMovementEntry[]; next_before: string | null }>(
     `${API_URL}/inventory/movements?${q.toString()}`,
     { headers: getHeaders(false) }
   );
+};
+
+// Chi ha fatto almeno un movimento nell'area o nel prodotto.
+export const getInventoryMovementPeople = async (filter: {
+  area?: InventoryArea;
+  product_id?: number;
+}): Promise<InventoryMovementPerson[]> => {
+  const q = new URLSearchParams();
+  if (filter.area) q.set('area', filter.area);
+  if (filter.product_id != null) q.set('product_id', String(filter.product_id));
+  return apiRequest<InventoryMovementPerson[]>(`${API_URL}/inventory/movements/people?${q.toString()}`, {
+    headers: getHeaders(false),
+  });
 };
 
 // La voce più recente di ogni prodotto dell'area.

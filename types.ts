@@ -1457,6 +1457,14 @@ export interface InventoryMovementEntry {
   from_invoice: boolean;
 }
 
+// Chi compare nello storico di un'area o di un prodotto: le voci del filtro
+// per persona. user_id null = utente cancellato, resta la firma.
+export interface InventoryMovementPerson {
+  user_id: number | null;
+  user_name: string;
+  last_at: string;
+}
+
 // L'assenza di un collega vista senza il permesso staff:leave: il server
 // manda ferie, malattia e permesso con questo tipo e senza note. Non è un
 // TimeOffType: non si registra, si legge soltanto.
