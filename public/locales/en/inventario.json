@@ -198,5 +198,10 @@
     "torchOff": "Turn off the torch",
     "barcodes": "Barcodes",
     "removeCode": "Remove {{code}}"
+  },
+  "rapido": {
+    "group": "Add or use {{product}}",
+    "in": "Add {{product}}",
+    "out": "Use {{product}}"
   }
 }

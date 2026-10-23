@@ -42,6 +42,7 @@ import { Movimenti, authorName, dateLocale, formatDelta, movementLabel, whenShor
 import { extendLatest, type MovementEntry, type RawMovement } from '../utils/inventoryMovements';
 import { normalizeBarcode } from '../utils/barcode';
 import { LettoreCodici } from './inventario/LettoreCodici';
+import { SchedaMovimento, parseQty, proposeCell, rememberCell, type Direction } from './inventario/SchedaMovimento';
 import {
   ModalShell, Sheet, SegmentedControl, SearchField, SectionHeader, StatStrip,
   StatusPill, Callout, EmptyState, FormCard, Field, useMediaQuery,
@@ -206,6 +207,14 @@ export const Inventory: React.FC<Props> = ({ showToast, autoOpenNewProduct, onAu
   // Il codice sconosciuto da cui è nata la scheda «Nuovo prodotto»: salvato
   // il prodotto, si torna al lettore con quel codice già letto.
   const [scanToResume, setScanToResume] = useState<string | null>(null);
+
+  // Il carico o scarico dai tasti − e + del Totale: la stessa scheda del
+  // lettore, in un foglio. Nella vista per cella i tasti restano immediati
+  // (uno per tocco), perché lì la cella è già scelta.
+  const [rapido, setRapido] = useState<{ product: InventoryProduct; direction: Direction } | null>(null);
+  const [rapidoQty, setRapidoQty] = useState('1');
+  const [rapidoCell, setRapidoCell] = useState<number | null>(null);
+  const [rapidoSaving, setRapidoSaving] = useState(false);
 
   // The "gestisci" menu behind the ⋮ in the page head.
   const [menuOpen, setMenuOpen] = useState(false);
@@ -563,6 +572,32 @@ export const Inventory: React.FC<Props> = ({ showToast, autoOpenNewProduct, onAu
     }
     const reason = sign > 0 ? InventoryMovementReason.CARICO : InventoryMovementReason.SCARICO;
     applyMovement(productId, activeLocationId, sign, reason);
+  };
+
+  const openRapido = (product: InventoryProduct, direction: Direction) => {
+    const productStock = stock.filter(s => s.product_id === product.id);
+    setRapido({ product, direction });
+    setRapidoQty('1');
+    setRapidoCell(proposeCell(product.area, locations, productStock, activeLocationId));
+  };
+
+  const confirmRapido = async () => {
+    if (!rapido || rapidoCell == null) return;
+    const n = parseQty(rapidoQty);
+    if (!Number.isFinite(n) || n <= 0) return;
+    const { product, direction } = rapido;
+    const delta = direction === 'in' ? n : -n;
+    setRapidoSaving(true);
+    const ok = await applyMovement(
+      product.id, rapidoCell, delta,
+      direction === 'in' ? InventoryMovementReason.CARICO : InventoryMovementReason.SCARICO,
+    );
+    setRapidoSaving(false);
+    if (!ok) return;
+    rememberCell(product.area, rapidoCell);
+    const cell = locations.find(l => l.id === rapidoCell);
+    showToast(`${formatDelta(delta, product.unit, locale)} · ${product.name}${cell && locations.length > 1 ? ` · ${toTitleCase(cell.name)}` : ''}`, 'success');
+    setRapido(null);
   };
 
   const handleSetQuantity = async (productId: number, raw: string) => {
@@ -970,14 +1005,14 @@ export const Inventory: React.FC<Props> = ({ showToast, autoOpenNewProduct, onAu
     // prodotto. In quest'ordine perché la riga si taglia da destra: il genere e
     // la cella sono i primi a poter mancare. Il -my-2 tiene la riga bassa e il
     // bersaglio a 44px.
-    const lastLine = (placement: string) =>
+    const lastLine = () =>
       last && lastText ? (
         <button
           type="button"
           onClick={() => setHistory({ product: p })}
           title={lastText.full}
           aria-label={`${t('movimenti.openFor', { product: p.name, defaultValue: 'Movimenti di {{product}}' })}: ${lastText.full}`}
-          className={`-mx-1 -my-2 inline-flex min-h-[44px] max-w-full items-center gap-1.5 rounded-[var(--ds-radius-sm)] px-1 text-left text-[13px] text-[var(--ds-text-muted)] transition-colors hover:text-[var(--ds-text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] ${placement}`}
+          className={`-mx-1 -my-2 inline-flex min-h-[44px] max-w-full items-center gap-1.5 rounded-[var(--ds-radius-sm)] px-1 text-left text-[13px] text-[var(--ds-text-muted)] transition-colors hover:text-[var(--ds-text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]`}
         >
           <History className="h-3.5 w-3.5 flex-shrink-0" aria-hidden />
           <span className="min-w-0 truncate">
@@ -1001,10 +1036,11 @@ export const Inventory: React.FC<Props> = ({ showToast, autoOpenNewProduct, onAu
           <span className="absolute inset-y-0 left-0 w-[3px] bg-[var(--ds-critical-solid)]" aria-hidden />
         )}
 
-        {/* In a cell view the name takes the whole first line on a phone: a
-            176px stepper and two round actions leave it about seventy pixels
-            otherwise, which is four characters of "Costine agnello tagliate". */}
-        <div className={`min-w-0 flex-1 ${isTotale ? '' : 'basis-full sm:basis-auto'}`}>
+        {/* With the − and + controls the name takes the whole first line on a
+            phone: a 176px stepper and two round actions leave it about seventy
+            pixels otherwise, which is four characters of "Costine agnello
+            tagliate". Only a read-only Totale row keeps it beside the number. */}
+        <div className={`min-w-0 flex-1 ${isTotale && !canEdit ? '' : 'basis-full sm:basis-auto'}`}>
           <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
             <span
               className={`truncate text-[15px] font-medium ${
@@ -1050,9 +1086,7 @@ export const Inventory: React.FC<Props> = ({ showToast, autoOpenNewProduct, onAu
           {p.notes && !isTotale && (
             <div className="mt-0.5 truncate text-[13px] text-[var(--ds-text-muted)]">{p.notes}</div>
           )}
-          {/* Su un telefono in Totale la colonna del nome è mezzo schermo:
-              lì la riga scende sotto, a tutta larghezza (vedi in fondo). */}
-          {lastLine(isTotale ? 'max-sm:hidden' : '')}
+          {lastLine()}
         </div>
 
         {isTotale && (
@@ -1066,7 +1100,37 @@ export const Inventory: React.FC<Props> = ({ showToast, autoOpenNewProduct, onAu
           </div>
         )}
 
-        {isTotale ? (
+        {isTotale && canEdit ? (
+          // In Totale la cella non è scelta: − e + aprono la scheda, dove si
+          // scrive quanto e si sceglie dove (proposta quella dove il prodotto
+          // c'è già). Stessa forma dei tasti della vista per cella.
+          <div className="flex flex-shrink-0 items-center gap-1.5" role="group"
+            aria-label={t('rapido.group', { product: p.name, defaultValue: 'Carica o scarica {{product}}' })}>
+            <button
+              type="button"
+              onClick={() => openRapido(p, 'out')}
+              aria-label={t('rapido.out', { product: p.name, defaultValue: 'Scarica {{product}}' })}
+              className="inline-flex h-11 w-11 items-center justify-center rounded-[var(--ds-radius-control)] bg-[var(--ds-surface-row)] text-[20px] font-medium leading-none text-[var(--ds-text-primary)] transition-colors hover:bg-[var(--ds-border)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+            >
+              −
+            </button>
+            <div
+              className={`w-[76px] text-center text-[17px] font-semibold tabular-nums ${
+                lowStock ? 'text-[var(--ds-critical-text)]' : 'text-[var(--ds-text-primary)]'
+              }`}
+            >
+              {qty}
+            </div>
+            <button
+              type="button"
+              onClick={() => openRapido(p, 'in')}
+              aria-label={t('rapido.in', { product: p.name, defaultValue: 'Carica {{product}}' })}
+              className="inline-flex h-11 w-11 items-center justify-center rounded-[var(--ds-radius-control)] bg-[var(--ds-action-bg)] text-[20px] font-medium leading-none text-[var(--ds-action-fg)] transition-colors hover:bg-[var(--ds-action-bg-hover)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+            >
+              +
+            </button>
+          </div>
+        ) : isTotale ? (
           <div
             className={`w-14 flex-shrink-0 text-right text-[17px] font-semibold tabular-nums ${
               lowStock ? 'text-[var(--ds-critical-text)]' : 'text-[var(--ds-text-primary)]'
@@ -1159,7 +1223,6 @@ export const Inventory: React.FC<Props> = ({ showToast, autoOpenNewProduct, onAu
           </div>
         )}
 
-        {isTotale && lastLine('basis-full sm:hidden')}
       </div>
     );
   };
@@ -1501,7 +1564,7 @@ export const Inventory: React.FC<Props> = ({ showToast, autoOpenNewProduct, onAu
           <div className="hidden items-center gap-3 px-5 py-3 text-[13px] text-[var(--ds-text-muted)] md:flex">
             <span className="min-w-0 flex-1">{t('product')}</span>
             {isTotale && <span className="w-[260px] text-right lg:w-[320px]">{t('where')}</span>}
-            <span className={isTotale ? 'w-14 text-right' : canEdit ? 'w-[176px] text-right' : 'w-[76px] text-right'}>
+            <span className={isTotale ? (canEdit ? 'w-[176px] text-center' : 'w-14 text-right') : canEdit ? 'w-[176px] text-right' : 'w-[76px] text-right'}>
               {isTotale ? 'Totale' : `Quantità in ${toTitleCase(activeLocation?.name ?? '')}`}
             </span>
             {canEdit && <span className="w-[84px]" aria-hidden />}
@@ -1977,6 +2040,50 @@ export const Inventory: React.FC<Props> = ({ showToast, autoOpenNewProduct, onAu
           </Field>
         </FormCard>
       </ModalShell>
+
+      {rapido && (() => {
+        const scheda = (
+          <SchedaMovimento
+            product={rapido.product}
+            locations={locations}
+            stock={stock.filter(s => s.product_id === rapido.product.id)}
+            direction={rapido.direction}
+            onDirection={d => setRapido(r => (r ? { ...r, direction: d } : r))}
+            qty={rapidoQty}
+            onQty={setRapidoQty}
+            cellId={rapidoCell}
+            onCell={setRapidoCell}
+            saving={rapidoSaving}
+            onConfirm={confirmRapido}
+            onCancel={() => setRapido(null)}
+            showName={false}
+            areaLabel={areaLabel}
+            autoFocusQty={isWide}
+          />
+        );
+        return isWide ? (
+          <ModalShell
+            open
+            onClose={() => setRapido(null)}
+            title={rapido.product.name}
+            size="sm"
+            closeOnEscape
+            bodyClassName="px-5 py-4 sm:px-6"
+          >
+            {scheda}
+          </ModalShell>
+        ) : (
+          <Sheet
+            open
+            onClose={() => setRapido(null)}
+            title={rapido.product.name}
+            ariaLabel={rapido.product.name}
+            bodyClassName="px-4 py-4"
+          >
+            {scheda}
+          </Sheet>
+        );
+      })()}
 
       <LettoreCodici
         open={scanner != null}

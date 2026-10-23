@@ -198,5 +198,10 @@
     "torchOff": "Spegni la torcia",
     "barcodes": "Codici a barre",
     "removeCode": "Togli {{code}}"
+  },
+  "rapido": {
+    "group": "Carica o scarica {{product}}",
+    "in": "Carica {{product}}",
+    "out": "Scarica {{product}}"
   }
 }
