@@ -128,5 +128,31 @@
   },
   "supplierInvoices": "Supplier invoices",
   "invoicesToCheck_one": "invoice",
-  "invoicesToCheck_other": "invoices"
+  "invoicesToCheck_other": "invoices",
+  "movimenti": {
+    "title": "Movements",
+    "all": "All",
+    "in": "In",
+    "out": "Out",
+    "filter": "Show",
+    "loading": "Loading movements…",
+    "loadError": "Could not load movements",
+    "empty": "No movements",
+    "emptyIn": "Nothing added",
+    "emptyOut": "Nothing used",
+    "loadMore": "Load more",
+    "today": "Today",
+    "yesterday": "Yesterday",
+    "todayAt": "today {{time}}",
+    "yesterdayAt": "yesterday {{time}}",
+    "openFor": "Movements of {{product}}",
+    "reason": {
+      "CARICO": "Added",
+      "SCARICO": "Used",
+      "RETTIFICA": "Count",
+      "TRASFERIMENTO": "Transfer",
+      "invoiceIn": "From invoice",
+      "invoiceOut": "Invoice undone"
+    }
+  }
 }

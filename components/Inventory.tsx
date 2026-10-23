@@ -6,6 +6,7 @@ import {
   InventoryProduct,
   InventoryStockRow,
   InventoryMovementReason,
+  InventoryMovementEntry,
   InventoryCategory,
 } from '../types';
 import {
@@ -23,18 +24,21 @@ import {
   updateInventoryCategory,
   deleteInventoryCategory,
   postInventoryMovement,
+  getInventoryLatestMovements,
 } from '../services/apiService';
 import { useAuth } from '../contexts/AuthContext';
 import { toTitleCase } from '../utils/text';
 import {
   Loader2, Plus, Pencil, Trash2, Boxes, GripVertical, Check, MoreVertical,
-  ChefHat, Wine, GlassWater, AlertTriangle, Tag, Search, Printer, Container, Receipt,
+  ChefHat, Wine, GlassWater, AlertTriangle, Tag, Search, Printer, Container, Receipt, History, ChevronRight,
 } from 'lucide-react';
 import { PrintInventoryModal } from './PrintInventoryModal';
 import { FattureFornitori } from './fatture/FattureFornitori';
 import { fattureFornitoriApi } from '../services/fattureFornitoriApiService';
 import { onSocketEvent } from '../services/socketEvents';
 import { SkeletonProductList } from './SkeletonCards';
+import { Movimenti, authorName, dateLocale, formatDelta, movementLabel, whenShort } from './inventario/Movimenti';
+import { extendLatest, type MovementEntry, type RawMovement } from '../utils/inventoryMovements';
 import {
   ModalShell, Sheet, SegmentedControl, SearchField, SectionHeader, StatStrip,
   StatusPill, Callout, EmptyState, FormCard, Field, useMediaQuery,
@@ -77,7 +81,8 @@ const rowIconButtonDanger =
 const plural = (n: number, one: string, many: string): string => `${n} ${n === 1 ? one : many}`;
 
 export const Inventory: React.FC<Props> = ({ showToast, autoOpenNewProduct, onAutoOpenNewProductHandled }) => {
-    const { t } = useTranslation('inventario', { useSuspense: false });
+    const { t, i18n } = useTranslation('inventario', { useSuspense: false });
+  const locale = dateLocale(i18n.language);
 
   /* AREA_LABEL resta l'elenco e la versione italiana: una costante di modulo
      non può chiamare un hook, e il nome dell'area compare dentro mezza pagina. */
@@ -165,6 +170,21 @@ export const Inventory: React.FC<Props> = ({ showToast, autoOpenNewProduct, onAu
   // Print modal
   const [printModalOpen, setPrintModalOpen] = useState(false);
 
+  // L'ultimo carico o scarico di ogni prodotto: quanto, quando e chi, sotto il
+  // nome. Si legge a parte dalla lista: se non arriva (un server di prima) la
+  // pagina resta quella di sempre.
+  const [latest, setLatest] = useState<Map<number, InventoryMovementEntry>>(new Map());
+  // Copia sincrona per i tocchi in volo: dopo l'await la `latest` della
+  // chiusura è quella di quando si è toccato, e due tocchi di fila la
+  // leggerebbero uguale.
+  const latestRef = useRef<Map<number, InventoryMovementEntry>>(new Map());
+  const putLatest = (next: Map<number, InventoryMovementEntry>) => {
+    latestRef.current = next;
+    setLatest(next);
+  };
+  // Lo storico aperto: di un prodotto, o di tutta l'area (product null).
+  const [history, setHistory] = useState<{ product: InventoryProduct | null } | null>(null);
+
   // The "gestisci" menu behind the ⋮ in the page head.
   const [menuOpen, setMenuOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement | null>(null);
@@ -215,6 +235,22 @@ export const Inventory: React.FC<Props> = ({ showToast, autoOpenNewProduct, onAu
     return () => {
       cancelled = true;
     };
+  }, [activeArea, ricarica]);
+
+  const loadLatest = (area: InventoryArea, cancelled: () => boolean = () => false) => {
+    getInventoryLatestMovements(area)
+      .then(rows => {
+        if (cancelled() || !Array.isArray(rows)) return;
+        putLatest(new Map(rows.map(r => [r.product_id, r])));
+      })
+      .catch(() => { /* la riga sotto il nome è un di più: senza, niente */ });
+  };
+
+  useEffect(() => {
+    let cancelled = false;
+    putLatest(new Map());
+    loadLatest(activeArea, () => cancelled);
+    return () => { cancelled = true; };
   }, [activeArea, ricarica]);
 
   useEffect(() => {
@@ -458,6 +494,32 @@ export const Inventory: React.FC<Props> = ({ showToast, autoOpenNewProduct, onAu
         next[idx] = res.stock;
         return next;
       });
+      // L'ultima voce si aggiorna qui, con le stesse regole del server: il
+      // decimo tocco su + fa «+10», non una riga nuova «+1».
+      const m = res.movement;
+      if (m && typeof m.delta === 'number') {
+        const raw: RawMovement = {
+          id: m.id,
+          product_id: m.product_id,
+          location_id: m.location_id,
+          delta: m.delta,
+          reason: m.reason as RawMovement['reason'],
+          notes: m.notes ?? null,
+          user_id: m.user_id ?? null,
+          user_name: m.user_name ?? null,
+          created_at: m.created_at,
+          from_invoice: m.from_invoice === true,
+        };
+        const current = (latestRef.current.get(productId) ?? null) as MovementEntry | null;
+        const updated = extendLatest(current, raw);
+        const next = new Map(latestRef.current);
+        if (updated) next.set(productId, updated as unknown as InventoryMovementEntry);
+        else next.delete(productId);
+        putLatest(next);
+        // + e − che si annullano: l'ultima voce vera è una di prima, e la sa
+        // solo il server.
+        if (!updated) loadLatest(activeArea);
+      }
       setSavedKeys(prev => new Set(prev).add(key));
     } catch (err: any) {
       showToast(err?.message || t('stockUpdateError'), 'error');
@@ -761,6 +823,7 @@ export const Inventory: React.FC<Props> = ({ showToast, autoOpenNewProduct, onAu
   // containers: a dropdown where there is a pointer, a bottom sheet where there
   // is a thumb.
   const manageActions = [
+    { icon: History, label: t('movimenti.title', 'Movimenti'), meta: null as string | null, onClick: () => setHistory({ product: null }) },
     ...(canInvoices
       ? [{
           icon: Receipt,
@@ -836,6 +899,47 @@ export const Inventory: React.FC<Props> = ({ showToast, autoOpenNewProduct, onAu
     const isPending = !!key && pendingKeys.has(key);
     const isSaved = !!key && savedKeys.has(key);
     const lowStock = isLowStock(p.id);
+    const last = latest.get(p.id) ?? null;
+    // La cella solo quando non è ovvia: in Totale, o se l'ultimo movimento è
+    // avvenuto in un'altra cella da quella che si sta contando.
+    const lastCell = last && locations.length > 1 && (isTotale || last.location_id !== activeLocationId)
+      ? locations.find(l => l.id === last.location_id)?.name ?? null
+      : null;
+    const lastText = last
+      ? (() => {
+          const delta = formatDelta(last.delta, p.unit, locale);
+          const who = authorName(last.user_name, true);
+          const kind = last.reason === InventoryMovementReason.RETTIFICA || last.from_invoice
+            ? movementLabel(last, t).toLowerCase()
+            : null;
+          const rest = [whenShort(last.at, t, locale), who || null, kind, lastCell ? toTitleCase(lastCell) : null]
+            .filter(Boolean)
+            .map(part => ` · ${part}`)
+            .join('');
+          return { delta, rest, full: `${delta}${rest}` };
+        })()
+      : null;
+    // Quanto, quando e chi dell'ultimo movimento; apre lo storico del
+    // prodotto. In quest'ordine perché la riga si taglia da destra: il genere e
+    // la cella sono i primi a poter mancare. Il -my-2 tiene la riga bassa e il
+    // bersaglio a 44px.
+    const lastLine = (placement: string) =>
+      last && lastText ? (
+        <button
+          type="button"
+          onClick={() => setHistory({ product: p })}
+          title={lastText.full}
+          aria-label={`${t('movimenti.openFor', { product: p.name, defaultValue: 'Movimenti di {{product}}' })}: ${lastText.full}`}
+          className={`-mx-1 -my-2 inline-flex min-h-[44px] max-w-full items-center gap-1.5 rounded-[var(--ds-radius-sm)] px-1 text-left text-[13px] text-[var(--ds-text-muted)] transition-colors hover:text-[var(--ds-text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] ${placement}`}
+        >
+          <History className="h-3.5 w-3.5 flex-shrink-0" aria-hidden />
+          <span className="min-w-0 truncate">
+            <span className="font-medium tabular-nums text-[var(--ds-text-secondary)]">{lastText.delta}</span>
+            {lastText.rest}
+          </span>
+          <ChevronRight className="h-3.5 w-3.5 flex-shrink-0" aria-hidden />
+        </button>
+      ) : null;
 
     return (
       <div
@@ -899,6 +1003,9 @@ export const Inventory: React.FC<Props> = ({ showToast, autoOpenNewProduct, onAu
           {p.notes && !isTotale && (
             <div className="mt-0.5 truncate text-[13px] text-[var(--ds-text-muted)]">{p.notes}</div>
           )}
+          {/* Su un telefono in Totale la colonna del nome è mezzo schermo:
+              lì la riga scende sotto, a tutta larghezza (vedi in fondo). */}
+          {lastLine(isTotale ? 'max-sm:hidden' : '')}
         </div>
 
         {isTotale && (
@@ -1004,6 +1111,8 @@ export const Inventory: React.FC<Props> = ({ showToast, autoOpenNewProduct, onAu
             </button>
           </div>
         )}
+
+        {isTotale && lastLine('basis-full sm:hidden')}
       </div>
     );
   };
@@ -1361,6 +1470,17 @@ export const Inventory: React.FC<Props> = ({ showToast, autoOpenNewProduct, onAu
           )}
         </div>
       )}
+
+      <Movimenti
+        open={history != null}
+        onClose={() => setHistory(null)}
+        area={activeArea}
+        areaLabel={areaLabel(activeArea)}
+        product={history?.product ?? null}
+        products={products}
+        locations={locations}
+        isWide={isWide}
+      />
 
       {/* ----- Manage sheet (touch) ----- */}
       <Sheet
