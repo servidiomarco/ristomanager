@@ -31,6 +31,7 @@ import { toTitleCase } from '../utils/text';
 import {
   Loader2, Plus, Pencil, Trash2, Boxes, GripVertical, Check, MoreVertical,
   ChefHat, Wine, GlassWater, AlertTriangle, Tag, Search, Printer, Container, Receipt, History, ChevronRight,
+  ScanBarcode, X,
 } from 'lucide-react';
 import { PrintInventoryModal } from './PrintInventoryModal';
 import { FattureFornitori } from './fatture/FattureFornitori';
@@ -39,6 +40,8 @@ import { onSocketEvent } from '../services/socketEvents';
 import { SkeletonProductList } from './SkeletonCards';
 import { Movimenti, authorName, dateLocale, formatDelta, movementLabel, whenShort } from './inventario/Movimenti';
 import { extendLatest, type MovementEntry, type RawMovement } from '../utils/inventoryMovements';
+import { normalizeBarcode } from '../utils/barcode';
+import { LettoreCodici } from './inventario/LettoreCodici';
 import {
   ModalShell, Sheet, SegmentedControl, SearchField, SectionHeader, StatStrip,
   StatusPill, Callout, EmptyState, FormCard, Field, useMediaQuery,
@@ -79,6 +82,16 @@ const rowIconButtonDanger =
   'inline-flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-[var(--ds-radius-control)] text-[var(--ds-text-muted)] transition-colors hover:bg-[var(--ds-critical-tint)] hover:text-[var(--ds-critical-text)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]';
 
 const plural = (n: number, one: string, many: string): string => `${n} ${n === 1 ? one : many}`;
+
+// La ricerca trova anche per codice a barre: è così che un lettore USB sul
+// computer (che «scrive» il codice e preme Invio) porta dritto al prodotto.
+// Da quattro caratteri, o «12» troverebbe mezza dispensa.
+const matchesBarcode = (p: InventoryProduct, raw: string): boolean => {
+  const typed = raw.trim().replace(/\s+/g, '');
+  if (typed.length < 4 || !p.barcodes?.length) return false;
+  const code = normalizeBarcode(typed);
+  return p.barcodes.some(c => c === code || c.includes(typed));
+};
 
 export const Inventory: React.FC<Props> = ({ showToast, autoOpenNewProduct, onAutoOpenNewProductHandled }) => {
     const { t, i18n } = useTranslation('inventario', { useSuspense: false });
@@ -131,7 +144,8 @@ export const Inventory: React.FC<Props> = ({ showToast, autoOpenNewProduct, onAu
   // Product create/edit modal
   const [productModalOpen, setProductModalOpen] = useState(false);
   const [productEditing, setProductEditing] = useState<InventoryProduct | null>(null);
-  const [productForm, setProductForm] = useState<{ name: string; unit: string; notes: string; category_id: number | null }>({ name: '', unit: '', notes: '', category_id: null });
+  const [productForm, setProductForm] = useState<{ name: string; unit: string; notes: string; category_id: number | null; barcodes: string[] }>({ name: '', unit: '', notes: '', category_id: null, barcodes: [] });
+  const [barcodeDraft, setBarcodeDraft] = useState('');
   const [confirmDeleteProductId, setConfirmDeleteProductId] = useState<number | null>(null);
 
   // Per-row pending state for the +/- stepper buttons so the user gets immediate
@@ -184,6 +198,14 @@ export const Inventory: React.FC<Props> = ({ showToast, autoOpenNewProduct, onAu
   };
   // Lo storico aperto: di un prodotto, o di tutta l'area (product null).
   const [history, setHistory] = useState<{ product: InventoryProduct | null } | null>(null);
+
+  // Il lettore di codici a barre: «move» carica e scarica, «capture» compila
+  // il codice nella scheda del prodotto. initialCode lo fa ripartire dal
+  // prodotto appena creato da un codice sconosciuto.
+  const [scanner, setScanner] = useState<{ mode: 'move' | 'capture'; initialCode?: string | null } | null>(null);
+  // Il codice sconosciuto da cui è nata la scheda «Nuovo prodotto»: salvato
+  // il prodotto, si torna al lettore con quel codice già letto.
+  const [scanToResume, setScanToResume] = useState<string | null>(null);
 
   // The "gestisci" menu behind the ⋮ in the page head.
   const [menuOpen, setMenuOpen] = useState(false);
@@ -334,7 +356,7 @@ export const Inventory: React.FC<Props> = ({ showToast, autoOpenNewProduct, onAu
       list = list.filter(p => p.category_id === categoryFilter);
     }
     if (onlyLowStock) list = list.filter(p => isLowStock(p.id));
-    if (q) list = list.filter(p => p.name.toLowerCase().includes(q));
+    if (q) list = list.filter(p => p.name.toLowerCase().includes(q) || matchesBarcode(p, search));
     return list;
   }, [products, search, categoryFilter, onlyLowStock, stockMap, locations]);
 
@@ -478,7 +500,7 @@ export const Inventory: React.FC<Props> = ({ showToast, autoOpenNewProduct, onAu
     }
   };
 
-  const applyMovement = async (productId: number, locationId: number, delta: number, reason: InventoryMovementReason) => {
+  const applyMovement = async (productId: number, locationId: number, delta: number, reason: InventoryMovementReason): Promise<boolean> => {
     const key = stockKey(productId, locationId);
     setPendingKeys(prev => {
       const next = new Set(prev);
@@ -521,8 +543,10 @@ export const Inventory: React.FC<Props> = ({ showToast, autoOpenNewProduct, onAu
         if (!updated) loadLatest(activeArea);
       }
       setSavedKeys(prev => new Set(prev).add(key));
+      return true;
     } catch (err: any) {
       showToast(err?.message || t('stockUpdateError'), 'error');
+      return false;
     } finally {
       setPendingKeys(prev => {
         const next = new Set(prev);
@@ -720,11 +744,13 @@ export const Inventory: React.FC<Props> = ({ showToast, autoOpenNewProduct, onAu
   };
 
   // ---------- Product modal handlers ----------
-  const openCreateProduct = (presetName?: string) => {
+  const openCreateProduct = (presetName?: string, presetBarcode?: string) => {
     setProductEditing(null);
     // Pre-select the currently filtered category, if any, for fast bulk-add.
     const presetCategory = (categoryFilter != null && categoryFilter !== UNCATEGORIZED) ? categoryFilter : null;
-    setProductForm({ name: presetName ?? '', unit: '', notes: '', category_id: presetCategory });
+    setProductForm({ name: presetName ?? '', unit: '', notes: '', category_id: presetCategory, barcodes: presetBarcode ? [presetBarcode] : [] });
+    setBarcodeDraft('');
+    setScanToResume(presetBarcode ?? null);
     setProductModalOpen(true);
   };
   useEffect(() => {
@@ -741,7 +767,10 @@ export const Inventory: React.FC<Props> = ({ showToast, autoOpenNewProduct, onAu
       unit: p.unit || '',
       notes: p.notes || '',
       category_id: p.category_id ?? null,
+      barcodes: Array.isArray(p.barcodes) ? p.barcodes : [],
     });
+    setBarcodeDraft('');
+    setScanToResume(null);
     setProductModalOpen(true);
   };
 
@@ -751,6 +780,15 @@ export const Inventory: React.FC<Props> = ({ showToast, autoOpenNewProduct, onAu
       showToast(t('productNameRequired'), 'error');
       return;
     }
+    // Un codice scritto ma non ancora aggiunto con «Aggiungi» conta lo stesso:
+    // chi l'ha scritto e preme Salva lo vuole salvato.
+    const draft = normalizeBarcode(barcodeDraft);
+    const barcodes = draft && !productForm.barcodes.includes(draft) ? [...productForm.barcodes, draft] : productForm.barcodes;
+    // Se la lista non è mai arrivata (un server di prima) e nessuno ha
+    // aggiunto codici, il campo non si manda: una lista vuota li cancellerebbe.
+    const sendBarcodes = productEditing && !Array.isArray(productEditing.barcodes) && barcodes.length === 0
+      ? undefined
+      : barcodes;
     try {
       if (productEditing) {
         const updated = await updateInventoryProduct(productEditing.id, {
@@ -758,6 +796,7 @@ export const Inventory: React.FC<Props> = ({ showToast, autoOpenNewProduct, onAu
           unit: productForm.unit.trim() || null,
           notes: productForm.notes.trim() || null,
           category_id: productForm.category_id,
+          barcodes: sendBarcodes,
         });
         setProducts(prev => prev.map(p => (p.id === updated.id ? updated : p)));
         showToast(t('productUpdated'), 'success');
@@ -768,10 +807,18 @@ export const Inventory: React.FC<Props> = ({ showToast, autoOpenNewProduct, onAu
           unit: productForm.unit.trim() || null,
           notes: productForm.notes.trim() || null,
           category_id: productForm.category_id,
+          barcodes: sendBarcodes,
         });
         setProducts(prev => [...prev, created].sort((a, b) => a.name.localeCompare(b.name)));
         showToast(t('productCreated'), 'success');
+        // Nato da un codice sconosciuto: si torna al lettore con quel codice,
+        // e il carico è a un tocco.
+        if (scanToResume && (created.barcodes ?? barcodes).includes(scanToResume)) {
+          setScanner({ mode: 'move', initialCode: scanToResume });
+        }
       }
+      setScanToResume(null);
+      setBarcodeDraft('');
       setProductModalOpen(false);
     } catch (err: any) {
       showToast(err?.message || t('productSaveError'), 'error');
@@ -799,7 +846,7 @@ export const Inventory: React.FC<Props> = ({ showToast, autoOpenNewProduct, onAu
       const q = search.trim().toLowerCase();
       setCrossArea({
         loading: false,
-        results: all.filter(p => p.area !== activeArea && p.name.toLowerCase().includes(q)),
+        results: all.filter(p => p.area !== activeArea && (p.name.toLowerCase().includes(q) || matchesBarcode(p, search))),
       });
     } catch (err: any) {
       setCrossArea(null);
@@ -1154,13 +1201,26 @@ export const Inventory: React.FC<Props> = ({ showToast, autoOpenNewProduct, onAu
           {/* On a phone the top bar's + is a reach away from where the thumb is
               working, so the action you take most from this page sits with the
               title. On desktop the + in the top bar is the only entry point. */}
+          {/* Sul telefono il gesto più frequente è la scansione: ha l'etichetta,
+              e «Nuovo prodotto» stringe a un + per stare nella stessa riga. */}
           {!isWide && (
             <div className="flex flex-shrink-0 items-center gap-2">
               {canEdit && (
-                <button type="button" onClick={() => openCreateProduct()} className={`${dsButton.primary} px-4`}>
-                  <Plus className="h-4 w-4" aria-hidden />
-                  {t('newProduct')}
-                </button>
+                <>
+                  <button type="button" onClick={() => setScanner({ mode: 'move' })} className={`${dsButton.primary} px-4`}>
+                    <ScanBarcode className="h-4 w-4" aria-hidden />
+                    {t('lettore.title', 'Scansiona')}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => openCreateProduct()}
+                    aria-label={t('newProduct')}
+                    title={t('newProduct')}
+                    className="inline-flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-[var(--ds-radius-control)] bg-[var(--ds-surface)] text-[var(--ds-text-secondary)] shadow-[var(--ds-shadow-card)] transition-colors hover:bg-[var(--ds-surface-row)] hover:text-[var(--ds-text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+                  >
+                    <Plus className="h-4 w-4" aria-hidden />
+                  </button>
+                </>
               )}
               {menuTrigger}
             </div>
@@ -1195,6 +1255,12 @@ export const Inventory: React.FC<Props> = ({ showToast, autoOpenNewProduct, onAu
           />
           {/* Everything you do to the inventory rather than in it. A dropdown on
               a pointer, an action sheet on touch — the same entries either way. */}
+          {isWide && canEdit && (
+            <button type="button" onClick={() => setScanner({ mode: 'move' })} className={`${dsButton.secondary} flex-shrink-0`}>
+              <ScanBarcode className="h-4 w-4" aria-hidden />
+              {t('lettore.title', 'Scansiona')}
+            </button>
+          )}
           {isWide && (
             <div className="relative flex-shrink-0">
               {menuTrigger}
@@ -1854,8 +1920,80 @@ export const Inventory: React.FC<Props> = ({ showToast, autoOpenNewProduct, onAu
               className={dsTextarea}
             />
           </Field>
+
+          {/* Più d'uno: lo stesso prodotto arriva da fornitori o confezioni
+              diverse. Si scrive, si incolla o si legge con la fotocamera. */}
+          <Field label={t('lettore.barcodes', 'Codici a barre')} htmlFor="inv-barcode">
+            {productForm.barcodes.length > 0 && (
+              <div className="mb-2 flex flex-wrap gap-1.5">
+                {productForm.barcodes.map(code => (
+                  <span
+                    key={code}
+                    className="inline-flex h-8 items-center gap-1 rounded-[var(--ds-radius-control)] bg-[var(--ds-surface-row)] pl-3 pr-1 text-[13px] tabular-nums text-[var(--ds-text-primary)]"
+                  >
+                    {code}
+                    <button
+                      type="button"
+                      onClick={() => setProductForm(f => ({ ...f, barcodes: f.barcodes.filter(c => c !== code) }))}
+                      aria-label={t('lettore.removeCode', { code, defaultValue: 'Togli {{code}}' })}
+                      className="inline-flex h-6 w-6 items-center justify-center rounded-[var(--ds-radius-control)] text-[var(--ds-text-muted)] transition-colors hover:bg-[var(--ds-border)] hover:text-[var(--ds-text-primary)]"
+                    >
+                      <X className="h-3.5 w-3.5" aria-hidden />
+                    </button>
+                  </span>
+                ))}
+              </div>
+            )}
+            <div className="flex gap-2">
+              <input
+                id="inv-barcode"
+                type="text"
+                inputMode="numeric"
+                autoComplete="off"
+                value={barcodeDraft}
+                onChange={(e) => setBarcodeDraft(e.target.value)}
+                onKeyDown={(e) => {
+                  // Il lettore USB chiude il codice con Invio: aggiunge, non salva.
+                  if (e.key === 'Enter') {
+                    e.preventDefault();
+                    const code = normalizeBarcode(barcodeDraft);
+                    if (code) setProductForm(f => (f.barcodes.includes(code) ? f : { ...f, barcodes: [...f.barcodes, code] }));
+                    setBarcodeDraft('');
+                  }
+                }}
+                placeholder={t('lettore.manualPlaceholder', 'Codice a barre')}
+                className={`${dsInput} min-w-0 flex-1`}
+              />
+              <button
+                type="button"
+                onClick={() => setScanner({ mode: 'capture' })}
+                aria-label={t('lettore.titleCapture', 'Leggi il codice')}
+                title={t('lettore.titleCapture', 'Leggi il codice')}
+                className="inline-flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-[var(--ds-radius-control)] bg-[var(--ds-surface-row)] text-[var(--ds-text-primary)] transition-colors hover:bg-[var(--ds-border)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+              >
+                <ScanBarcode className="h-5 w-5" aria-hidden />
+              </button>
+            </div>
+          </Field>
         </FormCard>
       </ModalShell>
+
+      <LettoreCodici
+        open={scanner != null}
+        onClose={() => setScanner(null)}
+        mode={scanner?.mode ?? 'move'}
+        initialCode={scanner?.initialCode ?? null}
+        activeArea={activeArea}
+        activeLocationId={activeLocationId}
+        areaLabel={areaLabel}
+        onCapture={code => setProductForm(f => (f.barcodes.includes(code) ? f : { ...f, barcodes: [...f.barcodes, code] }))}
+        onMove={(product, locationId, delta, reason) => applyMovement(product.id, locationId, delta, reason)}
+        onCreateProduct={code => {
+          setScanner(null);
+          openCreateProduct(undefined, code);
+        }}
+        onProductUpdated={updated => setProducts(prev => prev.map(p => (p.id === updated.id ? updated : p)))}
+      />
 
       {/* ----- Print inventory modal ----- */}
       <PrintInventoryModal

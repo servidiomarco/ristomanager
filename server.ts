@@ -343,6 +343,7 @@ import { configureRestaurantInfo } from './services/restaurantInfo.js';
 import { configureGuestUpdates } from './services/reservationGuestUpdates.js';
 import { shoppingReminderBody } from './utils/shoppingReminder.js';
 import { groupMovements, type MovementEntry, type RawMovement } from './utils/inventoryMovements.js';
+import { normalizeBarcode } from './utils/barcode.js';
 import { describeShiftChanges, shiftDayLabel, type ShiftDayChange } from './utils/staffShiftChange.js';
 import { buildEReceiptPayload, buildFatturaPaXml, getFiscalDriver, type FiscalSeller, type InvoiceBuyer } from './services/fiscalService.js';
 import {
@@ -20813,6 +20814,176 @@ app.delete('/inventory/categories/:id', authenticate, requirePermission('invento
     }
 });
 
+// ── Codici a barre ───────────────────────────────────────────────────────────
+// Un prodotto può averne più d'uno, un codice porta a un prodotto solo
+// (migrazione inventario-codici-a-barre). Sempre normalizzati con
+// utils/barcode.ts, in scrittura e in ricerca.
+const PRODUCT_COLUMNS = `
+    p.id, p.area, p.name, p.unit, p.notes, p.category_id, c.name AS category_name, p.created_at,
+    COALESCE((SELECT array_agg(b.code ORDER BY b.created_at, b.id)
+                FROM inventory_product_barcodes b
+               WHERE b.product_id = p.id AND b.tenant_id = p.tenant_id), '{}') AS barcodes`;
+
+const MAX_BARCODES_PER_PRODUCT = 20;
+
+// undefined = il campo non c'era (lascia stare); 'invalid' = 400.
+const parseBarcodeList = (raw: unknown): string[] | null | 'invalid' => {
+    if (raw === undefined) return null;
+    if (!Array.isArray(raw) || raw.length > MAX_BARCODES_PER_PRODUCT) return 'invalid';
+    const out = new Set<string>();
+    for (const r of raw) {
+        const code = normalizeBarcode(r);
+        if (!code) return 'invalid';
+        out.add(code);
+    }
+    return [...out];
+};
+
+// Il codice è già di un altro prodotto: chi lo sta salvando deve sapere di
+// quale, per decidere se ha sbagliato prodotto o etichetta.
+class BarcodeTakenError extends Error {
+    body: { error: string; code: 'barcode_taken'; barcode: string; product: { id: number; name: string; area: string } };
+    constructor(barcode: string, product: { id: number; name: string; area: string }) {
+        super('barcode_taken');
+        this.body = {
+            error: `Il codice ${barcode} è già di «${product.name}»`,
+            code: 'barcode_taken',
+            barcode,
+            product,
+        };
+    }
+}
+
+// Più di MAX_BARCODES_PER_PRODUCT su un prodotto: quasi sempre etichette
+// lette per sbaglio in fila, non venti confezioni diverse.
+class TooManyBarcodesError extends Error {}
+
+const saveProductBarcodes = async (
+    client: import('pg').PoolClient,
+    tenantId: number,
+    productId: number,
+    codes: string[],
+    userId: number | null,
+): Promise<void> => {
+    if (codes.length > 0) {
+        const taken = await client.query(
+            `SELECT b.code, p.id, p.name, p.area
+               FROM inventory_product_barcodes b
+               JOIN inventory_products p ON p.id = b.product_id AND p.tenant_id = b.tenant_id
+              WHERE b.tenant_id = $1 AND b.code = ANY($2::text[]) AND b.product_id <> $3
+              LIMIT 1`,
+            [tenantId, codes, productId]
+        );
+        if (taken.rowCount) {
+            const r = taken.rows[0];
+            throw new BarcodeTakenError(r.code, { id: Number(r.id), name: r.name, area: r.area });
+        }
+    }
+    await client.query(
+        `DELETE FROM inventory_product_barcodes
+          WHERE tenant_id = $1 AND product_id = $2 AND NOT (code = ANY($3::text[]))`,
+        [tenantId, productId, codes]
+    );
+    if (codes.length > 0) {
+        await client.query(
+            `INSERT INTO inventory_product_barcodes (tenant_id, product_id, code, created_by)
+             SELECT $1, $2, code, $4 FROM unnest($3::text[]) AS code
+             ON CONFLICT (tenant_id, code) DO NOTHING`,
+            [tenantId, productId, codes, userId]
+        );
+    }
+};
+
+const readProduct = async (client: import('pg').PoolClient, tenantId: number, productId: number) => {
+    const r = await client.query(
+        `SELECT ${PRODUCT_COLUMNS}
+           FROM inventory_products p
+           LEFT JOIN inventory_categories c ON c.id = p.category_id AND c.tenant_id = p.tenant_id
+          WHERE p.id = $1 AND p.tenant_id = $2`,
+        [productId, tenantId]
+    );
+    return r.rows[0];
+};
+
+// GET /inventory/barcodes/:code — la scansione. Il prodotto del codice, con
+// le celle della sua area e le sue giacenze: chi scansiona può essere su
+// un'altra area della pagina, e la scheda del carico deve bastare a sé.
+// 404 con il codice normalizzato quando non è di nessuno.
+app.get('/inventory/barcodes/:code', authenticate, requirePermission('inventory:view'), async (req, res) => {
+    try {
+        const code = normalizeBarcode(req.params.code);
+        if (!code) return res.status(400).json({ error: 'Invalid barcode' });
+        const found = await queryWithRetry(
+            `SELECT ${PRODUCT_COLUMNS}
+               FROM inventory_product_barcodes bc
+               JOIN inventory_products p ON p.id = bc.product_id AND p.tenant_id = bc.tenant_id
+               LEFT JOIN inventory_categories c ON c.id = p.category_id AND c.tenant_id = p.tenant_id
+              WHERE bc.tenant_id = $1 AND bc.code = $2`,
+            [req.tenantId!, code]
+        );
+        if (!found.rowCount) return res.status(404).json({ error: 'Barcode not found', barcode: code });
+        const product = found.rows[0];
+        const [locations, stock] = await Promise.all([
+            queryWithRetry(
+                `SELECT id, area, name, sort_order FROM inventory_locations
+                  WHERE tenant_id = $1 AND area = $2 ORDER BY sort_order, name`,
+                [req.tenantId!, product.area]
+            ),
+            queryWithRetry(
+                `SELECT product_id, location_id, quantity::float AS quantity FROM inventory_stock
+                  WHERE tenant_id = $1 AND product_id = $2`,
+                [req.tenantId!, product.id]
+            ),
+        ]);
+        res.json({ barcode: code, product, locations: locations.rows, stock: stock.rows });
+    } catch (err) {
+        console.error('GET /inventory/barcodes/:code error:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+// POST /inventory/products/:id/barcodes { code } — associa un codice letto
+// a un prodotto già esistente, senza passare dalla scheda. Rifarlo sullo
+// stesso prodotto non cambia niente; su un altro è un 409.
+app.post('/inventory/products/:id/barcodes', authenticate, requirePermission('inventory:full'), async (req, res) => {
+    try {
+        const productId = Number(req.params.id);
+        if (!Number.isInteger(productId) || productId <= 0) return res.status(400).json({ error: 'Invalid product' });
+        const code = normalizeBarcode(req.body?.code);
+        if (!code) return res.status(400).json({ error: 'Invalid barcode' });
+        const product = await withTenant(req.tenantId!, async client => {
+            const current = await readProduct(client, req.tenantId!, productId);
+            if (!current) return null;
+            const codes: string[] = Array.isArray(current.barcodes) ? current.barcodes : [];
+            if (!codes.includes(code)) {
+                if (codes.length >= MAX_BARCODES_PER_PRODUCT) {
+                    throw new TooManyBarcodesError();
+                }
+                await saveProductBarcodes(client, req.tenantId!, productId, [...codes, code], req.user?.userId ?? null);
+            }
+            return readProduct(client, req.tenantId!, productId);
+        });
+        if (!product) return res.status(404).json({ error: 'Product not found' });
+        if (req.user) {
+            LogService.logActivity(
+                req.tenantId!,
+                req.user.userId, req.user.email, req.user.email,
+                ActivityAction.UPDATE, ResourceType.INVENTORY_PRODUCT,
+                product.id, `${product.area} · ${product.name}`,
+                { barcode: code }
+            );
+        }
+        res.json(product);
+    } catch (err: any) {
+        if (err instanceof BarcodeTakenError) return res.status(409).json(err.body);
+        if (err instanceof TooManyBarcodesError) {
+            return res.status(400).json({ error: `Al massimo ${MAX_BARCODES_PER_PRODUCT} codici per prodotto`, code: 'too_many_barcodes' });
+        }
+        console.error('POST /inventory/products/:id/barcodes error:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
 // GET /inventory/products?area=CUCINA
 app.get('/inventory/products', authenticate, requirePermission('inventory:view'), async (req, res) => {
     try {
@@ -20827,7 +20998,7 @@ app.get('/inventory/products', authenticate, requirePermission('inventory:view')
             where += ' AND p.area = $2';
         }
         const result = await queryWithRetry(
-            `SELECT p.id, p.area, p.name, p.unit, p.notes, p.category_id, c.name AS category_name, p.created_at
+            `SELECT ${PRODUCT_COLUMNS}
              FROM inventory_products p
              LEFT JOIN inventory_categories c ON c.id = p.category_id AND c.tenant_id = p.tenant_id
              ${where}
@@ -20865,25 +21036,29 @@ app.post('/inventory/products', authenticate, requirePermission('inventory:full'
             }
             validCategoryId = Number(category_id);
         }
-        const result = await queryWithRetry(
-            `WITH inserted AS (
-               INSERT INTO inventory_products (tenant_id, area, name, unit, notes, category_id)
-               VALUES ($6, $1, $2, $3, $4, $5)
-               RETURNING id, area, name, unit, notes, category_id, created_at
-             )
-             SELECT i.*, c.name AS category_name
-             FROM inserted i
-             LEFT JOIN inventory_categories c ON c.id = i.category_id`,
-            [
-                area,
-                String(name).trim(),
-                unit ? String(unit).trim() : null,
-                notes ? String(notes).trim() : null,
-                validCategoryId,
-                req.tenantId!,
-            ]
-        );
-        const created = result.rows[0];
+        const barcodes = parseBarcodeList(req.body.barcodes);
+        if (barcodes === 'invalid') return res.status(400).json({ error: 'Invalid barcodes' });
+        // Prodotto e codici nella stessa transazione: un codice già di un
+        // altro prodotto annulla anche il prodotto, invece di lasciarne uno
+        // creato a metà.
+        const created = await withTenant(req.tenantId!, async client => {
+            const inserted = await client.query(
+                `INSERT INTO inventory_products (tenant_id, area, name, unit, notes, category_id)
+                 VALUES ($6, $1, $2, $3, $4, $5)
+                 RETURNING id`,
+                [
+                    area,
+                    String(name).trim(),
+                    unit ? String(unit).trim() : null,
+                    notes ? String(notes).trim() : null,
+                    validCategoryId,
+                    req.tenantId!,
+                ]
+            );
+            const productId = Number(inserted.rows[0].id);
+            if (barcodes) await saveProductBarcodes(client, req.tenantId!, productId, barcodes, req.user?.userId ?? null);
+            return readProduct(client, req.tenantId!, productId);
+        });
         if (req.user) {
             LogService.logActivity(
                 req.tenantId!,
@@ -20894,6 +21069,7 @@ app.post('/inventory/products', authenticate, requirePermission('inventory:full'
         }
         res.status(201).json(created);
     } catch (err: any) {
+        if (err instanceof BarcodeTakenError) return res.status(409).json(err.body);
         if (err?.code === '23505') {
             return res.status(409).json({ error: 'A product with this name already exists in the area' });
         }
@@ -20928,26 +21104,27 @@ app.put('/inventory/products/:id', authenticate, requirePermission('inventory:fu
             }
             validCategoryId = Number(category_id);
         }
-        const result = await queryWithRetry(
-            `WITH updated AS (
-               UPDATE inventory_products
-               SET name = $1, unit = $2, notes = $3, category_id = $4
-               WHERE id = $5 AND tenant_id = $6
-               RETURNING id, area, name, unit, notes, category_id, created_at
-             )
-             SELECT u.*, c.name AS category_name
-             FROM updated u
-             LEFT JOIN inventory_categories c ON c.id = u.category_id`,
-            [
-                String(name).trim(),
-                unit ? String(unit).trim() : null,
-                notes ? String(notes).trim() : null,
-                validCategoryId,
-                id,
-                req.tenantId!,
-            ]
-        );
-        const updated = result.rows[0];
+        const barcodes = parseBarcodeList(req.body.barcodes);
+        if (barcodes === 'invalid') return res.status(400).json({ error: 'Invalid barcodes' });
+        const updated = await withTenant(req.tenantId!, async client => {
+            await client.query(
+                `UPDATE inventory_products
+                 SET name = $1, unit = $2, notes = $3, category_id = $4
+                 WHERE id = $5 AND tenant_id = $6`,
+                [
+                    String(name).trim(),
+                    unit ? String(unit).trim() : null,
+                    notes ? String(notes).trim() : null,
+                    validCategoryId,
+                    id,
+                    req.tenantId!,
+                ]
+            );
+            // Senza `barcodes` (un client di prima) i codici restano com'erano;
+            // con la lista, la lista è quella giusta.
+            if (barcodes) await saveProductBarcodes(client, req.tenantId!, Number(id), barcodes, req.user?.userId ?? null);
+            return readProduct(client, req.tenantId!, Number(id));
+        });
         if (req.user) {
             LogService.logActivity(
                 req.tenantId!,
@@ -20958,6 +21135,7 @@ app.put('/inventory/products/:id', authenticate, requirePermission('inventory:fu
         }
         res.json(updated);
     } catch (err: any) {
+        if (err instanceof BarcodeTakenError) return res.status(409).json(err.body);
         if (err?.code === '23505') {
             return res.status(409).json({ error: 'A product with this name already exists in the area' });
         }

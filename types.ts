@@ -1406,6 +1406,9 @@ export interface InventoryProduct {
   category_id?: number | null;
   category_name?: string | null;
   created_at?: string;
+  /** Codici a barre, già normalizzati (utils/barcode.ts). Assente sui server
+   *  di prima del 23/10/2026. */
+  barcodes?: string[];
 }
 
 // Per-(product, location) quantity. Returned aggregated by GET /inventory/stock.

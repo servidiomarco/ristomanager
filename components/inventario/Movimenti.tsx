@@ -32,6 +32,12 @@ const formatNumber = (n: number, locale: string): string => {
   return f.format(n);
 };
 
+/** «10 kg», «2,5 l»: una quantità senza segno. */
+export const formatQuantity = (n: number, unit: string | null | undefined, locale: string): string => {
+  const u = unit?.trim();
+  return `${formatNumber(n, locale)}${u ? ` ${u}` : ''}`;
+};
+
 /** «+10 kg», «−2,5 l». Il meno è quello tipografico: il trattino si perde. */
 export const formatDelta = (delta: number, unit: string | null | undefined, locale: string): string => {
   const sign = delta > 0 ? '+' : '−';

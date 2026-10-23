@@ -1171,7 +1171,7 @@ export const getInventoryProducts = async (area?: InventoryArea): Promise<Invent
   return apiRequest<InventoryProduct[]>(url, { headers: getHeaders(false) });
 };
 
-export const createInventoryProduct = async (prod: { area: InventoryArea; name: string; unit?: string | null; notes?: string | null; category_id?: number | null }): Promise<InventoryProduct> => {
+export const createInventoryProduct = async (prod: { area: InventoryArea; name: string; unit?: string | null; notes?: string | null; category_id?: number | null; barcodes?: string[] }): Promise<InventoryProduct> => {
   return apiRequest<InventoryProduct>(`${API_URL}/inventory/products`, {
     method: 'POST',
     headers: getHeaders(),
@@ -1179,11 +1179,35 @@ export const createInventoryProduct = async (prod: { area: InventoryArea; name: 
   });
 };
 
-export const updateInventoryProduct = async (id: number, prod: { name: string; unit?: string | null; notes?: string | null; category_id?: number | null }): Promise<InventoryProduct> => {
+export const updateInventoryProduct = async (id: number, prod: { name: string; unit?: string | null; notes?: string | null; category_id?: number | null; barcodes?: string[] }): Promise<InventoryProduct> => {
   return apiRequest<InventoryProduct>(`${API_URL}/inventory/products/${id}`, {
     method: 'PUT',
     headers: getHeaders(),
     body: JSON.stringify(prod),
+  });
+};
+
+// La scansione: il prodotto del codice con le celle della sua area e le sue
+// giacenze. Un codice di nessuno risponde 404 (err.data.barcode è il codice
+// normalizzato).
+export const lookupInventoryBarcode = async (code: string): Promise<{
+  barcode: string;
+  product: InventoryProduct;
+  locations: InventoryLocation[];
+  stock: InventoryStockRow[];
+}> => {
+  return apiRequest(`${API_URL}/inventory/barcodes/${encodeURIComponent(code)}`, {
+    headers: getHeaders(false),
+  });
+};
+
+// Associa un codice letto a un prodotto esistente. 409 se è già di un altro
+// (err.data.product dice di quale).
+export const addInventoryProductBarcode = async (productId: number, code: string): Promise<InventoryProduct> => {
+  return apiRequest<InventoryProduct>(`${API_URL}/inventory/products/${productId}/barcodes`, {
+    method: 'POST',
+    headers: getHeaders(),
+    body: JSON.stringify({ code }),
   });
 };
 
