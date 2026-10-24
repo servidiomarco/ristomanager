@@ -2225,6 +2225,8 @@ export interface AdminTenantProvisioned {
   webhook_token: string;
   print_agent_token: string;
   booking_url: string;
+  /** Esito dell'aggancio alla scheda CRM; assente dai server precedenti. */
+  crm_link?: string | null;
 }
 
 // Piano dei minuti di Sofia di un ristorante (null = listino).
@@ -2278,6 +2280,8 @@ export const adminCreateTenant = async (input: {
   slug: string;
   owner_email: string;
   features?: Partial<Record<AdminTenantFeature, boolean>>;
+  /** Scheda del CRM a cui legare il ristorante appena creato. */
+  crm_account_id?: number;
 }): Promise<AdminTenantProvisioned> => {
   return apiRequest<AdminTenantProvisioned>(`${API_URL}/admin/tenants`, {
     method: 'POST',

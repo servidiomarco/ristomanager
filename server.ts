@@ -339,6 +339,7 @@ import { createScheduledTasksRouter, scheduledTasksTick, syncBanquetScheduledTas
 import { createHaccpRouter, haccpSensorWatchTick, runHaccpExpiryReminder, runHaccpMissingReminder, type HaccpDeps } from './services/haccpRoutes.js';
 import { createFoodCostRouter } from './services/foodCostRoutes.js';
 import { createFattureFornitoriRouter, type FattureFornitoriDeps } from './services/fattureFornitoriRoutes.js';
+import { createPlatformCrmRouter, crmActorOf, linkCrmAccountToTenant } from './services/platformCrmRoutes.js';
 import { createFattureEmailRouter, fattureEmailConfig, gestisciWebhookFatture } from './services/fattureEmail.js';
 import { configureRestaurantInfo } from './services/restaurantInfo.js';
 import { configureGuestUpdates } from './services/reservationGuestUpdates.js';
@@ -35380,6 +35381,10 @@ const platformAdminAuth = (req: express.Request, res: express.Response, next: ex
             });
     });
 
+// CRM della piattaforma: lead e clienti, referenti, cronologia, promemoria,
+// opportunità, salute e billing per cliente (services/platformCrmRoutes.ts).
+app.use('/admin/crm', platformAdminAuth, createPlatformCrmRouter());
+
 app.post('/admin/tenants', platformAdminAuth, async (req, res) => {
     const body = req.body ?? {};
     // Le feature richieste si validano qui (l'endpoint conosce HTTP, il
@@ -35405,6 +35410,19 @@ app.post('/admin/tenants', platformAdminAuth, async (req, res) => {
             owner_full_name: body.owner_full_name,
             features,
         });
+        // Creato dalla scheda di un lead: il ristorante nasce già legato alla
+        // sua storia nel CRM. Un aggancio non riuscito non annulla il
+        // provisioning — la scheda si collega anche dopo, a mano.
+        const crmAccountId = Number(body.crm_account_id);
+        let crmLink: string | null = null;
+        if (Number.isInteger(crmAccountId) && crmAccountId > 0) {
+            try {
+                crmLink = await linkCrmAccountToTenant(crmAccountId, result.tenant.id, await crmActorOf(req));
+            } catch (err) {
+                console.error('POST /admin/tenants: aggancio alla scheda CRM non riuscito:', err);
+                crmLink = 'error';
+            }
+        }
         // La password temporanea esce SOLO da questa risposta: chi provisiona
         // la consegna all'OWNER a voce/di persona. Niente email di invito —
         // la casella SMTP del nuovo tenant non esiste ancora (arriva col
@@ -35415,6 +35433,7 @@ app.post('/admin/tenants', platformAdminAuth, async (req, res) => {
             webhook_token: result.tokens.webhook_token,
             print_agent_token: result.tokens.print_agent_token,
             booking_url: `${req.protocol}://${req.get('host')}/prenota/${result.tenant.slug}`,
+            crm_link: crmLink,
         });
     } catch (err) {
         if (err instanceof ProvisioningError) {
