@@ -167,7 +167,9 @@ describe('telefono: Sympotia davanti al numero', () => {
     it('Sofia muta: agganciata ma senza post-call, la chiamata diventa persa', async () => {
         expect((await inbound('CAvoce0003', SCONOSCIUTO)).status).toBe(200);
         expect((await status('CAvoce0003', 4)).status).toBe(204);
-        const r = await waitFor(() => row('CAvoce0003'), v => v?.status === 'missed', 40);
+        // Persa e riga di Sofia sono due query in fila (recordMissedPhoneCall):
+        // aspettare solo 'missed' legge la riga provvisoria prima che esista.
+        const r = await waitFor(() => row('CAvoce0003'), v => v?.status === 'missed' && v?.voice_call_id != null, 40);
         expect(r.missed_reason).toBe('sofia_muta');
         expect((await placeholder('CAvoce0003')).follow_up_status).toBe('PENDING');
     });
